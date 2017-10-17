@@ -434,11 +434,10 @@ static void record_if_better(struct diff_score m[], struct diff_score *o)
  * 1 if we need to disable inexact rename detection;
  * 2 if we would be under the limit if we were given -C instead of -C -C.
  */
-static int too_many_rename_candidates(int num_create,
+static int too_many_rename_candidates(int num_create, int num_src,
 				      struct diff_options *options)
 {
 	int rename_limit = options->rename_limit;
-	int num_src = rename_src_nr;
 	int i;
 
 	options->needed_rename_limit = 0;
@@ -505,7 +504,7 @@ void diffcore_rename(struct diff_options *options)
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
 	int i, j, rename_count, skip_unmodified = 0;
-	int num_create, dst_cnt;
+	int num_create, dst_cnt, num_src;
 	struct progress *progress = NULL;
 
 	if (!minimum_score)
@@ -571,12 +570,14 @@ void diffcore_rename(struct diff_options *options)
 	 * files still remain as options for rename/copies!)
 	 */
 	num_create = (rename_dst_nr - rename_count);
+	num_src = (detect_rename == DIFF_DETECT_COPY ?
+		   rename_src_nr : rename_src_nr - rename_count);
 
 	/* All done? */
 	if (!num_create)
 		goto cleanup;
 
-	switch (too_many_rename_candidates(num_create, options)) {
+	switch (too_many_rename_candidates(num_create, num_src, options)) {
 	case 1:
 		goto cleanup;
 	case 2:
@@ -590,7 +591,7 @@ void diffcore_rename(struct diff_options *options)
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
 				_("Performing inexact rename detection"),
-				(uint64_t)rename_dst_nr * (uint64_t)rename_src_nr);
+				(uint64_t)num_create * (uint64_t)num_src);
 	}
 
 	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_create), sizeof(*mx));
@@ -608,6 +609,10 @@ void diffcore_rename(struct diff_options *options)
 		for (j = 0; j < rename_src_nr; j++) {
 			struct diff_filespec *one = rename_src[j].p->one;
 			struct diff_score this_src;
+
+			if (one->rename_used &&
+			    detect_rename != DIFF_DETECT_COPY)
+				continue;
 
 			if (skip_unmodified &&
 			    diff_unmodified_pair(rename_src[j].p))
@@ -629,7 +634,7 @@ void diffcore_rename(struct diff_options *options)
 			diff_free_filespec_blob(two);
 		}
 		dst_cnt++;
-		display_progress(progress, (uint64_t)(i+1)*(uint64_t)rename_src_nr);
+		display_progress(progress, (uint64_t)dst_cnt*(uint64_t)num_src);
 	}
 	stop_progress(&progress);
 
