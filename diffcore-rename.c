@@ -642,6 +642,23 @@ void dump_unmatched(void)
 #endif
 }
 
+static int remove_renames_from_src(void)
+{
+	int j, new_j;
+
+	for (j = 0, new_j = 0; j < rename_src_nr; j++) {
+		if (rename_src[j].p->one->rename_used)
+			continue;
+
+		if (new_j < j)
+			memcpy(&rename_src[new_j], &rename_src[j],
+			       sizeof(struct diff_rename_src));
+		new_j++;
+	}
+
+	return new_j;
+}
+
 void diffcore_rename(struct diff_options *options)
 {
 	int detect_rename = options->detect_rename;
@@ -728,13 +745,14 @@ void diffcore_rename(struct diff_options *options)
 	printf("Done.\n");
 #endif
 
+	num_src = rename_src_nr;
+	if (detect_rename != DIFF_DETECT_COPY)
+		num_src = remove_renames_from_src();
+
 	/*
-	 * Calculate how many renames are left (but all the source
-	 * files still remain as options for rename/copies!)
+	 * Calculate how many renames are left
 	 */
 	num_create = (rename_dst_nr - rename_count);
-	num_src = (detect_rename == DIFF_DETECT_COPY ?
-		   rename_src_nr : rename_src_nr - rename_count);
 
 	/* All done? */
 	if (!num_create)
@@ -772,7 +790,7 @@ void diffcore_rename(struct diff_options *options)
 		for (j = 0; j < NUM_CANDIDATE_PER_DST; j++)
 			m[j].dst = -1;
 
-		for (j = 0; j < rename_src_nr; j++) {
+		for (j = 0; j < num_src; j++) {
 			struct diff_filespec *one = rename_src[j].p->one;
 			struct diff_score this_src;
 
