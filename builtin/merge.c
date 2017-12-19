@@ -28,6 +28,7 @@
 #include "rerere.h"
 #include "help.h"
 #include "merge-recursive.h"
+#include "merge-ort.h"
 #include "resolve-undo.h"
 #include "remote.h"
 #include "fmt-merge-msg.h"
@@ -88,6 +89,7 @@ static int no_verify;
 static struct strategy all_strategy[] = {
 	{ "recursive",  DEFAULT_TWOHEAD | NO_TRIVIAL },
 	{ "octopus",    DEFAULT_OCTOPUS },
+	{ "ort",        NO_TRIVIAL },
 	{ "resolve",    0 },
 	{ "ours",       NO_FAST_FORWARD | NO_TRIVIAL },
 	{ "subtree",    NO_FAST_FORWARD | NO_TRIVIAL },
@@ -701,7 +703,8 @@ static int try_merge_strategy(const char *strategy, struct commit_list *common,
 	if (refresh_and_write_cache(REFRESH_QUIET, SKIP_IF_UNCHANGED, 0) < 0)
 		return error(_("Unable to write index."));
 
-	if (!strcmp(strategy, "recursive") || !strcmp(strategy, "subtree")) {
+	if (!strcmp(strategy, "recursive") || !strcmp(strategy, "subtree") ||
+	    !strcmp(strategy, "ort")) {
 		struct lock_file lock = LOCK_INIT;
 		int clean, x;
 		struct commit *result;
@@ -732,8 +735,12 @@ static int try_merge_strategy(const char *strategy, struct commit_list *common,
 			commit_list_insert(j->item, &reversed);
 
 		hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
-		clean = merge_recursive(&o, head,
-				remoteheads->item, reversed, &result);
+		if (!strcmp(strategy, "ort"))
+			clean = merge_ort(&o, head, remoteheads->item,
+					  reversed, &result);
+		else
+			clean = merge_recursive(&o, head, remoteheads->item,
+						reversed, &result);
 		if (clean < 0)
 			exit(128);
 		if (write_locked_index(&the_index, &lock,
