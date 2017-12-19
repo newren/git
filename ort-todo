@@ -1,0 +1,176 @@
+Basic ideas:
+  - Create a struct per unmerged path, with a hash
+    - any messages we will later want to print (dir rename, automerge,
+      conflict types, etc.)
+    - cache_entry's for the relevant src_entry and dst_entry fields
+    - rename_conflict_info or rename data?
+    - cache_entry's for intermediate merges (for rename/add and
+      rename/rename(2to1) cases?)
+    - cache_entry to use for eventual tree
+    - bitfields: clean, processed
+  - Create two indexes (or two sets of process_entries for each unmerged entry):
+    - One with higher order entries for the unmerged entries -> writes to index
+    - One with what the working tree would look like (w/ conflict markers),
+      but no higher stage entries -> writes to working tree
+  - Use checkout unconflicted_index equivalent && read-tree -i conflicted_index
+    - Gives us advantage of any future parallelization in updating working tree
+    - Automatically updates stat information for us
+    - Lets us rip out update_file_flags && make_room_for_path
+    - iterates full index twice -- once for working tree & once for index :-(
+    - (maybe we can just directly call oneway_merge from unpack-trees.c?)
+
+Things to remember:
+  - Use name-hash.c's index_file_exists() and index_dir_exists(); maybe also
+    add_name_hash() and remove_name_hash().  May help with:
+    . Try to simplify merge_options
+      . remove current_file_dir_set, df_conflict_file_set
+  . remove dependency on merge-recursive.h in merge-ort.h ?
+  . remove special casing for merge base == merge branch; short circuiting
+    causes problems and is unnecessary optimization given other optimizations.
+  . Optimizations:
+    . put avoid discard_cache & read_cache at the end, when it might matter
+    . avoid re-comparing sha1sums; use trival merge case # from unpack_trees.c
+  . builtin/rm.c has code for removing submodules; important bits:
+    . bad_to_remove_submodule()
+    . remove_dir_recursively()
+    . remove_path_from_gitmodules()
+  . misc
+    . See big-repo-small-cherry-pick branch
+    . accelerating rename detection within unpack_trees itself would be faster
+    . could set unpack_opts.fn to something other than threeway_merge, in order
+      to record which sides a given unmerged file is found on.
+    . See tip of github/wip: and github/untracked:remaining-todo
+    . More perf:
+      . use file basename as hint; check for renames based on just that
+      . Just keep entries in index with CE_REMOVE; add them at end unsorted,
+        and then add a sorting pass.
+      . Preserve skip_worktree as long as no conflict
+      . merge-recursive uses read_tree_recursive to get all files and trees,
+        and uses both head and merge.  This is very duplicative of what
+        unpack_trees does, reads many mostly similar trees multiple times,
+        requires inflating objects, etc.  Why not just use the index to get
+        all these paths?  Yes, it's slightly annoying in that I need to hash
+        both file and dirname(file) [and if the latter isn't hashed, I may
+        also need to recurse, starting with dirname(dirname(file))...], but
+        all the information is there.  Alternatively, ...
+	<BECAUSE: There may be no index (or merge may not involve HEAD)>
+      . If no directory deleted (from above; requires knowledge of merge
+        base tree, though), then don't do directory rename detection.
+      . Can I improve upon some of Duy's magic to avoid traversing trees?
+      . Can we make unpack_trees do trivial tree merges, instead of just file
+        merges?
+
+Questions to ponder:
+  . Do I print CONFLICT messages when merging index, or when updating working
+    tree?
+    NOTES: (1) early-abort may be weird if I print messages even earlier.
+    (2) printing too early would mean that it might be separated from
+    any worktree updates causing additional needed messages (e.g. D/F conflicts)
+  . update-worktree:
+    . no-conflict: just write it out
+    . conflict: gather all conflicted states
+      . all-three: content merge
+      . 2 & 3: check sameness, then either content merge or two copies
+      . 1 & 3 or 2 & 3: modify/delete (or rename/delete): leave copy present
+        (there may ALSO be a D/F conflict)
+      . just 1: impossible (erm...change of D/F conflict handling does this)
+      . just 2 or just 3: implies D/F conflict (in-index) remains
+
+High level:
+  / Add a new do-nothing strategy
+  / Basic new high-level overview
+    X index-only before conflict-resolution-on-index-only
+    X check-working-tree-for-early-abort
+    . working-tree-update
+  . basic process_entry() handling
+  . refactor process_renames()
+  . if no directory renames (and no update_stages()??), use
+      remove_marked_cache_entries()
+    otherwise,
+      build unsorted string_list name->cache_entry values (w/o deletions),
+      sort by name,
+      build cache from these
+  / cover letter
+  . patches to switch default and -s recursive to new strategy
+
+
+Old todo notes (from untracked:remaining-todo):
+  Performance series:
+    . don't miss directory renames entirely (make this a separate commit)
+    . before doing N^2 comparisons, if any of the exact renames suggest a
+      directory rename has taken place, see if applying that directory rename
+      to any relevant source paths yields the name of a destination path.  If so,
+      check for similarity, and if the threshold is met, record the rename pair.
+      Don't bother looking for the "best" pairing in such a case.
+      (Nah, just use file basename as hint)
+
+    . add existence_bitmap to stage_data, use it to accelerate get_rename_ignore
+      (see other perf, under augment save_files_dirs())
+
+  Other Perf:
+    . perf shortcut: if no directory removed (or added), don't do directory
+      rename detection.  [can determine this when walking over trees --
+      in either unpack_trees() or save_files_dirs()]
+    . perf: should be able to memoize values in check_dir_renamed()
+    . perf: augment save_files_dirs() with side information.  Should allow
+      avoiding tree_has_path() calls, and may help accelerate get_rename_ignore
+    . perf: pass callback function to unpack_trees that it can call while
+      traversing trees?  That way we don't have to traverse again for
+      save_files_dirs().
+
+    . if any files added or removed, then instead of modifying existing index,
+      create a new one during process_entry() loop (though we'd also have to
+      iterate non-unmerged entries and/or do big copies between them).
+    . unpack_trees records trivial_merge case numbers to avoid recomputation
+
+  Other Perf Investigation:
+    . Are my calls to get_tree_entry() excessively expensive?  Avoidable?
+      Memoizable?
+    . Is there excessive stat'ing when cherry-picking a small change?
+
+    . Figure out other pieces:
+      . What takes .24s before getting to merge_trees()?
+      . What takes .06s between end of unpack_trees and handle_renames?
+        (Is get_files_dirs() and get_unmerged() that slow?  Which?)
+      . figure out what uses the final ~.25s-.30s (5%-6%) of runtime.
+    . Dig deeper into big functions
+      . unpack_trees(): is it excessive stat'ing?
+      . handle_renames(): is more needed than guess rename from exact renames?
+        is get_rename_ignore() too slow?  Is slowness in get_diffpairs(), or
+        something else?
+      . process_entry(): is new index instead of old enough or are there other
+        slow pieces?
+
+
+  Other perf notes:
+    Investigation notes:
+      . Is there excessive stat'ing when cherry-picking a small change?
+      . Can I cherry-pick an empty commit and test perf of that?
+
+    Investigate performance more thoroughly:
+        . ts (from moreutils) & stdbuf:
+          $ time stdbuf -oL -eL git cherry-pick FETCH_HEAD |& ts -s "%.s"
+          0.736654 rename_dst_nr = 57963; rename_src_nr = 48941
+          0.760815 rename_count = 30912
+          0.764754 ignore_count = 18022
+          0.764865 num_create = 27051; num_src = 7
+          21.795335 Renaming detection finished.
+          21.800970 No renames to find.
+          21.801026 Renaming detection finished.
+          34.840998 error: could not apply 9327fd6950f... QA-98552 Mark objects incoming later
+          34.841075 hint: after resolving the conflicts, mark the corrected paths
+          34.841090 hint: with 'git add <paths>' or 'git rm <paths>'
+          34.841101 hint: and commit the result with 'git commit'
+
+          real	0m34.896s
+          user	0m34.332s
+          sys	0m0.700s
+        . perf
+           # -g results in totally different types of reports/annotations
+           perf record -e cpu-cycles --call-graph {dwarf|fp} $CMD
+           perf report -n [--no-children]
+
+           perf record $CMD
+           perf report
+           perf annotate diffcore_rename
+        . sysprof

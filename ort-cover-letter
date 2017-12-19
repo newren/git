@@ -1,0 +1,292 @@
+Add a new merge strategy to git: Ostensibly Recursive's Twin, or 'ort' for
+short.
+
+FIXME: Remove FIXMEs as I implement everything.  Remove this one last.
+
+The ort merge strategy implements the 'ideal world' design of a drop-in
+replacement for merge-recursive outlined by Junio[1][2], and provides three
+primary benefits over its predecessor:
+
+  * Faster
+  * More correct
+  * Simpler
+  * New features
+
+To be less nebulous about those benefits:
+
+=== Faster ===
+
+  * Special cases
+
+    ort is much faster when there are lots of renames or deletes.  Example:
+
+      $ time git-v2.15.1 merge -srecursive pickme
+      real   FIXME: (?m?????s)
+
+      $ time git merge -sort pickme
+      real   FIXME: (?m?????s)
+
+    Where the numbers above are for the following simple testcase:
+
+      $ cd linux.git
+
+      $ git branch pickme
+      $ git branch rename-and-delete
+
+        # Add a simple change to a handful of files
+      $ git checkout pickme
+      $ for i in `git ls-files drivers/*d*onkey*`; do echo 'Okay, FINE!' >>$i; done
+      $ git add -u
+      $ git commit -m 'https://www.youtube.com/watch?v=Dj3GH5myc3M'
+
+        # Lots of renames and deletes
+      $ git checkout rename-and-delete
+      $ git mv drivers/ pilots/
+      $ git mv arch/ vault/
+      $ git rm -rf Documentation/
+      $ git mv sound/ trustworthy/
+      $ git mv fs/ phis/
+      $ git mv net/ bag/
+      $ git commit -m 'Marketing said so...  Whee!'
+
+  * Typical cases
+
+    ort is slightly faster than recursive on average.  FIXME: details here,
+    include timings for re-doing all merges in say linux.git and webkit.git
+
+  * Reasons for speed improvement(s)
+
+    * Renames: safely reduces N in the O(N*M) rename detection algorithm
+
+      In special but relatively common cases, we can omit certain files in
+      the merge base from the rename detection algorithm and still get the
+      correct merge result.
+
+      Note that since two of the three optimizations in this area are
+      entirely specific to diffcore-rename, those optimizations also apply
+      to the recursive merge algorithm for free.  One of the three
+      optimizations would require (small) changes to the recursive merge
+      algorithm; if we want merge-recursive to benefit from all the
+      speedups, then I can add another patch.
+
+      FIXME: This all comes from the performance patches I submitted
+      previously, which I have numbers for.  Should I include them here?
+      (Also, if those patches ever actually get picked up and applied to
+      merge-recursive.c, then it won't actually be a benefit relative to
+      the new merge-recursive.)
+
+    * Deletes and Renames: replaces O(N^2) index removal algorithm with
+      O(N)
+
+      Deleting individual files from the index (needed for both deletes and
+      renames) involved calling MOVE_ARRAY, thus making it an O(N)
+      operation, per file.  Therefore, deleting O(N) files was O(N^2).
+      There is no bulk-remove operation for index entries, but we simply
+      build up a new index as we go.
+
+      FIXME: Verify building up a new index works and is the best way.
+
+      FIXME2: We also have O(N) individual inserts, which is necessary for
+              update_stages() and directory renames.  So we'll have to be
+              smarter on that side as well...
+
+    * Avoid unncessary stat'ing
+
+      The logic to detect whether untracked or dirty contents could be lost
+      was not rename-aware and was not conflict-resolution-aware, and thus
+      had to stat more files than necessary.  Waiting until after renames
+      are handled and conflict resolution removes any files from the index
+      that are no longer needed allows us stat fewer paths for these
+      checks.
+
+      FIXME: This is just supposition right now.  Does it really stat more
+      than necessary, and even if it does, does it really make that big a
+      difference?
+
+=== More correct ===
+
+  * Fixes some known issues with merging (submodules, recursive, renames, D/F?)
+
+    * en/t6036-recursive-corner-cases (trickier D/F conflicts)
+    * en/t7405-recursive-submodule-conflicts (F/S, D/S, merge --abort)
+    * en/t6036-merge-recursive-tests (undetected conflicts when recursing)
+    * en/t6042-insane-merge-rename-testcases (r/r/d/d, r/a/d, chains of r/r)
+
+  * Fixes false positive and false negative early aborts in merging
+
+    The logic to detect whether untracked or dirty contents could be lost
+    during the merge was suboptimal and had both false positives and false
+    negatives.  This was due to the fact that the check was performed by
+    unpack_trees(), which does not understand renames.  Look for "doesn't
+    understand renames" in [4] for more details.  This problem was actually
+    the cause of the old code being forced to do a 4-way merge; the 4-way
+    merge was a (painful and possibly-not-quite-bulletproof) workaround to
+    minimize data loss for users when we hit a false negative.
+
+  * Avoids early abort with partial merge results written to working copy
+
+    Since merge-recursive updates the working copy as it goes, if it hits a
+    fatal error on some path (often signified with a -1 return value and
+    checked for in many places throughout the code), it will abort looping
+    through the remaining entries and leave the working copy littered with
+    a partial merge.  (Further, since the merge state isn't recorded in
+    such a case, not only is it confusing for the user, but 'git merge
+    --abort' won't help, and 'git reset --hard' is unsafe if they had
+    uncommitted changes before starting the merge).  The new strategy won't
+    touch the working copy until the merge has successfully determined the
+    new index.
+
+    Technically, this may never have happened with merge-recursive because
+    the test suite tried to thoroughly make sure we never hit such an error
+    path, but it was really easy to accidentally hit many of them when
+    trying to modify and improve the code, so it felt like a ticking time
+    bomb.
+
+  * Passes existing tests, including some former expected failures
+
+    If ort is used as a replacement for recursive -- both when the latter
+    is explicitly requested or when git just decides to use the 'default'
+    merge strategy -- all tests in the testsuite continue to pass, and a
+    few known failures are corrected.
+
+
+=== Simpler ===
+
+  * Performs a 3-way merge instead of 4-way
+
+    See "Fixes false positives and false negative early aborts in merging"
+    in the previous section for why merge-recursive did a 4-way merge.
+    This complication alone was the cause of many headaches.
+
+  * Removes odd must-update-working-copy-before-index requirement
+
+    Look for "final loose end" in [4] for details.
+
+  * De-tangles concerns
+
+    merges have to deal with lots of different concerns: dirty files,
+    untracked files, directory/file conflicts, submodule/directory
+    conflicts, submodule/file conflicts, renames, directory renames,
+    recursively generated virtual merge-bases, case-insensitive
+    filesystems, etc.  Further, merges often have to deal with cases where
+    individual paths might be involved in combinations of two (or three or
+    four) of these effects.
+
+    Unfortunately, the code base traditionally has had code paths for each
+    type of merge conflict, and made each of these code paths
+    simultaneously responsible for all of these types of concerns.  This
+    had the net effect that anyone reading the code needed to
+    simultaneously keep all concerns in their mind for each code path,
+    making it difficult to follow.
+
+    Over time, the coupling of some concerns was gradually reduced.  For
+    example, D/F conflicts were separated at some point with a
+    process_df_entry() post-processing step, then later by simply iterating
+    over unmerged entries in reverse lexicographic order combined with a
+    helper record_df_conflict_files().  rename handling gradually deferred
+    more and more processing to process_entry() instead of always doing
+    immediate processing of files involved in renames.  Unfortunately, the
+    practice of updating the working copy as entries were iterated
+    prevented full de-coupling for both D/F conflicts and renames.
+
+    This rewrite explicitly focuses on deferred processing of the working
+    copy, which not only de-couples dirty and untracked files from the
+    other concerns, it also allows further de-coupling of both renames and
+    D/F conflicts.  The additional de-coupling of D/F conflicts was easy to
+    apply to submodules, allowing S/D and S/F conflicts to likewise be
+    localized instead of spread throughout each code path for each type of
+    merge conflict.
+
+    FIXME: I'm only assuming that I will be able to decouple the submodule
+    handling better.  Same goes for some of the other statements above.  Time
+    to see how it works out.
+
+  * Refactors process_renames()
+
+    process_renames() is a long and rather complicated function.  Part of
+    the complexity was intrinsic to handling renames, but there were a few
+    factors that made things more complex than necessary:
+
+      * The whole handling of ren1/ren2.  The code itself had a "TODO:
+        refactor, so that 1/2 are not needed" comment from the beginning
+        that showed it was known to be complex/confusing.
+
+      * Immediate processing of renames.  This has been relaxed over time
+        so that necessary information is recorded for later processing
+        within process_entry(), but the immediate processing of files
+        involved in renames in concert with merge-recursive's overall
+        updating of the working copy (and printing of error messages) when
+        entries were iterated resulted in the desire to process renames in
+        a certain order, requiring some extra gymnastics.  Immediate
+        processing also limited the de-coupling of renames from other
+        concerns, as noted above.
+
+  * Other small cleanups
+
+    There were some miscellaneous cleanups, including the removal of
+    my personal pet peeve (merge-recursive had a function parameter
+    that resulted in double -- and sometimes triple -- negatives.  This
+    stemmed from the fact that the parameter was named "no_wd", which
+    often needed to be further negated in callers).
+
+=== New Features ===
+
+  * Merge in bare-repo (For gerrit/github/gitlab: will this merge cleanly?)
+  * Create as-merged-as-possible-tree (potentially with conflicts)
+  * index-only merge, with follow-up steps (for rebase -i acceleration)
+
+
+[1] https://public-inbox.org/git/xmqqd147kpdm.fsf@gitster.mtv.corp.google.com/  [Ideal world]
+[2] https://public-inbox.org/git/xmqqk1ydkbx0.fsf@gitster.mtv.corp.google.com/  [New strategy]
+[3] https://public-inbox.org/git/CABPp-BHDrw_dAESic3xK7kC3jMgKeNQuPQF69OpbVYhRkbhJsw@mail.gmail.com/ [submodule problems]
+[4] https://public-inbox.org/git/20171124195901.2581-1-newren@gmail.com/ [Big complaint about recursive]
+
+
+
+===========================================================================
+
+
+Stuff I wrote that I don't think fits or that I reworded, but which I might
+decide later to include so I'm just keeping it around here:
+
+[a] https://public-inbox.org/git/CABPp-BFdJr8AL3hJSSLiqwPJMt6LZcLOEcTtxz1vohEuw==wKg@mail.gmail.com/ [Too much to keep in mind]
+
+
+  * Localization of D/F concerns
+
+    The new design removes the need to do a lot of crazy things we've had to
+    do in the past to correctly handle D/F conflicts:
+
+    * No need for a big pre-processing step on all unmerged entries to find
+      the D/F entries and record them (see record_df_conflict_files())
+
+    * No need for a special process_df_entry() handled in a separate step
+      [see commit 37348937ff ("merge-recursive: Fix D/F conflicts",
+      2010-07-09)]
+
+    * No need to require that the unmerged entries be iterated in reverse
+      order to make sure directories were processed before corresponding
+      files [see commit edd2faf52e ("merge-recursive: Consolidate
+      process_entry() and process_df_entry()", 2011-08-11)]
+
+    ...and it's still able to put the code for D/F conflicts in a single
+    place instead of spread throughout the resolutions for each type of
+    conflict.
+
+  * Submodule/Directory and Submodule/File conflict handling also localized
+
+    Analagous to D/F conflicts, the addition of submodules added S/D and
+    S/F conflict possibilities.  However, the fact that concerns weren't
+    generally localized in merge-recursive meant fixing problems with such
+    conflicts couldn't be fixed in a single location.  Further, number of
+    locations that needed fixing was unknown and finding them all
+    effectively required an audit of the codebase.  The new design does
+    permit such a local fix.
+
+  * Localization of code to update the working copy
+
+    Previously, the code to update the working copy was spread all over the
+    place, next to each different type of conflict resolution or rename
+    handling.  (Also, it had confusing double (and maybe triple) negatives
+    due to functions using parameter names like "no_wd", which sometimes
+    needed to be further negated)
