@@ -236,11 +236,18 @@ static void unpack_trees_finish(struct merge_options *opt)
 	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
 }
 
-static int merge_trees_internal(struct merge_options *opt,
-				struct tree *head,
-				struct tree *merge,
-				struct tree *merge_base,
-				struct tree **result)
+/*
+ * Drop-in replacement for merge_trees_internal().
+ * Differences:
+ *   1) s/merge_trees_internal/merge_ort_nonrecursive_internal/
+ *   2) The handling of unmerged entries has been gutted and replaced with
+ *      a BUG() call.  Will be handled later.
+ */
+static int merge_ort_nonrecursive_internal(struct merge_options *opt,
+					   struct tree *head,
+					   struct tree *merge,
+					   struct tree *merge_base,
+					   struct tree **result)
 {
 	struct index_state *istate = opt->repo->index;
 	int code, clean;
@@ -285,11 +292,18 @@ static int merge_trees_internal(struct merge_options *opt,
 	return clean;
 }
 
-static int merge_recursive_internal(struct merge_options *opt,
-				    struct commit *h1,
-				    struct commit *h2,
-				    struct commit_list *merge_bases,
-				    struct commit **result)
+/*
+ * Drop-in replacement for merge_recursive_internal().
+ * Currently, a near wholesale copy-paste of merge_recursive_internal(); only
+ * the following modifications have been made:
+ *   1) s/merge_recursive_internal/merge_ort_internal/
+ *   2) s/merge_trees_internal/merge_ort_nonrecursive_internal/
+ */
+static int merge_ort_internal(struct merge_options *opt,
+			      struct commit *h1,
+			      struct commit *h2,
+			      struct commit_list *merge_bases,
+			      struct commit **result)
 {
 	struct commit_list *iter;
 	struct commit *merged_merge_bases;
@@ -354,8 +368,8 @@ static int merge_recursive_internal(struct merge_options *opt,
 		saved_b2 = opt->branch2;
 		opt->branch1 = "Temporary merge branch 1";
 		opt->branch2 = "Temporary merge branch 2";
-		if (merge_recursive_internal(opt, merged_merge_bases, iter->item,
-					     NULL, &merged_merge_bases) < 0)
+		if (merge_ort_internal(opt, merged_merge_bases, iter->item,
+				       NULL, &merged_merge_bases) < 0)
 			return -1;
 		opt->branch1 = saved_b1;
 		opt->branch2 = saved_b2;
@@ -370,7 +384,7 @@ static int merge_recursive_internal(struct merge_options *opt,
 		repo_read_index(opt->repo);
 
 	opt->ancestor = ancestor_name;
-	clean = merge_trees_internal(opt,
+	clean = merge_ort_nonrecursive_internal(opt,
 				     repo_get_commit_tree(opt->repo, h1),
 				     repo_get_commit_tree(opt->repo, h2),
 				     repo_get_commit_tree(opt->repo,
@@ -455,7 +469,8 @@ int merge_ort_nonrecursive(struct merge_options *opt,
 
 	if (merge_start(opt, head))
 		return -1;
-	clean = merge_trees_internal(opt, head, merge, merge_base, &ignored);
+	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
+						&ignored);
 	merge_finalize(opt);
 
 	return clean;
@@ -474,7 +489,7 @@ int merge_ort(struct merge_options *opt,
 
 	if (merge_start(opt, repo_get_commit_tree(opt->repo, h1)))
 		return -1;
-	clean = merge_recursive_internal(opt, h1, h2, merge_bases, result);
+	clean = merge_ort_internal(opt, h1, h2, merge_bases, result);
 	merge_finalize(opt);
 
 	return clean;
