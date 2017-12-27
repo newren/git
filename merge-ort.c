@@ -249,6 +249,10 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	struct index_state *istate = opt->repo->index;
 	int code, clean;
 
+	if (opt->priv->call_depth) {
+		discard_index(opt->repo->index);
+	}
+
 	if (opt->subtree_shift) {
 		merge = shift_tree_object(opt->repo, head, merge,
 					  opt->subtree_shift);
@@ -360,7 +364,6 @@ static int merge_ort_internal(struct merge_options *opt,
 		 * overwritten it: the committed "conflicts" were
 		 * already resolved.
 		 */
-		discard_index(opt->repo->index);
 		saved_b1 = opt->branch1;
 		saved_b2 = opt->branch2;
 		opt->branch1 = "Temporary merge branch 1";
@@ -376,9 +379,10 @@ static int merge_ort_internal(struct merge_options *opt,
 			return err(opt, _("merge returned no commit"));
 	}
 
-	discard_index(opt->repo->index);
-	if (!opt->priv->call_depth)
+	if (!opt->priv->call_depth && merge_bases != NULL) {
+		discard_index(opt->repo->index);
 		repo_read_index(opt->repo);
+	}
 
 	opt->ancestor = ancestor_name;
 	clean = merge_ort_nonrecursive_internal(opt,
