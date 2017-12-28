@@ -103,8 +103,14 @@ enum update_sparsity_result {
 
 enum update_sparsity_result update_sparsity(struct unpack_trees_options *options);
 
+void display_error_msgs(struct unpack_trees_options *o);
+int cache_entries_same(const struct cache_entry *a,
+		       const struct cache_entry *b);
 int verify_uptodate(const struct cache_entry *ce,
 		    struct unpack_trees_options *o);
+int verify_absent(const struct cache_entry *,
+		  enum unpack_trees_error_types,
+		  struct unpack_trees_options *);
 
 int threeway_merge(const struct cache_entry * const *stages,
 		   struct unpack_trees_options *o);
