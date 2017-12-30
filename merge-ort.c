@@ -233,6 +233,18 @@ static void unpack_trees_finish(struct merge_options *opt)
 	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
 }
 
+/* Check whether either untracked or dirty files would be overwritten */
+static int files_would_be_overwritten(struct merge_options *opt)
+{
+	return 0;
+}
+
+/* Update working tree, which was from opt->priv->orig_index, to the_index */
+static int update_working_tree(struct merge_options *opt)
+{
+	return 0;
+}
+
 /*
  * Drop-in replacement for merge_trees_internal().
  * Differences:
@@ -284,12 +296,19 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		BUG("not yet implemented");
 	}
 
-	unpack_trees_finish(opt);
-
 	if (opt->priv->call_depth &&
 	    !(*result = write_in_core_index_as_tree(opt->repo)))
 		return -1;
 
+	if (!opt->priv->call_depth) {
+		/* Update the working tree to match */
+		if (files_would_be_overwritten(opt))
+			return -1;
+		if (update_working_tree(opt))
+			return -1;
+	}
+
+	unpack_trees_finish(opt);
 	return clean;
 }
 
