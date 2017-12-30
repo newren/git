@@ -214,15 +214,8 @@ static int unpack_trees_start(struct merge_options *opt,
 	rc = unpack_trees(3, t, &opt->priv->unpack_opts);
 	cache_tree_free(&opt->repo->index->cache_tree);
 
-	/*
-	 * Update opt->repo->index to match the new results, AFTER saving a
-	 * copy in opt->priv->orig_index.  Update src_index to point to the
-	 * saved copy.  (verify_uptodate() checks src_index, and the original
-	 * index is the one that had the necessary modification timestamps.)
-	 */
 	opt->priv->orig_index = *opt->repo->index;
 	*opt->repo->index = tmp_index;
-	opt->priv->unpack_opts.src_index = &opt->priv->orig_index;
 
 	return rc;
 }
@@ -233,9 +226,18 @@ static void unpack_trees_finish(struct merge_options *opt)
 	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
 }
 
-/* Check whether either untracked or dirty files would be overwritten */
-static int files_would_be_overwritten(struct merge_options *opt)
+static int handle_would_be_overwritten(struct merge_options *opt,
+				       const struct cache_entry *old,
+				       const struct cache_entry *new)
 {
+	if (!old)
+		return verify_absent(new,
+				     ERROR_WOULD_LOSE_UNTRACKED_OVERWRITTEN,
+				     &opt->priv->unpack_opts);
+	if (!cache_entries_same(old, new))
+		return verify_uptodate(old, &opt->priv->unpack_opts);
+
+	/* no untracked or dirty data would be overwritten by this merge */
 	return 0;
 }
 
@@ -243,6 +245,54 @@ static int files_would_be_overwritten(struct merge_options *opt)
 static int update_working_tree(struct merge_options *opt)
 {
 	return 0;
+}
+
+static const struct cache_entry *get_next(struct index_state *index,
+					  int *cur)
+{
+	if (*cur < 0)
+		++*cur;
+	else /* Skip unmerged entries with the same name */
+		while (++*cur < index->cache_nr &&
+		       index->cache[*cur-1]->ce_namelen ==
+			 index->cache[*cur]->ce_namelen &&
+		       !strncmp(index->cache[*cur-1]->name,
+				index->cache[*cur]->name,
+				index->cache[*cur]->ce_namelen))
+			; /* skip */
+
+	return (*cur < index->cache_nr) ? index->cache[*cur] : NULL;
+}
+
+/* Check whether either untracked or dirty files would be overwritten */
+static int files_would_be_overwritten(struct merge_options *opt)
+{
+	int i = -1, j = -1;
+	int unsafe = 0;
+	const struct cache_entry *old, *new;
+	old = get_next(&opt->priv->orig_index, &i);
+	new = get_next(opt->repo->index, &j);
+
+	while (old || new) {
+		int minlen = old->ce_namelen < new->ce_namelen ?
+			     old->ce_namelen : new->ce_namelen;
+		int cmp = strncmp(old->name, new->name, minlen);
+		if (cmp == 0)
+			cmp += new->ce_namelen - old->ce_namelen;
+		if (cmp > 0) {
+			unsafe |= handle_would_be_overwritten(opt, old, NULL);
+			old = get_next(&opt->priv->orig_index, &i);
+		} else if (cmp < 0) {
+			unsafe |= handle_would_be_overwritten(opt, NULL, new);
+			new = get_next(opt->repo->index, &j);
+		} else { /* cmp == 0 */
+			unsafe |= handle_would_be_overwritten(opt, old, new);
+			old = get_next(&opt->priv->orig_index, &i);
+			new = get_next(opt->repo->index, &j);
+		}
+	}
+
+	return unsafe;
 }
 
 /*
@@ -301,9 +351,19 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 
 	if (!opt->priv->call_depth) {
-		/* Update the working tree to match */
-		if (files_would_be_overwritten(opt))
+		/*
+		 * Update opt->priv->unpack_opts so that functions from
+		 * unpack_trees (such as verify_uptodate() which checks
+		 * src_index) let us now check for updates in the working
+		 * tree against the original index.
+		 */
+		opt->priv->unpack_opts.index_only = 0;
+		opt->priv->unpack_opts.update = 1;
+		opt->priv->unpack_opts.src_index = &opt->priv->orig_index;
+		if (files_would_be_overwritten(opt)) {
+			display_error_msgs(&opt->priv->unpack_opts);
 			return -1;
+		}
 		if (update_working_tree(opt))
 			return -1;
 	}
