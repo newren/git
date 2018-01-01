@@ -248,26 +248,8 @@ static int would_lose_untracked(struct merge_options *opt, const char *path)
 
 static int make_room_for_path(struct merge_options *opt, const char *path)
 {
-	int status, i;
+	int status;
 	const char *msg = _("failed to create path '%s'%s");
-
-	/* Unlink any D/F conflict files that are in the way */
-	for (i = 0; i < opt->priv->df_conflict_file_set.nr; i++) {
-		const char *df_path = opt->priv->df_conflict_file_set.items[i].string;
-		size_t pathlen = strlen(path);
-		size_t df_pathlen = strlen(df_path);
-		if (df_pathlen < pathlen &&
-		    path[df_pathlen] == '/' &&
-		    strncmp(path, df_path, df_pathlen) == 0) {
-			output(opt, 3,
-			       _("Removing %s to make room for subdirectory\n"),
-			       df_path);
-			unlink(df_path);
-			unsorted_string_list_delete_item(&opt->priv->df_conflict_file_set,
-							 i, 0);
-			break;
-		}
-	}
 
 	/* Make sure leading directories are created */
 	status = safe_create_leading_directories_const(path);
@@ -296,83 +278,77 @@ static int make_room_for_path(struct merge_options *opt, const char *path)
 	return err(opt, msg, path, _(": perhaps a D/F conflict?"));
 }
 
-static int update_file_flags(struct merge_options *opt,
-			     const struct diff_filespec *contents,
-			     const char *path,
-			     int update_cache,
-			     int update_wd)
+static int update_file(struct merge_options *opt,
+		       const struct diff_filespec *contents,
+		       const char *path)
 {
 	int ret = 0;
+	enum object_type type;
+	void *buf;
+	unsigned long size;
 
-	if (opt->priv->call_depth)
-		update_wd = 0;
-
-	if (update_wd) {
-		enum object_type type;
-		void *buf;
-		unsigned long size;
-
-		if (S_ISGITLINK(contents->mode)) {
-			/*
-			 * We may later decide to recursively descend into
-			 * the submodule directory and update its index
-			 * and/or work tree, but we do not do that now.
-			 */
-			return 0;
-		}
-
-		buf = read_object_file(&contents->oid, &type, &size);
-		if (!buf) {
-			ret = err(opt, _("cannot read object %s '%s'"),
-				   oid_to_hex(&contents->oid), path);
-			goto free_buf;
-		}
-		if (type != OBJ_BLOB) {
-			ret = err(opt, _("blob expected for %s '%s'"),
-				  oid_to_hex(&contents->oid), path);
-			goto free_buf;
-		}
-		if (S_ISREG(contents->mode)) {
-			struct strbuf strbuf = STRBUF_INIT;
-			if (convert_to_working_tree(opt->repo->index, path, buf, size, &strbuf)) {
-				free(buf);
-				size = strbuf.len;
-				buf = strbuf_detach(&strbuf, NULL);
-			}
-		}
-
-		if (make_room_for_path(opt, path) < 0) {
-			update_wd = 0;
-			goto free_buf;
-		}
-		if (S_ISREG(contents->mode) ||
-		    (!has_symlinks && S_ISLNK(contents->mode))) {
-			int fd;
-			int mode = (contents->mode & 0100 ? 0777 : 0666);
-
-			fd = open(path, O_WRONLY | O_TRUNC | O_CREAT, mode);
-			if (fd < 0) {
-				ret = err(opt, _("failed to open '%s': %s"),
-					  path, strerror(errno));
-				goto free_buf;
-			}
-			write_in_full(fd, buf, size);
-			close(fd);
-		} else if (S_ISLNK(contents->mode)) {
-			char *lnk = xmemdupz(buf, size);
-			safe_create_leading_directories_const(path);
-			unlink(path);
-			if (symlink(lnk, path))
-				ret = err(opt, _("failed to symlink '%s': %s"),
-					  path, strerror(errno));
-			free(lnk);
-		} else
-			ret = err(opt,
-				  _("do not know what to do with %06o %s '%s'"),
-				  contents->mode, oid_to_hex(&contents->oid), path);
-	free_buf:
-		free(buf);
+	if (S_ISGITLINK(contents->mode)) {
+		/*
+		 * We may later decide to recursively descend into the
+		 * submodule directory and update its working tree, but we
+		 * do not do that now.
+		 */
+		return 0;
 	}
+	buf = read_object_file(&contents->oid, &type, &size);
+	if (!buf) {
+		ret = err(opt, _("cannot read object %s '%s'"),
+			  oid_to_hex(&contents->oid), path);
+		goto free_buf;
+	}
+	if (type != OBJ_BLOB) {
+		ret = err(opt, _("blob expected for %s '%s'"),
+			  oid_to_hex(&contents->oid), path);
+		goto free_buf;
+	}
+	if (S_ISREG(contents->mode)) {
+		struct strbuf strbuf = STRBUF_INIT;
+		if (convert_to_working_tree(opt->repo->index,
+					    path, buf, size, &strbuf)) {
+			free(buf);
+			size = strbuf.len;
+			buf = strbuf_detach(&strbuf, NULL);
+		}
+	}
+
+	ret = make_room_for_path(opt, path);
+	if (ret < 0)
+		goto free_buf;
+
+	if (S_ISREG(contents->mode) ||
+	    (!has_symlinks && S_ISLNK(contents->mode))) {
+		int fd;
+		int mode = (contents->mode & 0100 ? 0777 : 0666);
+
+		fd = open(path, O_WRONLY | O_TRUNC | O_CREAT, mode);
+		if (fd < 0) {
+			ret = err(opt, _("failed to open '%s': %s"),
+				  path, strerror(errno));
+			goto free_buf;
+		}
+		write_in_full(fd, buf, size);
+		close(fd);
+	} else if (S_ISLNK(contents->mode)) {
+		char *lnk = xmemdupz(buf, size);
+		safe_create_leading_directories_const(path);
+		unlink(path);
+		if (symlink(lnk, path))
+			ret = err(opt, _("failed to symlink '%s': %s"),
+				  path, strerror(errno));
+		free(lnk);
+	} else {
+		ret = err(opt,
+			  _("do not know what to do with %06o %s '%s'"),
+			  contents->mode, oid_to_hex(&contents->oid), path);
+	}
+
+free_buf:
+	free(buf);
 
 	return ret;
 }
@@ -395,7 +371,7 @@ static int handle_would_be_overwritten(struct merge_options *opt,
 /* Update working tree, which was from opt->priv->orig_index, to the_index */
 static int update_working_tree(struct merge_options *opt)
 {
-	update_file_flags(opt, NULL, NULL, 0, 0);
+	update_file(opt, NULL, NULL);
 	return 0;
 }
 
