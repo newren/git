@@ -2394,6 +2394,24 @@ int threeway_merge(const struct cache_entry * const *stages,
 		if (no_anc_exists && head && remote && same(head, remote))
 			return merged_entry(head, index, o);
 
+	} else if (o->semi_aggressive) {
+		/*
+		 * Resolve unchanged on one side and deleted on other cases.
+		 */
+		int head_deleted = !head;
+		int remote_deleted = !remote;
+
+		if ((head_deleted && remote && remote_match) ||
+		    (remote_deleted && head && head_match)) {
+			const struct cache_entry *ce = head ? head : remote;
+			if (index)
+				return deleted_entry(index, index, o);
+			if (ce && !head_deleted) {
+				if (verify_absent(ce, ERROR_WOULD_LOSE_UNTRACKED_REMOVED, o))
+					return -1;
+			}
+			return 0;
+		}
 	}
 
 	/* Below are "no merge" cases, which require that the index be
