@@ -1,0 +1,136 @@
+* Performance Notes:
+  * Major perf stuff:
+    * diffcore-rename: don't look for a match better than exact
+    * unpack-trees/diffcore-rename: see "perf vs. directory rename detection"
+    * diffcore-rename: filter rename_src list when possible (based on above)
+    * insert into index once, at the end (use strmap/string_list similarity)
+    * unpack-trees: see "three-way merge handling for trees"
+    * unpack-trees: insert tree entries into index if possible, avoid recursing
+
+  * Minor perf stuff to not forget but include at the end:
+    * unconditional discarding of cache even if non-recursive
+    * "unpack-trees: exit check_updates() early if updates not requested"
+
+  * Fuzzy ideas:
+    * avoid having get_unmerged() loop the whole index (unpack_trees already
+      did that...)
+    * if not writing index or working tree, avoid reading index too
+    * Can I get list of directories from unpack-trees somehow and avoid doing
+      directory rename detection on renames whose starting path still exists?
+
+  * Testing:
+    * determine speedup for re-merging old git.git or linux.git merge commits
+    * find speedup for rebasing some sequence of linux commits on empty change
+    * find speedup for rebasing same sequence, on top of big directory rename
+
+* Details on various performance notes
+
+  * perf vs. directory rename detection:
+    * basic perf optimization: if a file is unmodified on one side of history
+      one side of history, and the containing directory for that file from
+      that side of history also exists on the other side of history, then take
+      the version of that file on the other side as the resolution
+    * in rename detection, if precisely one other file with same basename,
+      check it first.  If similar enough, mark it as rename pair and don't
+      look for "best" match.
+    * note 1: if file unchanged on one side and containing directory exists on
+      the other side, no dir rename possible so optimization can't hurt at all.
+    * note 2: if file unchanged on one side and containing directory does not
+      exist on the other side, then it's possible there is a directory rename,
+      and so we can't do the normal optimization.  However, in such a case it
+      is very likely both that
+      * individual files had no content changes (100% rename)
+      * file basenames will match and content will be similar (O(N) vs. O(N^2))
+
+  * three-way merge handling for trees (instead of just files):
+    * if orig == head == merge, then we can accept any of three as merge result
+
+    * if orig == head OR orig == merge:
+
+      * Types of rename issues that can come up:
+        * normal rename (content merge)
+        * rename/delete
+        * rename/rename(1to2)[/add/add]
+        * rename/rename(2to1)[/delete/delete]
+        * rename/add
+        * rename/add/delete
+        * directory rename stuff
+
+      * If at tree level, orig=merge != head, or orig=head != merge, then:
+
+        * Can only have rename from orig to the modified side of history.
+          A file present with the same name will prevent rename detection
+          on the unmodified side of history.  (Even if break detection were
+          turned on, which we don't do in the merge machinery, the file
+          would be 100% similar and thus we would not break the pairing and
+          not get a rename.)
+
+        * May have normal rename, but no need for content merge.  If rename
+          not detected, it looks like one-sided add, which matches exactly
+          what we'd get from doing a content merge anyway (since one side
+          was unmodified).
+
+        * rename/delete is impossible, because orig=merge or orig=head
+          implies that the source file renamed on the modified side could
+          not have been deleted on the unmodified side.
+
+        * rename/rename(1to2) impossible, because unmodified side implies
+          that the source file was not renamed on the unmodified side of
+          history.
+
+        * rename/rename(2to1) impossible, because unmodified side implies
+          that the target file could not have gotten there from a rename on
+          the unmodified side of history.
+
+        * rename/add is possible, but if rename not detected it looks like
+          an add/add conflict; since the renamed file was unmodified on the
+          other side of history, no content merge is needed and thus
+          treating the rename/add as an add/add gives the same result.
+
+        * rename/add/delete impossible since rename/delete is impposible.
+
+        * directory rename is totally possible.  However, the point of
+          directory rename detection is to send "new" files added on the
+          unrenamed side of history to the same directory that the renamed
+          side sent them to.  Since one side was unmodified, that means
+          that not only is there no renames on that side (and that there
+          are no content changes to any files within that dir), but that
+          there are no new files to send anywhere either.
+
+    * if head == merge, cannot just accept either as merge result:
+
+      * we'd fail to detect renames with source in orig, or with dest in
+        either head or merge.  These could be paired to paths outside the
+        tree.
+
+      * Just accepting head == merge as the result for this directory would
+        not cause us to miss any normal rename cases (normal renames
+        require that one side of history have the same path in the target
+        location, and the other side of history have a different path that
+        pairs up with the source), nor would it cause us to miss any
+        important directory renames (since head matches merge, either they
+        both have the directory so it wasn't renamed, or both don't have it
+        in which case neither added any files that need to follow a rename
+        done by the other side).
+
+      * Just accepting head == merge as the result for this directory would
+        absolutely cause us problems with multiple different conflict
+        types: rename/delete, rename/add, rename/rename(2to1)[/add/add],
+        rename/rename(1to2)[/delete/delete], and rename/add/delete.  Just
+        digging slightly more into the rename/rename(1to2) case...
+
+        * most likely, any renames would be rename/rename(1to2) with source
+          in orig.  If the dest on both the head and merge sides remained
+          within the same directory, then the dest would be the same file
+          so it'd be a rename/rename(1to1) without even having content
+          differences.
+
+        * however, with the rename/rename(1to2) conflicts it'd be possible
+          to have neither dest within the same starting directory as the
+          source or as each other.
+
+        * it's also possible there could be a rename/rename(1to2) conflict,
+          with only one target in this tree -- but it'd be rare because the
+          best rename match would have to be within this tree on one side
+          of history and an even better match for the rename would have to
+          exist elsewhere on the other branch.
