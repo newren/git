@@ -279,15 +279,15 @@ static int make_room_for_path(struct merge_options *opt, const char *path)
 }
 
 static int update_file(struct merge_options *opt,
-		       const struct diff_filespec *contents,
-		       const char *path)
+		       const struct cache_entry *ce)
 {
 	int ret = 0;
 	enum object_type type;
 	void *buf;
 	unsigned long size;
+	char *path;
 
-	if (S_ISGITLINK(contents->mode)) {
+	if (S_ISGITLINK(ce->ce_mode)) {
 		/*
 		 * We may later decide to recursively descend into the
 		 * submodule directory and update its working tree, but we
@@ -295,18 +295,23 @@ static int update_file(struct merge_options *opt,
 		 */
 		return 0;
 	}
-	buf = read_object_file(&contents->oid, &type, &size);
+
+	path = xmalloc(ce->ce_namelen+1);
+	memcpy(path, ce->name, ce->ce_namelen);
+	path[ce->ce_namelen] = '\0';
+
+	buf = read_object_file(&ce->oid, &type, &size);
 	if (!buf) {
 		ret = err(opt, _("cannot read object %s '%s'"),
-			  oid_to_hex(&contents->oid), path);
-		goto free_buf;
+			   oid_to_hex(&ce->oid), path);
+		goto free_buf_and_path;
 	}
 	if (type != OBJ_BLOB) {
 		ret = err(opt, _("blob expected for %s '%s'"),
-			  oid_to_hex(&contents->oid), path);
-		goto free_buf;
+			  oid_to_hex(&ce->oid), path);
+		goto free_buf_and_path;
 	}
-	if (S_ISREG(contents->mode)) {
+	if (S_ISREG(ce->ce_mode)) {
 		struct strbuf strbuf = STRBUF_INIT;
 		if (convert_to_working_tree(opt->repo->index,
 					    path, buf, size, &strbuf)) {
@@ -318,22 +323,22 @@ static int update_file(struct merge_options *opt,
 
 	ret = make_room_for_path(opt, path);
 	if (ret < 0)
-		goto free_buf;
+		goto free_buf_and_path;
 
-	if (S_ISREG(contents->mode) ||
-	    (!has_symlinks && S_ISLNK(contents->mode))) {
+	if (S_ISREG(ce->ce_mode) ||
+	    (!has_symlinks && S_ISLNK(ce->ce_mode))) {
 		int fd;
-		int mode = (contents->mode & 0100 ? 0777 : 0666);
+		int mode = (ce->ce_mode & 0100 ? 0777 : 0666);
 
 		fd = open(path, O_WRONLY | O_TRUNC | O_CREAT, mode);
 		if (fd < 0) {
 			ret = err(opt, _("failed to open '%s': %s"),
 				  path, strerror(errno));
-			goto free_buf;
+			goto free_buf_and_path;
 		}
 		write_in_full(fd, buf, size);
 		close(fd);
-	} else if (S_ISLNK(contents->mode)) {
+	} else if (S_ISLNK(ce->ce_mode)) {
 		char *lnk = xmemdupz(buf, size);
 		safe_create_leading_directories_const(path);
 		unlink(path);
@@ -344,11 +349,12 @@ static int update_file(struct merge_options *opt,
 	} else {
 		ret = err(opt,
 			  _("do not know what to do with %06o %s '%s'"),
-			  contents->mode, oid_to_hex(&contents->oid), path);
+			  ce->ce_mode, oid_to_hex(&ce->oid), path);
 	}
 
-free_buf:
+free_buf_and_path:
 	free(buf);
+	free(path);
 
 	return ret;
 }
@@ -371,7 +377,7 @@ static int handle_would_be_overwritten(struct merge_options *opt,
 /* Update working tree, which was from opt->priv->orig_index, to the_index */
 static int update_working_tree(struct merge_options *opt)
 {
-	update_file(opt, NULL, NULL);
+	update_file(opt, NULL);
 	return 0;
 }
 
