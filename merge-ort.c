@@ -359,9 +359,10 @@ free_buf_and_path:
 	return ret;
 }
 
-static int handle_would_be_overwritten(struct merge_options *opt,
-				       const struct cache_entry *old,
-				       const struct cache_entry *new)
+static int would_be_overwritten(struct merge_options *opt,
+				const struct cache_entry *old,
+				const struct cache_entry *new,
+				int idx)
 {
 	if (!old)
 		return verify_absent(new,
@@ -374,8 +375,11 @@ static int handle_would_be_overwritten(struct merge_options *opt,
 	return 0;
 }
 
-/* Update working tree, which was from opt->priv->orig_index, to the_index */
-static int update_working_tree(struct merge_options *opt)
+/* Update one path in working tree, from old to new */
+static int update_working_tree(struct merge_options *opt,
+			       const struct cache_entry *old,
+			       const struct cache_entry *new,
+			       int idx)
 {
 	update_file(opt, NULL);
 	return 0;
@@ -398,11 +402,24 @@ static const struct cache_entry *get_next(struct index_state *index,
 	return (*cur < index->cache_nr) ? index->cache[*cur] : NULL;
 }
 
-/* Check whether either untracked or dirty files would be overwritten */
-static int files_would_be_overwritten(struct merge_options *opt)
+typedef int (*handle_func)(struct merge_options *opt,
+			   const struct cache_entry *old,
+			   const struct cache_entry *new,
+			   int idx);
+
+/*
+ * Iterates over orig_index and opt->repo->index, finding entries which differ
+ * between the two (or which exist in only one of the two).  Calls fn()
+ * for each such pair.  If the_index has unmerged entries, fn() will only
+ * be called with the first unmerged entry.  Returns a bitwise ORed value
+ * of all return values from calls to fn().
+ *   Precondition: orig_index has no unmerged entries.
+ */
+static int handle_differing_entries(struct merge_options *opt,
+				    handle_func fn)
 {
 	int i = -1, j = -1;
-	int unsafe = 0;
+	int ret = 0;
 	const struct cache_entry *old, *new;
 	old = get_next(&opt->priv->orig_index, &i);
 	new = get_next(opt->repo->index, &j);
@@ -414,19 +431,19 @@ static int files_would_be_overwritten(struct merge_options *opt)
 		if (cmp == 0)
 			cmp += new->ce_namelen - old->ce_namelen;
 		if (cmp > 0) {
-			unsafe |= handle_would_be_overwritten(opt, old, NULL);
+			ret |= fn(opt, old, NULL, -1);
 			old = get_next(&opt->priv->orig_index, &i);
 		} else if (cmp < 0) {
-			unsafe |= handle_would_be_overwritten(opt, NULL, new);
+			ret |= fn(opt, NULL, new, j);
 			new = get_next(opt->repo->index, &j);
 		} else { /* cmp == 0 */
-			unsafe |= handle_would_be_overwritten(opt, old, new);
+			ret |= fn(opt, old, new, j);
 			old = get_next(&opt->priv->orig_index, &i);
 			new = get_next(opt->repo->index, &j);
 		}
 	}
 
-	return unsafe;
+	return ret;
 }
 
 /*
@@ -494,11 +511,11 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		opt->priv->unpack_opts.index_only = 0;
 		opt->priv->unpack_opts.update = 1;
 		opt->priv->unpack_opts.src_index = &opt->priv->orig_index;
-		if (files_would_be_overwritten(opt)) {
+		if (handle_differing_entries(opt, would_be_overwritten)) {
 			display_error_msgs(&opt->priv->unpack_opts);
 			return -1;
 		}
-		if (update_working_tree(opt))
+		if (handle_differing_entries(opt, update_working_tree))
 			return -1;
 	}
 
