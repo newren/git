@@ -359,6 +359,24 @@ free_buf_and_path:
 	return ret;
 }
 
+static int unlink_file_or_remove_submodule(const char *path)
+{
+	BUG("Unimplemented");
+}
+
+static int merge_entry_contents(struct merge_options *opt,
+				const struct cache_entry *o,
+				const struct cache_entry *a,
+				const struct cache_entry *b,
+				const char *branch1,
+				const char *branch2,
+				const int extra_marker_size,
+				struct cache_entry *result)
+{
+	BUG("Not yet implemented!");
+}
+
+/* Check whether either untracked or dirty files would be overwritten */
 static int would_be_overwritten(struct merge_options *opt,
 				const struct cache_entry *old,
 				const struct cache_entry *new,
@@ -375,14 +393,97 @@ static int would_be_overwritten(struct merge_options *opt,
 	return 0;
 }
 
-/* Update one path in working tree, from old to new */
+/*
+ * Update the working tree entry for a path from old to new.
+ *   Preconditions:
+ *     1) One of old or new can be NULL but not both.
+ *     2) If both old and new are non-NULL, they refer to the same path.
+ *     3) Either
+ *          a) new == NULL && idx == -1
+ *          b) new = opt->repo->index[idx]
+ *     4) if ce_stage(new), then all other unmerged entries for new->name
+ *        will occur after new (i.e. at indexes cache_index+1 and
+ *        cache_index+2)
+ */
 static int update_working_tree(struct merge_options *opt,
 			       const struct cache_entry *old,
 			       const struct cache_entry *new,
 			       int idx)
 {
-	update_file(opt, NULL);
-	return 0;
+	int ret = 0;
+	const struct cache_entry *entry[4] = {NULL, NULL, NULL, NULL};
+	unsigned int stages = 0;
+	unsigned int stage;
+	unsigned int num_unstaged_entries = 0;
+	int do_file_merge = 0;
+	struct cache_entry **cache = opt->repo->index->cache;
+
+	if (old != NULL)
+		/* Remove the file or unlink the submodule */
+		ret = unlink_file_or_remove_submodule(old->name);
+
+	if (ret || !new)
+		return ret;
+
+	if (!ce_stage(new))
+		return update_file(opt, new);
+
+	/*
+	 * At this point, we have conflicted entries for new.  Gather them
+	 * into entry.
+	 */
+	do {
+		stage = ce_stage(cache[idx]);
+		stages |= (1ul << (stage-1));
+		entry[stage] = cache[idx];
+		num_unstaged_entries++;
+	} while (++idx < opt->repo->index->cache_nr &&
+		 new->ce_namelen == cache[idx]->ce_namelen &&
+		 !strncmp(new->name, cache[idx]->name, new->ce_namelen));
+
+	/* Handle different conflict cases */
+	if (num_unstaged_entries == 1) {
+		/* D/F conflict */
+		if (stages != 1)
+			/*
+			 * Nothing to do; whenever we have a D/F conflict we
+			 * create a stage 1 entry with a new name, and only
+			 * it can be written to the working tree.
+			 */
+			return 0;
+		ret = update_file(opt, new);
+	} else if (num_unstaged_entries == 2 && (stages & 1)) {
+		/*
+		 * FIXME: modify(or rename)/delete OR D/F
+		 * conflict; how do I find out which?  Just
+		 * assuming (modify|rename)/delete for now and
+		 * writing out result.
+		 */
+		ret = update_file(opt, new);
+	} else if (num_unstaged_entries == 2) {
+		/*
+		 * both stages 2 & 3 present, so we have an add/add,
+		 * or rename/add, or rename/rename(2to1).
+		 */
+		do_file_merge = 1;
+	} else if (num_unstaged_entries == 3) {
+		do_file_merge = 1;
+	} else {
+		BUG("Unexpected number of unstaged entries (%d) for %s",
+		    num_unstaged_entries, new->name);
+	}
+
+	if (do_file_merge) {
+		struct cache_entry merged_entry;
+		memset(&merged_entry, 0, sizeof(merged_entry));
+		if (merge_entry_contents(opt, entry[1], entry[2], entry[3],
+					 opt->branch1, opt->branch2, 0,
+					 &merged_entry))
+			return -1;
+		ret = update_file(opt, &merged_entry);
+	}
+
+	return ret;
 }
 
 static const struct cache_entry *get_next(struct index_state *index,
