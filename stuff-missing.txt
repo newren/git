@@ -1,0 +1,23 @@
+- The dirmask is not passed through to the unpack_opts.fn (and might be hard
+  to thread through)
+- The unpack_opts.fn is only called for file entries, not directory entries.
+- Lots of checks for index, which will be useless to me (we have separate
+  index matches head checks before merge starts)
+-
+
+Places to edit:
+  - Copy threeway_merge, rename, and use it instead;
+
+Supplemental info I want/need:
+  - Stuff I need to accumulate to use later
+    - messages to print later (dir rename, automerge, conflict types, etc.)
+    - whether the directory for the current path exists on both sides (so
+      that I can safely do o->semi_aggressive stuff)
+    - pointer to D/F conflict int counter (NULL when no D/F conflict)
+      - note for files under D, decrement counter if path is removed
+      - note for F: if counter == 0 when processing, okay to keep path.
+        Otherwise, must move path elsewhere.
+  - At end of merge:
+    - Index to write out
+    - Working tree info to write out
+    - List of renames (in case want to re-use for next rebase commit)

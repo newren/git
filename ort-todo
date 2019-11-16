@@ -174,3 +174,31 @@ Old todo notes (from untracked:remaining-todo):
            perf report
            perf annotate diffcore_rename
         . sysprof
+
+
+Talk Info
+  Title: Scaling the merge machinery, especially with large numbers of renames
+  Abstract:
+
+    An often overlooked dimension of "scaling git" is large numbers of
+    renames. Refactoring workflows can result in many renamed files
+    (particularly when top-level directories are renamed), and large
+    numbers of renames pose a challenge for git's on-the-fly rename
+    detection.
+
+    Efforts to optimize rename detection uncovered multiple different
+    strategies to tackle the problem, and also turned up a few
+    opportunities to optimize the merge machinery for cases involving
+    no renames. The combination of all these strategies working
+    together yield some nice speedups for larger repositories.
+
+    In this talk, I will provide a high-level overview of the merge
+    machinery and how it is used in merging/rebasing/cherry-picking
+    (or at least the pieces related to the optimizations being made),
+    the ideas and insights being leveraged to optimize these
+    codepaths, and some early results from the optimization work.
+
+  Key Takeaways:
+    - git's merge machinery is going to be getting faster, especially
+      for large repos and many renames
+    - a better understanding of how merge/rebase/cherry-pick work
