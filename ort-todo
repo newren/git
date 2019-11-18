@@ -6,6 +6,12 @@ More notes:
     - If it weren't for renames (normal or directory), D/F conflicts remain
       IFF trivial tree merge doesn't remove tree.
 
+Resolution types:
+  - What needs to go in the working tree
+  - What needs to go in the index
+  - What needs to go in index for automerge case (== what goes in working tree)
+  - What needs to go in index in recursive case
+
 Basic ideas:
   - Create a struct per unmerged path, with a hash
     - any messages we will later want to print (dir rename, automerge,
@@ -16,6 +22,15 @@ Basic ideas:
       rename/rename(2to1) cases?)
     - cache_entry to use for eventual tree
     - bitfields: clean, processed
+    - pointer to int for file/dir conflict:
+      - pointers are null for paths not corresponding to any Dir/File conflict
+      - when doing three_way_merge increase the int for each file under Dir
+      - when processing entries, decrement for each file under Dir deleted
+      - when processing the File, if int nonzero then conflict remains
+      - (no entry can need two of these pointers)
+      - do still need full list of files/directories across both sides so that
+        when Dir/File conflict remains we can store it at a new name.  Might
+	get this cheaply from name-hash.c's index_file_exists().
   - Create two indexes (or two sets of process_entries for each unmerged entry):
     - One with higher order entries for the unmerged entries -> writes to index
     - One with what the working tree would look like (w/ conflict markers),
