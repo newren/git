@@ -38,9 +38,11 @@ struct merge_options_internal {
 };
 
 struct stage_data {
+	struct diff_filespec merged_version;
 	struct diff_filespec stages[4]; /* mostly for oid & mode; maybe path */
 	struct rename_conflict_info *rename_conflict_info;
 	unsigned processed:1;
+	unsigned clean:1;
 };
 
 
@@ -295,6 +297,35 @@ static const struct cache_entry *get_next(struct index_state *index,
 }
 #endif
 
+/* Per entry merge function */
+static int process_entry(struct merge_options *opt,
+			 const char *path, struct stage_data *entry)
+{
+	int clean_merge = 1;
+	/* int normalize = opt->renormalize; */
+
+	struct diff_filespec *o = &entry->stages[1];
+	struct diff_filespec *a = &entry->stages[2];
+	struct diff_filespec *b = &entry->stages[3];
+	o->path = a->path = b->path = (char*)path;
+
+	entry->processed = 1;
+	if (entry->rename_conflict_info) {
+		BUG("Not yet handled");
+	/* FIXME: Next two blocks implements an 'ours' strategy. */
+	} else if (a->mode != 0 && !is_null_oid(&a->oid)) {
+		entry->merged_version.mode = a->mode;
+		oidcpy(&entry->merged_version.oid, &a->oid);
+		entry->clean = 1;
+	} else {
+		entry->merged_version.mode = 0;
+		oidcpy(&entry->merged_version.oid, &null_oid);
+		entry->clean = 1;
+	}
+
+	return clean_merge;
+}
+
 /*
  * Drop-in replacement for merge_trees_internal().
  * Differences:
@@ -347,11 +378,13 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		clean = 1;
 	} else {
 		struct strmap *entries;
+		struct hashmap_iter iter;
+		struct str_entry *entry;
 		clean = 0;
 		entries = get_unmerged(opt->repo->index);
-		for (i = entries->nr-1; 0 <= i; i--) {
-			const char *path = entries->items[i].string;
-			struct stage_data *e = entries->items[i].util;
+		strmap_for_each_entry(entries, &iter, entry) {
+			const char *path = entry->item.string;
+			struct stage_data *e = entry->item.util;
 			if (!e->processed) {
 				int ret = process_entry(opt, path, e);
 				if (!ret)
@@ -361,6 +394,15 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					goto cleanup;
 				}
 			}
+		}
+
+	cleanup:
+		strmap_clear(entries, 1);
+		free(entries);
+
+		if (clean < 0) {
+			unpack_trees_finish(opt);
+			return clean;
 		}
 	}
 
