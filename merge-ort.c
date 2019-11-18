@@ -227,143 +227,6 @@ static void unpack_trees_finish(struct merge_options *opt)
 	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
 }
 
-/*
- * Returns whether path was tracked in the index before the merge started
- */
-static int was_tracked(struct merge_options *opt, const char *path)
-{
-	int pos = index_name_pos(&opt->priv->orig_index, path, strlen(path));
-
-	if (0 <= pos)
-		/* we were tracking this path before the merge */
-		return 1;
-
-	return 0;
-}
-
-static int would_lose_untracked(struct merge_options *opt, const char *path)
-{
-	return !was_tracked(opt, path) && file_exists(path);
-}
-
-static int make_room_for_path(struct merge_options *opt, const char *path)
-{
-	int status;
-	const char *msg = _("failed to create path '%s'%s");
-
-	/* Make sure leading directories are created */
-	status = safe_create_leading_directories_const(path);
-	if (status) {
-		if (status == SCLD_EXISTS)
-			/* something else exists */
-			return err(opt, msg, path, _(": perhaps a D/F conflict?"));
-		return err(opt, msg, path, "");
-	}
-
-	/*
-	 * Do not unlink a file in the work tree if we are not
-	 * tracking it.
-	 */
-	if (would_lose_untracked(opt, path))
-		return err(opt, _("refusing to lose untracked file at '%s'"),
-			   path);
-
-	/* Successful unlink is good.. */
-	if (!unlink(path))
-		return 0;
-	/* .. and so is no existing file */
-	if (errno == ENOENT)
-		return 0;
-	/* .. but not some other error (who really cares what?) */
-	return err(opt, msg, path, _(": perhaps a D/F conflict?"));
-}
-
-static int update_file(struct merge_options *opt,
-		       const struct cache_entry *ce)
-{
-	int ret = 0;
-	enum object_type type;
-	void *buf;
-	unsigned long size;
-	char *path;
-
-	if (S_ISGITLINK(ce->ce_mode)) {
-		/*
-		 * We may later decide to recursively descend into the
-		 * submodule directory and update its working tree, but we
-		 * do not do that now.
-		 */
-		return 0;
-	}
-
-	path = xmalloc(ce->ce_namelen+1);
-	memcpy(path, ce->name, ce->ce_namelen);
-	path[ce->ce_namelen] = '\0';
-
-	buf = read_object_file(&ce->oid, &type, &size);
-	if (!buf) {
-		ret = err(opt, _("cannot read object %s '%s'"),
-			   oid_to_hex(&ce->oid), path);
-		goto free_buf_and_path;
-	}
-	if (type != OBJ_BLOB) {
-		ret = err(opt, _("blob expected for %s '%s'"),
-			  oid_to_hex(&ce->oid), path);
-		goto free_buf_and_path;
-	}
-	if (S_ISREG(ce->ce_mode)) {
-		struct strbuf strbuf = STRBUF_INIT;
-		if (convert_to_working_tree(opt->repo->index,
-					    path, buf, size, &strbuf)) {
-			free(buf);
-			size = strbuf.len;
-			buf = strbuf_detach(&strbuf, NULL);
-		}
-	}
-
-	ret = make_room_for_path(opt, path);
-	if (ret < 0)
-		goto free_buf_and_path;
-
-	if (S_ISREG(ce->ce_mode) ||
-	    (!has_symlinks && S_ISLNK(ce->ce_mode))) {
-		int fd;
-		int mode = (ce->ce_mode & 0100 ? 0777 : 0666);
-
-		fd = open(path, O_WRONLY | O_TRUNC | O_CREAT, mode);
-		if (fd < 0) {
-			ret = err(opt, _("failed to open '%s': %s"),
-				  path, strerror(errno));
-			goto free_buf_and_path;
-		}
-		write_in_full(fd, buf, size);
-		close(fd);
-	} else if (S_ISLNK(ce->ce_mode)) {
-		char *lnk = xmemdupz(buf, size);
-		safe_create_leading_directories_const(path);
-		unlink(path);
-		if (symlink(lnk, path))
-			ret = err(opt, _("failed to symlink '%s': %s"),
-				  path, strerror(errno));
-		free(lnk);
-	} else {
-		ret = err(opt,
-			  _("do not know what to do with %06o %s '%s'"),
-			  ce->ce_mode, oid_to_hex(&ce->oid), path);
-	}
-
-free_buf_and_path:
-	free(buf);
-	free(path);
-
-	return ret;
-}
-
-static int unlink_file_or_remove_submodule(const char *path)
-{
-	BUG("Unimplemented");
-}
-
 static int merge_entry_contents(struct merge_options *opt,
 				const struct cache_entry *o,
 				const struct cache_entry *a,
@@ -374,116 +237,6 @@ static int merge_entry_contents(struct merge_options *opt,
 				struct cache_entry *result)
 {
 	BUG("Not yet implemented!");
-}
-
-/* Check whether either untracked or dirty files would be overwritten */
-static int would_be_overwritten(struct merge_options *opt,
-				const struct cache_entry *old,
-				const struct cache_entry *new,
-				int idx)
-{
-	if (!old)
-		return verify_absent(new,
-				     ERROR_WOULD_LOSE_UNTRACKED_OVERWRITTEN,
-				     &opt->priv->unpack_opts);
-	if (!cache_entries_same(old, new))
-		return verify_uptodate(old, &opt->priv->unpack_opts);
-
-	/* no untracked or dirty data would be overwritten by this merge */
-	return 0;
-}
-
-/*
- * Update the working tree entry for a path from old to new.
- *   Preconditions:
- *     1) One of old or new can be NULL but not both.
- *     2) If both old and new are non-NULL, they refer to the same path.
- *     3) Either
- *          a) new == NULL && idx == -1
- *          b) new = opt->repo->index[idx]
- *     4) if ce_stage(new), then all other unmerged entries for new->name
- *        will occur after new (i.e. at indexes cache_index+1 and
- *        cache_index+2)
- */
-static int update_working_tree(struct merge_options *opt,
-			       const struct cache_entry *old,
-			       const struct cache_entry *new,
-			       int idx)
-{
-	int ret = 0;
-	const struct cache_entry *entry[4] = {NULL, NULL, NULL, NULL};
-	unsigned int stages = 0;
-	unsigned int stage;
-	unsigned int num_unstaged_entries = 0;
-	int do_file_merge = 0;
-	struct cache_entry **cache = opt->repo->index->cache;
-
-	if (old != NULL)
-		/* Remove the file or unlink the submodule */
-		ret = unlink_file_or_remove_submodule(old->name);
-
-	if (ret || !new)
-		return ret;
-
-	if (!ce_stage(new))
-		return update_file(opt, new);
-
-	/*
-	 * At this point, we have conflicted entries for new.  Gather them
-	 * into entry.
-	 */
-	do {
-		stage = ce_stage(cache[idx]);
-		stages |= (1ul << (stage-1));
-		entry[stage] = cache[idx];
-		num_unstaged_entries++;
-	} while (++idx < opt->repo->index->cache_nr &&
-		 new->ce_namelen == cache[idx]->ce_namelen &&
-		 !strncmp(new->name, cache[idx]->name, new->ce_namelen));
-
-	/* Handle different conflict cases */
-	if (num_unstaged_entries == 1) {
-		/* D/F conflict */
-		if (stages != 1)
-			/*
-			 * Nothing to do; whenever we have a D/F conflict we
-			 * create a stage 1 entry with a new name, and only
-			 * it can be written to the working tree.
-			 */
-			return 0;
-		ret = update_file(opt, new);
-	} else if (num_unstaged_entries == 2 && (stages & 1)) {
-		/*
-		 * FIXME: modify(or rename)/delete OR D/F
-		 * conflict; how do I find out which?  Just
-		 * assuming (modify|rename)/delete for now and
-		 * writing out result.
-		 */
-		ret = update_file(opt, new);
-	} else if (num_unstaged_entries == 2) {
-		/*
-		 * both stages 2 & 3 present, so we have an add/add,
-		 * or rename/add, or rename/rename(2to1).
-		 */
-		do_file_merge = 1;
-	} else if (num_unstaged_entries == 3) {
-		do_file_merge = 1;
-	} else {
-		BUG("Unexpected number of unstaged entries (%d) for %s",
-		    num_unstaged_entries, new->name);
-	}
-
-	if (do_file_merge) {
-		struct cache_entry merged_entry;
-		memset(&merged_entry, 0, sizeof(merged_entry));
-		if (merge_entry_contents(opt, entry[1], entry[2], entry[3],
-					 opt->branch1, opt->branch2, 0,
-					 &merged_entry))
-			return -1;
-		ret = update_file(opt, &merged_entry);
-	}
-
-	return ret;
 }
 
 static const struct cache_entry *get_next(struct index_state *index,
@@ -501,50 +254,6 @@ static const struct cache_entry *get_next(struct index_state *index,
 			; /* skip */
 
 	return (*cur < index->cache_nr) ? index->cache[*cur] : NULL;
-}
-
-typedef int (*handle_func)(struct merge_options *opt,
-			   const struct cache_entry *old,
-			   const struct cache_entry *new,
-			   int idx);
-
-/*
- * Iterates over orig_index and opt->repo->index, finding entries which differ
- * between the two (or which exist in only one of the two).  Calls fn()
- * for each such pair.  If the_index has unmerged entries, fn() will only
- * be called with the first unmerged entry.  Returns a bitwise ORed value
- * of all return values from calls to fn().
- *   Precondition: orig_index has no unmerged entries.
- */
-static int handle_differing_entries(struct merge_options *opt,
-				    handle_func fn)
-{
-	int i = -1, j = -1;
-	int ret = 0;
-	const struct cache_entry *old, *new;
-	old = get_next(&opt->priv->orig_index, &i);
-	new = get_next(opt->repo->index, &j);
-
-	while (old || new) {
-		int minlen = old->ce_namelen < new->ce_namelen ?
-			     old->ce_namelen : new->ce_namelen;
-		int cmp = strncmp(old->name, new->name, minlen);
-		if (cmp == 0)
-			cmp += new->ce_namelen - old->ce_namelen;
-		if (cmp > 0) {
-			ret |= fn(opt, old, NULL, -1);
-			old = get_next(&opt->priv->orig_index, &i);
-		} else if (cmp < 0) {
-			ret |= fn(opt, NULL, new, j);
-			new = get_next(opt->repo->index, &j);
-		} else { /* cmp == 0 */
-			ret |= fn(opt, old, new, j);
-			old = get_next(&opt->priv->orig_index, &i);
-			new = get_next(opt->repo->index, &j);
-		}
-	}
-
-	return ret;
 }
 
 /*
@@ -612,12 +321,14 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		opt->priv->unpack_opts.index_only = 0;
 		opt->priv->unpack_opts.update = 1;
 		opt->priv->unpack_opts.src_index = &opt->priv->orig_index;
+		/*
 		if (handle_differing_entries(opt, would_be_overwritten)) {
 			display_error_msgs(&opt->priv->unpack_opts);
 			return -1;
 		}
 		if (handle_differing_entries(opt, update_working_tree))
 			return -1;
+		*/
 	}
 
 	unpack_trees_finish(opt);
