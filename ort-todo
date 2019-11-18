@@ -1,3 +1,11 @@
+More notes:
+  - Nuke all worktree updating code.  Instead:
+    - Create a tree representing working directory files
+    - Do equivalent of 'git checkout <tree>' (except don't update index)
+  - Massively simplify D/F conflicts:
+    - If it weren't for renames (normal or directory), D/F conflicts remain
+      IFF trivial tree merge doesn't remove tree.
+
 Basic ideas:
   - Create a struct per unmerged path, with a hash
     - any messages we will later want to print (dir rename, automerge,

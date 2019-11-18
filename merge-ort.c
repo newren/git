@@ -25,6 +25,7 @@
 #include "diffcore.h"
 #include "dir.h"
 #include "object-store.h"
+#include "strmap.h"
 #include "unpack-trees.h"
 
 struct merge_options_internal {
@@ -35,6 +36,13 @@ struct merge_options_internal {
 	struct unpack_trees_options unpack_opts;
 	struct index_state orig_index;
 };
+
+struct stage_data {
+	struct diff_filespec stages[4]; /* mostly for oid & mode; maybe path */
+	struct rename_conflict_info *rename_conflict_info;
+	unsigned processed:1;
+};
+
 
 /***** Copy-paste static functions from merge-recursive.c *****/
 
@@ -227,6 +235,36 @@ static void unpack_trees_finish(struct merge_options *opt)
 	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
 }
 
+/*
+ * Create a dictionary mapping file names to stage_data objects. The
+ * dictionary contains one entry for every path with a non-zero stage entry.
+ */
+static struct strmap *get_unmerged(struct index_state *istate)
+{
+	struct strmap *unmerged = xcalloc(1, sizeof(*unmerged));
+	int i;
+
+	/* FIXME (use this?): unmerged->strdup_strings = 1; */
+
+	for (i = 0; i < istate->cache_nr; i++) {
+		struct stage_data *e;
+		const struct cache_entry *ce = istate->cache[i];
+		if (!ce_stage(ce))
+			continue;
+
+		e = strmap_get(unmerged, ce->name);
+		if (!e) {
+			e = xcalloc(1, sizeof(*e));
+			strmap_put(unmerged, ce->name, e);
+		}
+		e->stages[ce_stage(ce)].mode = ce->ce_mode;
+		oidcpy(&e->stages[ce_stage(ce)].oid, &ce->oid);
+	}
+
+	return unmerged;
+}
+
+#if 0
 static int merge_entry_contents(struct merge_options *opt,
 				const struct cache_entry *o,
 				const struct cache_entry *a,
@@ -255,6 +293,7 @@ static const struct cache_entry *get_next(struct index_state *index,
 
 	return (*cur < index->cache_nr) ? index->cache[*cur] : NULL;
 }
+#endif
 
 /*
  * Drop-in replacement for merge_trees_internal().
@@ -300,11 +339,29 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 	}
 
+	/*
+	 * FIXME: O(N) just to determine if unmerged, in addition to another
+	 * O(N) to walk the index?!?
+	 */
 	if (!unmerged_index(istate)) {
 		clean = 1;
 	} else {
+		struct strmap *entries;
 		clean = 0;
-		BUG("not yet implemented");
+		entries = get_unmerged(opt->repo->index);
+		for (i = entries->nr-1; 0 <= i; i--) {
+			const char *path = entries->items[i].string;
+			struct stage_data *e = entries->items[i].util;
+			if (!e->processed) {
+				int ret = process_entry(opt, path, e);
+				if (!ret)
+					clean = 0;
+				else if (ret < 0) {
+					clean = ret;
+					goto cleanup;
+				}
+			}
+		}
 	}
 
 	if (opt->priv->call_depth &&
