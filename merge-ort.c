@@ -199,6 +199,27 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 
 /***** End copy-paste static functions from merge-recursive.c *****/
 
+static int threeway_simple_merge_callback(int n,
+					  unsigned long mask,
+					  unsigned long dirmask,
+					  struct name_entry *names,
+					  struct traverse_info *info)
+{
+	assert(n==3);
+
+	if (unpack_nondirectories(n, mask, dirmask, src, names, info) < 0)
+		return -1;
+
+	if (dirmask) {
+		if (traverse_trees_recursive(n, dirmask, mask & ~dirmask,
+					     names, info) < 0)
+			return -1;
+		return mask;
+	}
+
+	return mask;
+}
+
 static int unpack_trees_start(struct merge_options *opt,
 			      struct tree *common,
 			      struct tree *head,
@@ -206,29 +227,22 @@ static int unpack_trees_start(struct merge_options *opt,
 {
 	int rc;
 	struct tree_desc t[3];
-	struct index_state tmp_index = { NULL };
+	struct traverse_info info;
 
-	memset(&opt->priv->unpack_opts, 0, sizeof(opt->priv->unpack_opts));
-	opt->priv->unpack_opts.index_only = 1;
-	opt->priv->unpack_opts.merge = 1;
-	opt->priv->unpack_opts.head_idx = 2;
-	opt->priv->unpack_opts.fn = threeway_merge;
-	opt->priv->unpack_opts.src_index = opt->repo->index;
-	opt->priv->unpack_opts.dst_index = &tmp_index;
-	opt->priv->unpack_opts.aggressive = !merge_detect_rename(opt);
-	setup_unpack_trees_porcelain(&opt->priv->unpack_opts, "merge");
+	setup_traverse_info(&info, "");
+	info.fn = threeway_simple_merge_callback;
+	info.data = opt;
+	info.show_all_errors = 1;
 
 	init_tree_desc_from_tree(t+0, common);
 	init_tree_desc_from_tree(t+1, head);
 	init_tree_desc_from_tree(t+2, merge);
 
-	rc = unpack_trees(3, t, &opt->priv->unpack_opts);
-	cache_tree_free(&opt->repo->index->cache_tree);
+	trace_performance_enter();
+	ret = traverse_trees(NULL, 3, t, &info);
+	trace_performance_leave("traverse_trees");
 
-	opt->priv->orig_index = *opt->repo->index;
-	*opt->repo->index = tmp_index;
-
-	return rc;
+	return ret;
 }
 
 static void unpack_trees_finish(struct merge_options *opt)
