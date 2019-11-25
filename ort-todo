@@ -1,3 +1,7 @@
+Other ideas:
+  - Use mempool or other block allocation
+  - See a849735bfbf159b98ead9ef4c843dc8acfd372f0
+
 More notes:
   - Nuke all worktree updating code.  Instead:
     - Create a tree representing working directory files

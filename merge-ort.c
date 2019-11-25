@@ -205,16 +205,71 @@ static int threeway_simple_merge_callback(int n,
 					  struct name_entry *names,
 					  struct traverse_info *info)
 {
-	assert(n==3);
+	int i;
+	struct merge_options *opt = info->data;
+	unsigned long conflicts = info->df_conflicts | dirmask;
+	char *path = NULL;
 
-	if (unpack_nondirectories(n, mask, dirmask, src, names, info) < 0)
+	if (n != 3)
+		BUG("Called threeway_simple_merge_callback wrong");
+
+	// If mask == dirmask and O == A or O == B, resolve & return immediately
+	// If mask != dirmask (i.e. some files), handle those
+
+	// Code for mask != dirmask, from unpack_nondirectories()
+	for (i = 0; i < 3; i++) {
+		char *compare;
+		unsigned mode;
+		struct object_id oid;
+		struct name_entry *cur = names + i;
+
+		/*
+		unsigned int bit = 1ul << i;
+		if (conflicts & bit) {
+			src[i + o->merge] = o->df_conflict_entry;
+			continue;
+		}
+		*/
+
+		size_t len = traverse_path_len(info, cur->pathlen);
+		/* len+1 because the cache_entry allocates space for NUL */
+		make_traverse_path(compare, len + 1, info, cur->path, cur->pathlen);
+		if (i==0) {
+			path = compare;
+		} else {
+			assert(!strcmp(path, compare));
+		}
+
+		mode = cur->mode;
+		oidcpy(&oid, &cur->oid);
+	}
+	if (call_unpack_fn(<sets of (oid, mode)>, opt) < 0)
 		return -1;
 
+	// If dirmask, recurse into subdirectories
 	if (dirmask) {
-		if (traverse_trees_recursive(n, dirmask, mask & ~dirmask,
-					     names, info) < 0)
+		struct tree_desc t[3];
+		void *buf[3] = {NULL,};
+		int ret;
+
+		for (i = 0; i < 3; i++, dirmask >>= 1) {
+			if (i > 0 && are_same_oid(&names[i], &names[i - 1]))
+				t[i] = t[i - 1];
+			else {
+				const struct object_id *oid = NULL;
+				if (dirmask & 1)
+					oid = &names[i].oid;
+				buf[i] = fill_tree_descriptor(the_repository, t + i, oid);
+			}
+		}
+
+		ret = traverse_trees(NULL, 3, t, &newinfo);
+
+		for (i = 0; i < 3; i++)
+			free(buf[i]);
+
+		if (ret < 0)
 			return -1;
-		return mask;
 	}
 
 	return mask;
@@ -225,7 +280,7 @@ static int unpack_trees_start(struct merge_options *opt,
 			      struct tree *head,
 			      struct tree *merge)
 {
-	int rc;
+	int ret;
 	struct tree_desc t[3];
 	struct traverse_info info;
 
