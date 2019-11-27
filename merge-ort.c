@@ -205,6 +205,7 @@ static int threeway_simple_merge_callback(int n,
 					  struct name_entry *names,
 					  struct traverse_info *info)
 {
+#if 0
 	int i;
 	struct merge_options *opt = info->data;
 	unsigned long conflicts = info->df_conflicts | dirmask;
@@ -272,6 +273,7 @@ static int threeway_simple_merge_callback(int n,
 			return -1;
 	}
 
+#endif
 	return mask;
 }
 
