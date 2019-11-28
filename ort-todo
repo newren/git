@@ -1,6 +1,9 @@
 Other ideas:
   - Use mempool or other block allocation
   - See a849735bfbf159b98ead9ef4c843dc8acfd372f0
+  - For path conflicts (or binary files), store conflict info in file named
+      filename[0:-1]+'\x01'+filename[-1]+'.path-conflicts'
+    at least for merged version.  Maybe store this at stage 1 in index?
 
 More notes:
   - Nuke all worktree updating code.  Instead:
