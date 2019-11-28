@@ -29,18 +29,24 @@
 #include "unpack-trees.h"
 
 struct merge_options_internal {
+	struct strmap merged;   /* maps path -> version_info */
+	struct strmap unmerged; /* maps path -> conflict_info */
 	int call_depth;
 	int needed_rename_limit;
-	struct hashmap current_file_dir_set;
-	struct string_list df_conflict_file_set;
-	struct unpack_trees_options unpack_opts;
-	struct index_state orig_index;
 };
 
-struct stage_data {
-	struct diff_filespec merged_version;
-	struct diff_filespec stages[4]; /* mostly for oid & mode; maybe path */
-	struct rename_conflict_info *rename_conflict_info;
+struct version_info {
+	unsigned short mode;
+	struct object_id oid;
+	/* char *name; */
+};
+
+struct conflict_info {
+	/*
+	 * stages 1-3 are higher order stages; stage 0 will be filled with
+	 * the content merge, which may have conflict markers.
+	 */
+	struct version_info stages[4];
 	unsigned processed:1;
 	unsigned clean:1;
 };
@@ -277,10 +283,10 @@ static int threeway_simple_merge_callback(int n,
 	return mask;
 }
 
-static int unpack_trees_start(struct merge_options *opt,
-			      struct tree *common,
-			      struct tree *head,
-			      struct tree *merge)
+static int preliminary_merge_trees(struct merge_options *opt,
+				   struct tree *common,
+				   struct tree *head,
+				   struct tree *merge)
 {
 	int ret;
 	struct tree_desc t[3];
@@ -300,41 +306,6 @@ static int unpack_trees_start(struct merge_options *opt,
 	trace_performance_leave("traverse_trees");
 
 	return ret;
-}
-
-static void unpack_trees_finish(struct merge_options *opt)
-{
-	discard_index(&opt->priv->orig_index);
-	clear_unpack_trees_porcelain(&opt->priv->unpack_opts);
-}
-
-/*
- * Create a dictionary mapping file names to stage_data objects. The
- * dictionary contains one entry for every path with a non-zero stage entry.
- */
-static struct strmap *get_unmerged(struct index_state *istate)
-{
-	struct strmap *unmerged = xcalloc(1, sizeof(*unmerged));
-	int i;
-
-	/* FIXME (use this?): unmerged->strdup_strings = 1; */
-
-	for (i = 0; i < istate->cache_nr; i++) {
-		struct stage_data *e;
-		const struct cache_entry *ce = istate->cache[i];
-		if (!ce_stage(ce))
-			continue;
-
-		e = strmap_get(unmerged, ce->name);
-		if (!e) {
-			e = xcalloc(1, sizeof(*e));
-			strmap_put(unmerged, ce->name, e);
-		}
-		e->stages[ce_stage(ce)].mode = ce->ce_mode;
-		oidcpy(&e->stages[ce_stage(ce)].oid, &ce->oid);
-	}
-
-	return unmerged;
 }
 
 #if 0
@@ -370,27 +341,26 @@ static const struct cache_entry *get_next(struct index_state *index,
 
 /* Per entry merge function */
 static int process_entry(struct merge_options *opt,
-			 const char *path, struct stage_data *entry)
+			 const char *path, struct conflict_info *entry)
 {
 	int clean_merge = 1;
 	/* int normalize = opt->renormalize; */
 
-	struct diff_filespec *o = &entry->stages[1];
-	struct diff_filespec *a = &entry->stages[2];
-	struct diff_filespec *b = &entry->stages[3];
-	o->path = a->path = b->path = (char*)path;
+	//struct version_info *o = &entry->stages[1];
+	struct version_info *a = &entry->stages[2];
+	//struct version_info *b = &entry->stages[3];
+	/* o->path = a->path = b->path = (char*)path; */
 
 	entry->processed = 1;
-	if (entry->rename_conflict_info) {
-		BUG("Not yet handled");
+	/* FIXME: Handle renamed cases */
 	/* FIXME: Next two blocks implements an 'ours' strategy. */
-	} else if (a->mode != 0 && !is_null_oid(&a->oid)) {
-		entry->merged_version.mode = a->mode;
-		oidcpy(&entry->merged_version.oid, &a->oid);
+	if (a->mode != 0 && !is_null_oid(&a->oid)) {
+		entry->stages[0].mode = a->mode;
+		oidcpy(&entry->stages[0].oid, &a->oid);
 		entry->clean = 1;
 	} else {
-		entry->merged_version.mode = 0;
-		oidcpy(&entry->merged_version.oid, &null_oid);
+		entry->stages[0].mode = 0;
+		oidcpy(&entry->stages[0].oid, &null_oid);
 		entry->clean = 1;
 	}
 
@@ -410,7 +380,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree *merge_base,
 					   struct tree **result)
 {
-	struct index_state *istate = opt->repo->index;
 	int code, clean;
 
 	if (opt->priv->call_depth) {
@@ -430,50 +399,33 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return 1;
 	}
 
-	code = unpack_trees_start(opt, merge_base, head, merge);
+	code = preliminary_merge_trees(opt, merge_base, head, merge);
 
 	if (code != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
 			err(opt, _("merging of trees %s and %s failed"),
 			    oid_to_hex(&head->object.oid),
 			    oid_to_hex(&merge->object.oid));
-		unpack_trees_finish(opt);
 		return -1;
 	}
 
-	/*
-	 * FIXME: O(N) just to determine if unmerged, in addition to another
-	 * O(N) to walk the index?!?
-	 */
-	if (!unmerged_index(istate)) {
+	if (strmap_empty(&opt->priv->unmerged)) {
 		clean = 1;
 	} else {
-		struct strmap *entries;
 		struct hashmap_iter iter;
 		struct str_entry *entry;
 		clean = 0;
-		entries = get_unmerged(opt->repo->index);
-		strmap_for_each_entry(entries, &iter, entry) {
+		strmap_for_each_entry(&opt->priv->unmerged, &iter, entry) {
 			const char *path = entry->item.string;
-			struct stage_data *e = entry->item.util;
+			struct conflict_info *e = entry->item.util;
 			if (!e->processed) {
 				int ret = process_entry(opt, path, e);
 				if (!ret)
 					clean = 0;
 				else if (ret < 0) {
-					clean = ret;
-					goto cleanup;
+					return ret;
 				}
 			}
-		}
-
-	cleanup:
-		strmap_clear(entries, 1);
-		free(entries);
-
-		if (clean < 0) {
-			unpack_trees_finish(opt);
-			return clean;
 		}
 	}
 
@@ -481,27 +433,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	    !(*result = write_in_core_index_as_tree(opt->repo)))
 		return -1;
 
-	if (!opt->priv->call_depth) {
-		/*
-		 * Update opt->priv->unpack_opts so that functions from
-		 * unpack_trees (such as verify_uptodate() which checks
-		 * src_index) let us now check for updates in the working
-		 * tree against the original index.
-		 */
-		opt->priv->unpack_opts.index_only = 0;
-		opt->priv->unpack_opts.update = 1;
-		opt->priv->unpack_opts.src_index = &opt->priv->orig_index;
-		/*
-		if (handle_differing_entries(opt, would_be_overwritten)) {
-			display_error_msgs(&opt->priv->unpack_opts);
-			return -1;
-		}
-		if (handle_differing_entries(opt, update_working_tree))
-			return -1;
-		*/
-	}
-
-	unpack_trees_finish(opt);
 	return clean;
 }
 
@@ -655,7 +586,6 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	}
 
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
-	string_list_init(&opt->priv->df_conflict_file_set, 1);
 	return 0;
 }
 
@@ -667,6 +597,9 @@ static void merge_finalize(struct merge_options *opt)
 	if (show(opt, 2))
 		diff_warn_rename_limit("merge.renamelimit",
 				       opt->priv->needed_rename_limit, 0);
+	strmap_clear(&opt->priv->unmerged, 1);
+	strmap_clear(&opt->priv->merged, 1);
+
 	FREE_AND_NULL(opt->priv);
 }
 
