@@ -31,6 +31,7 @@
 struct merge_options_internal {
 	struct strmap merged;   /* maps path -> version_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
+	struct strmap rename_from; /* set of possible rename source paths */
 	int call_depth;
 	int needed_rename_limit;
 };
@@ -38,15 +39,19 @@ struct merge_options_internal {
 struct version_info {
 	unsigned short mode;
 	struct object_id oid;
-	/* char *name; */
+};
+
+struct merged_info {
+	struct version_info result;
+	size_t path_len;
+	size_t basename_len;
 };
 
 struct conflict_info {
-	/*
-	 * stages 1-3 are higher order stages; stage 0 will be filled with
-	 * the content merge, which may have conflict markers.
-	 */
-	struct version_info stages[4];
+	struct merged_info merged;
+	struct version_info stages[3];
+	unsigned *df_counter[3];
+	unsigned filemask:3;
 	unsigned processed:1;
 	unsigned clean:1;
 };
@@ -205,6 +210,39 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 
 /***** End copy-paste static functions from merge-recursive.c *****/
 
+static void setup_path_info(struct string_list_item *result,
+			    struct traverse_info *info,
+			    struct name_entry *names,
+			    unsigned filemask,
+			    int clean)
+{
+	size_t len = traverse_path_len(info, names->pathlen);
+	char *fullpath = xmalloc(len);
+	struct conflict_info *path_info = xcalloc(1, sizeof(*path_info));
+	int i;
+
+	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
+	fullpath = xcalloc(1, clean ? sizeof(struct merged_info) :
+				      sizeof(struct conflict_info));
+	path_info->merged.path_len = len;
+	path_info->merged.basename_len = names->pathlen;
+	if (clean) {
+		path_info->merged.result.mode = names->mode;
+		oidcpy(&path_info->merged.result.oid, &names->oid);
+	} else {
+		for (i = 0; i < 3; i++) {
+			if (!(filemask & (1ul << i)))
+				continue;
+			path_info->stages[i].mode = names[i].mode;
+			oidcpy(&path_info->stages[i].oid, &names[i].oid);
+		}
+		path_info->filemask = filemask;
+		/* path_info->df_conflicts = ????; */
+	}
+	result->string = fullpath;
+	result->util = path_info;
+}
+
 static int threeway_simple_merge_callback(int n,
 					  unsigned long mask,
 					  unsigned long dirmask,
@@ -212,55 +250,97 @@ static int threeway_simple_merge_callback(int n,
 					  struct traverse_info *info)
 {
 #if 0
-	int i;
-	struct merge_options *opt = info->data;
 	unsigned long conflicts = info->df_conflicts | dirmask;
-	char *path = NULL;
+#endif
+	unsigned base_null, head_null, side_null;
+	unsigned head_match = 0, side_match = 0;
+	unsigned head_or_side_are_trees;
+	unsigned long filemask = mask & ~dirmask;
+	struct string_list_item entry;
+	struct merge_options_internal *opt = info->data;
 
 	if (n != 3)
 		BUG("Called threeway_simple_merge_callback wrong");
 
-	// If mask == dirmask and O == A or O == B, resolve & return immediately
-	// If mask != dirmask (i.e. some files), handle those
+	base_null = !(mask & 1);
+	head_null = !(mask & 2);
+	side_null = !(mask & 4);
+	head_or_side_are_trees = (dirmask & 6);
+	/* FIXME: Remove these sanity checks at some point */
+	assert(base_null == is_null_oid(&names[0].oid));
+	assert(head_null == is_null_oid(&names[1].oid));
+	assert(side_null == is_null_oid(&names[2].oid));
 
-	// Code for mask != dirmask, from unpack_nondirectories()
-	for (i = 0; i < 3; i++) {
-		char *compare;
-		unsigned mode;
-		struct object_id oid;
-		struct name_entry *cur = names + i;
-
-		/*
-		unsigned int bit = 1ul << i;
-		if (conflicts & bit) {
-			src[i + o->merge] = o->df_conflict_entry;
-			continue;
+	/* If head matches base or remote matches base, we can resolve early */
+	if (!base_null && !head_null) {
+		head_match = oideq(&names[0].oid, &names[1].oid);
+		if (head_match) {
+			/* head_match => use side version as resolution */
+			setup_path_info(&entry, info, names+2, filemask, 1);
+			strmap_put(&opt->merged, entry.string, entry.util);
 		}
-		*/
-
-		size_t len = traverse_path_len(info, cur->pathlen);
-		/* len+1 because the cache_entry allocates space for NUL */
-		make_traverse_path(compare, len + 1, info, cur->path, cur->pathlen);
-		if (i==0) {
-			path = compare;
-		} else {
-			assert(!strcmp(path, compare));
-		}
-
-		mode = cur->mode;
-		oidcpy(&oid, &cur->oid);
+		return mask;
 	}
-	if (call_unpack_fn(<sets of (oid, mode)>, opt) < 0)
-		return -1;
+	if (!base_null && !side_null) {
+		side_match = oideq(&names[0].oid, &names[2].oid);
+		if (side_match) {
+			/* side_match => use head version as resolution */
+			setup_path_info(&entry, info, names+1, filemask, 1);
+			strmap_put(&opt->merged, entry.string, entry.util);
+		}
+		return mask;
+	}
+
+	/*
+	 * If head & side are files and match, we can resolve; otherwise,
+	 * out of the remaining cases, we have some kind of conflict (though
+	 * rename detection elsewhere might allow us to unconflict).
+	 */
+	if (!head_null && !side_null && !head_or_side_are_trees &&
+	    oideq(&names[1].oid, &names[2].oid)) {
+		/*
+		 * head & side_match and both are files =>
+		 *   use head (==side) version as resolution, but don't return
+		 *   early (may need to recurse into base if it's a tree)
+		 */
+		setup_path_info(&entry, info, names+1, filemask, 1);
+		strmap_put(&opt->merged, entry.string, entry.util);
+	} else {
+		setup_path_info(&entry, info, names, filemask, 0);
+		strmap_put(&opt->unmerged, entry.string, entry.util);
+	}
+
+	/* Record possible rename sources. */
+	if ((filemask & 1) && filemask != 7)
+		/*
+		 * base is a file and either head or side isn't, so record
+		 * this as a possible rename source.
+		 */
+		strmap_put(&opt->rename_from, entry.string, NULL);
 
 	// If dirmask, recurse into subdirectories
 	if (dirmask) {
+		struct traverse_info newinfo;
+		struct name_entry *p;
 		struct tree_desc t[3];
 		void *buf[3] = {NULL,};
 		int ret;
+		int i;
+
+		p = names;
+		while (!p->mode)
+			p++;
+
+		newinfo = *info;
+		newinfo.prev = info;
+		newinfo.name = p->path;
+		newinfo.namelen = p->pathlen;
+		newinfo.mode = p->mode;
+		newinfo.pathlen = st_add3(newinfo.pathlen, p->pathlen, 1);
+		newinfo.df_conflicts |= (mask & ~dirmask);
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
-			if (i > 0 && are_same_oid(&names[i], &names[i - 1]))
+			if (i > 0 && oideq(&names[i].oid, &names[i - 1].oid))
 				t[i] = t[i - 1];
 			else {
 				const struct object_id *oid = NULL;
@@ -278,8 +358,6 @@ static int threeway_simple_merge_callback(int n,
 		if (ret < 0)
 			return -1;
 	}
-
-#endif
 	return mask;
 }
 
@@ -585,6 +663,9 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		return -1;
 	}
 
+	strmap_init(&opt->priv->merged, 0);
+	strmap_init(&opt->priv->unmerged, 0);
+	strmap_init(&opt->priv->rename_from, 0);
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	return 0;
 }
@@ -597,6 +678,17 @@ static void merge_finalize(struct merge_options *opt)
 	if (show(opt, 2))
 		diff_warn_rename_limit("merge.renamelimit",
 				       opt->priv->needed_rename_limit, 0);
+
+	/*
+	 * We marked opt->priv->[un]merged with strdup_strings = 0, so that
+	 * we wouldn't have to make another copy of the fullpath created by
+	 * make_traverse_path from setup_path_info().  But, now that we've
+	 * used it and have no other references to these strings, it is time
+	 * to deallocate them, which we do by just setting strdup_string = 1
+	 * before the strmaps are cleared.
+	 */
+	opt->priv->unmerged.strdup_strings = 1;
+	opt->priv->merged.strdup_strings = 1;
 	strmap_clear(&opt->priv->unmerged, 1);
 	strmap_clear(&opt->priv->merged, 1);
 
