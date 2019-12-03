@@ -186,10 +186,12 @@ static void output_commit_title(struct merge_options *opt, struct commit *commit
 	flush_output(opt);
 }
 
+#if 0
 static inline int merge_detect_rename(struct merge_options *opt)
 {
 	return (opt->detect_renames >= 0) ? opt->detect_renames : 1;
 }
+#endif
 
 static void init_tree_desc_from_tree(struct tree_desc *desc, struct tree *tree)
 {
