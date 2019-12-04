@@ -219,13 +219,13 @@ static void setup_path_info(struct string_list_item *result,
 			    int clean)
 {
 	size_t len = traverse_path_len(info, names->pathlen);
-	char *fullpath = xmalloc(len);
+	char *fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
 	struct conflict_info *path_info = xcalloc(1, sizeof(*path_info));
 	int i;
 
 	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
-	fullpath = xcalloc(1, clean ? sizeof(struct merged_info) :
-				      sizeof(struct conflict_info));
+	path_info = xcalloc(1, clean ? sizeof(struct merged_info) :
+				       sizeof(struct conflict_info));
 	path_info->merged.path_len = len;
 	path_info->merged.basename_len = names->pathlen;
 	if (clean) {
