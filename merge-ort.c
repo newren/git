@@ -251,93 +251,88 @@ static int threeway_simple_merge_callback(int n,
 					  struct traverse_info *info)
 {
 	/*
-	 * n is 3.  Or BUG, see below.
+	 * n is 3.  Always.
 	 * common ancestor (base) stored in index 0, uses a mask of 1
 	 * parent 1        (par1) stored in index 1, uses a mask of 2
 	 * parent 2        (par2) stored in index 2, uses a mask of 3
 	 */
+	struct merge_options_internal *opt = info->data;
+	struct string_list_item entry;
+	unsigned long filemask = mask & ~dirmask;
 #if 0
 	unsigned long conflicts = info->df_conflicts | dirmask;
 #endif
-	unsigned base_null, par1_null, par2_null;
-	unsigned par1_or_par2_are_trees;
-	unsigned long filemask = mask & ~dirmask;
-	unsigned par1_match = oideq(&names[0].oid, &names[1].oid);
-	unsigned par2_match = oideq(&names[0].oid, &names[2].oid);
-	struct string_list_item entry;
-	struct merge_options_internal *opt = info->data;
+	unsigned base_null = !(mask & 1);
+	unsigned par1_null = !(mask & 2);
+	unsigned par2_null = !(mask & 4);
+	unsigned par1_is_tree = (dirmask & 2);
+	unsigned par2_is_tree = (dirmask & 4);
+	unsigned par1_matches_base = oideq(&names[0].oid, &names[1].oid);
+	unsigned par2_matches_base = oideq(&names[0].oid, &names[2].oid);
 
+	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
 		BUG("Called threeway_simple_merge_callback wrong");
 
-	base_null = !(mask & 1);
-	par1_null = !(mask & 2);
-	par2_null = !(mask & 4);
-	par1_or_par2_are_trees = (dirmask & 6);
-	/* FIXME: Remove these sanity checks at some point */
+	/*
+	 * A bunch of sanity checks verifying that traverse_trees() calls
+	 * us the way I expect.  Could just remove these at some point,
+	 * though maybe they are helpful to future code readers.
+	 */
 	assert(base_null == is_null_oid(&names[0].oid));
 	assert(par1_null == is_null_oid(&names[1].oid));
 	assert(par2_null == is_null_oid(&names[2].oid));
+	assert(!base_null || !par1_null || !par2_null);
+	assert(mask > 0 && mask < 8);
 
 	/*
-	 * If par1 matches base, we can resolve early.  We can ignore base
-	 * (and everything under it if it's a tree) as a possible rename
-	 * source for something on par2's side of history because a three
-	 * way merge of base matching par1 will just take whatever par2
-	 * had anyway.
+	 * If base, par1, and par2 all match, we can resolve early.  Even
+	 * if these are trees, there will be no renames or anything
+	 * underneath.
 	 */
-	if (!base_null && !par1_null) {
+	if (par1_matches_base && par2_matches_base) {
 
-		if (par1_match) {
-			/* par1_match => use par2 version as resolution */
-			setup_path_info(&entry, info, names+2, filemask, 1);
-			strmap_put(&opt->merged, entry.string, entry.util);
-		}
+		setup_path_info(&entry, info, names, filemask, 1);
+		strmap_put(&opt->merged, entry.string, entry.util);
 		return mask;
 	}
 
 	/*
-	 * If par2 matches base, we can resolve early.  As with the previous
-	 * case, we can ignore base as a possible rename for anything on
-	 * par1's side of history.
+	 * If par1 matches base, and par2 is not a tree, we can resolve
+	 * early because par1 matching base implies:
+	 *    * par1 has no interesting contents or changes; use par2 versions
+	 *    * par1 has no content changes to include in renames on par2 side
+	 *    * par1 has no new files to move with par2's directory renames
+	 * We can't resolve early if par2 is a tree though, because there
+	 * may be new files on par2's side that are rename targets that need
+	 * to be merged with changes from elsewhere on par1's side of history.
 	 */
-	if (!base_null && !par2_null) {
-		if (par2_match) {
-			/* par2_match => use par1 version as resolution */
-			setup_path_info(&entry, info, names+1, filemask, 1);
-			strmap_put(&opt->merged, entry.string, entry.util);
-		}
+	if (!par1_null && par1_matches_base && !par2_is_tree) {
+		/* par1_matches_base => use par2 version as resolution */
+		setup_path_info(&entry, info, names+2, filemask, 1);
+		strmap_put(&opt->merged, entry.string, entry.util);
 		return mask;
 	}
 
 	/*
-	 * If par1 & par2 are files and match, we can resolve.  Any renames
-	 * which have either of these two as targets can be ignored because
-	 * a three-way merge would end up matching these two files.  Also,
-	 * in the rare case of finding different matching bases, we'd end
-	 * up with a rename/rename(2to1) case but which wouldn't conflict
-	 * because the contents of both sides match so we can again ignore
-	 * the rename.
+	 * If par2 matches base, and par1 is not a tree, we can resolve
+	 * early.  Same reasoning as for above when par1 and par2 swapped.
 	 */
-	if (!par1_null && !par2_null && !par1_or_par2_are_trees &&
-	    oideq(&names[1].oid, &names[2].oid)) {
-		/*
-		 * par1 & par2_match and both are files =>
-		 *   use par1 (==par2) version as resolution, but don't return
-		 *   early (may need to recurse into base if it's a tree)
-		 */
+	if (!par2_null && par2_matches_base && !par1_is_tree) {
+		/* par2_matches_base => use par1 version as resolution */
 		setup_path_info(&entry, info, names+1, filemask, 1);
 		strmap_put(&opt->merged, entry.string, entry.util);
+		return mask;
+	}
+
 	/*
 	 * None of the special cases above matched, so we have a
 	 * provisional conflict.  (Rename detection might allow us to
-	 * unconflict some more cases, but that comes later; for now just
-	 * record the different non-null file hashes.)
+	 * unconflict some more cases, but that comes later so all we can
+	 * do now is record the different non-null file hashes.)
 	 */
-	} else {
-		setup_path_info(&entry, info, names, filemask, 0);
-		strmap_put(&opt->unmerged, entry.string, entry.util);
-	}
+	setup_path_info(&entry, info, names, filemask, 0);
+	strmap_put(&opt->unmerged, entry.string, entry.util);
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
@@ -361,13 +356,18 @@ static int threeway_simple_merge_callback(int n,
 		newinfo.df_conflicts |= (mask & ~dirmask);
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
-			if (i > 0 && oideq(&names[i].oid, &names[i - 1].oid))
-				t[i] = t[i - 1];
+			if (i == 1 && par1_matches_base)
+				t[1] = t[0];
+			else if (i == 2 && par2_matches_base)
+				t[2] = t[0];
+			else if (i == 2 && oideq(&names[2].oid, &names[1].oid))
+				t[2] = t[1];
 			else {
 				const struct object_id *oid = NULL;
 				if (dirmask & 1)
 					oid = &names[i].oid;
-				buf[i] = fill_tree_descriptor(the_repository, t + i, oid);
+				buf[i] = fill_tree_descriptor(the_repository,
+							      t + i, oid);
 			}
 		}
 
