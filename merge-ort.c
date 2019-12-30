@@ -250,12 +250,20 @@ static int threeway_simple_merge_callback(int n,
 					  struct name_entry *names,
 					  struct traverse_info *info)
 {
+	/*
+	 * n is 3.  Or BUG, see below.
+	 * common ancestor (base) stored in index 0, uses a mask of 1
+	 * parent 1        (par1) stored in index 1, uses a mask of 2
+	 * parent 2        (par2) stored in index 2, uses a mask of 3
+	 */
 #if 0
 	unsigned long conflicts = info->df_conflicts | dirmask;
 #endif
-	unsigned base_null, head_null, side_null;
-	unsigned head_or_side_are_trees;
+	unsigned base_null, par1_null, par2_null;
+	unsigned par1_or_par2_are_trees;
 	unsigned long filemask = mask & ~dirmask;
+	unsigned par1_match = oideq(&names[0].oid, &names[1].oid);
+	unsigned par2_match = oideq(&names[0].oid, &names[2].oid);
 	struct string_list_item entry;
 	struct merge_options_internal *opt = info->data;
 
@@ -263,26 +271,25 @@ static int threeway_simple_merge_callback(int n,
 		BUG("Called threeway_simple_merge_callback wrong");
 
 	base_null = !(mask & 1);
-	head_null = !(mask & 2);
-	side_null = !(mask & 4);
-	head_or_side_are_trees = (dirmask & 6);
+	par1_null = !(mask & 2);
+	par2_null = !(mask & 4);
+	par1_or_par2_are_trees = (dirmask & 6);
 	/* FIXME: Remove these sanity checks at some point */
 	assert(base_null == is_null_oid(&names[0].oid));
-	assert(head_null == is_null_oid(&names[1].oid));
-	assert(side_null == is_null_oid(&names[2].oid));
+	assert(par1_null == is_null_oid(&names[1].oid));
+	assert(par2_null == is_null_oid(&names[2].oid));
 
 	/*
-	 * If head matches base, we can resolve early.  We can ignore base
+	 * If par1 matches base, we can resolve early.  We can ignore base
 	 * (and everything under it if it's a tree) as a possible rename
-	 * source for something on side's side of history because a three
-	 * way merge of base matching head will just take whatever side
+	 * source for something on par2's side of history because a three
+	 * way merge of base matching par1 will just take whatever par2
 	 * had anyway.
 	 */
-	if (!base_null && !head_null) {
-		unsigned head_match = oideq(&names[0].oid, &names[1].oid);
+	if (!base_null && !par1_null) {
 
-		if (head_match) {
-			/* head_match => use side version as resolution */
+		if (par1_match) {
+			/* par1_match => use par2 version as resolution */
 			setup_path_info(&entry, info, names+2, filemask, 1);
 			strmap_put(&opt->merged, entry.string, entry.util);
 		}
@@ -290,14 +297,13 @@ static int threeway_simple_merge_callback(int n,
 	}
 
 	/*
-	 * If side matches base, we can resolve early.  As with the previous
+	 * If par2 matches base, we can resolve early.  As with the previous
 	 * case, we can ignore base as a possible rename for anything on
-	 * head's side of history.
+	 * par1's side of history.
 	 */
-	if (!base_null && !side_null) {
-		unsigned side_match = oideq(&names[0].oid, &names[2].oid);
-		if (side_match) {
-			/* side_match => use head version as resolution */
+	if (!base_null && !par2_null) {
+		if (par2_match) {
+			/* par2_match => use par1 version as resolution */
 			setup_path_info(&entry, info, names+1, filemask, 1);
 			strmap_put(&opt->merged, entry.string, entry.util);
 		}
@@ -305,7 +311,7 @@ static int threeway_simple_merge_callback(int n,
 	}
 
 	/*
-	 * If head & side are files and match, we can resolve.  Any renames
+	 * If par1 & par2 are files and match, we can resolve.  Any renames
 	 * which have either of these two as targets can be ignored because
 	 * a three-way merge would end up matching these two files.  Also,
 	 * in the rare case of finding different matching bases, we'd end
@@ -313,11 +319,11 @@ static int threeway_simple_merge_callback(int n,
 	 * because the contents of both sides match so we can again ignore
 	 * the rename.
 	 */
-	if (!head_null && !side_null && !head_or_side_are_trees &&
+	if (!par1_null && !par2_null && !par1_or_par2_are_trees &&
 	    oideq(&names[1].oid, &names[2].oid)) {
 		/*
-		 * head & side_match and both are files =>
-		 *   use head (==side) version as resolution, but don't return
+		 * par1 & par2_match and both are files =>
+		 *   use par1 (==par2) version as resolution, but don't return
 		 *   early (may need to recurse into base if it's a tree)
 		 */
 		setup_path_info(&entry, info, names+1, filemask, 1);
@@ -377,9 +383,9 @@ static int threeway_simple_merge_callback(int n,
 }
 
 static int preliminary_merge_trees(struct merge_options *opt,
-				   struct tree *common,
-				   struct tree *head,
-				   struct tree *merge)
+				   struct tree *base,
+				   struct tree *parent1,
+				   struct tree *parent2)
 {
 	int ret;
 	struct tree_desc t[3];
@@ -390,9 +396,9 @@ static int preliminary_merge_trees(struct merge_options *opt,
 	info.data = opt;
 	info.show_all_errors = 1;
 
-	init_tree_desc_from_tree(t+0, common);
-	init_tree_desc_from_tree(t+1, head);
-	init_tree_desc_from_tree(t+2, merge);
+	init_tree_desc_from_tree(t+0, base);
+	init_tree_desc_from_tree(t+1, parent1);
+	init_tree_desc_from_tree(t+2, parent2);
 
 	trace_performance_enter();
 	ret = traverse_trees(NULL, 3, t, &info);
