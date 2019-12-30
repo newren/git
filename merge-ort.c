@@ -31,6 +31,7 @@
 struct merge_options_internal {
 	struct strmap merged;   /* maps path -> version_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
+	struct strmap possible_dir_rename_bases; /* set of paths */
 	int call_depth;
 	int needed_rename_limit;
 };
@@ -333,6 +334,40 @@ static int threeway_simple_merge_callback(int n,
 	 */
 	setup_path_info(&entry, info, names, filemask, 0);
 	strmap_put(&opt->unmerged, entry.string, entry.util);
+
+	/*
+	 * Record directories which could possibly have been renamed.  Notes:
+	 *   - Directory has to exist in base to have been renamed (i.e.
+	 *     dirmask & 1 must be true)
+	 *   - Directory cannot exist on both sides or it isn't renamed
+	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
+	 *   - If directory does not exist in either parent1 or parent2, then
+	 *     there are no new files to send along with the directory rename
+	 *     so there's no point detecting it[1].  (i.e. Thus, either
+	 *     dirmask & 2 or dirmask & 4 must be true)
+	 *   - If the side that didn't rename a directory also didn't
+	 *     modify it at all (i.e. the par[12]_matches_base cases
+	 *     checked above were true), then we don't need to detect the
+	 *     directory rename as there are not either any new files or
+	 *     file modifications to send along with the rename.  Thus,
+	 *     it's okay that we returned early for the
+	 *     par[12]_matches_base cases above.
+	 *
+	 * [1] At best, both sides renamed it to the same place (which will
+	 *     be handled by all individual files being renamed to the same
+	 *     place and no dir rename detection is needed).  At worst,
+	 *     they both renamed it differently (but all individual files
+	 *     are renamed to different places which will flag errors so
+	 *     again no dir rename detection is needed.)
+	 */
+	if (dirmask == 3 || dirmask == 5) {
+		/*
+		 * For directory rename detection, we can ignore any rename
+		 * whose source path doesn't start with one of the directory
+		 * paths in possible_dir_rename_bases.
+		 */
+		strmap_put(&opt->possible_dir_rename_bases, entry.string, NULL);
+	}
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
@@ -698,6 +733,12 @@ static void merge_finalize(struct merge_options *opt)
 	if (show(opt, 2))
 		diff_warn_rename_limit("merge.renamelimit",
 				       opt->priv->needed_rename_limit, 0);
+
+	/*
+	 * possible_dir_rename_bases reuse the same strings found in
+	 * opt->priv->unmerged, so they'll be freed below.
+	 */
+	strmap_clear(&opt->priv->possible_dir_rename_bases, 1);
 
 	/*
 	 * We marked opt->priv->[un]merged with strdup_strings = 0, so that
