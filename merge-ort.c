@@ -31,7 +31,6 @@
 struct merge_options_internal {
 	struct strmap merged;   /* maps path -> version_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
-	struct strmap rename_from; /* set of possible rename source paths */
 	int call_depth;
 	int needed_rename_limit;
 };
@@ -216,7 +215,7 @@ static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    struct name_entry *names,
 			    unsigned filemask,
-			    int clean)
+			    int resolved)
 {
 	size_t len = traverse_path_len(info, names->pathlen);
 	char *fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
@@ -224,11 +223,11 @@ static void setup_path_info(struct string_list_item *result,
 	int i;
 
 	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
-	path_info = xcalloc(1, clean ? sizeof(struct merged_info) :
-				       sizeof(struct conflict_info));
+	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
+					  sizeof(struct conflict_info));
 	path_info->merged.path_len = len;
 	path_info->merged.basename_len = names->pathlen;
-	if (clean) {
+	if (resolved) {
 		path_info->merged.result.mode = names->mode;
 		oidcpy(&path_info->merged.result.oid, &names->oid);
 	} else {
@@ -255,7 +254,6 @@ static int threeway_simple_merge_callback(int n,
 	unsigned long conflicts = info->df_conflicts | dirmask;
 #endif
 	unsigned base_null, head_null, side_null;
-	unsigned head_match = 0, side_match = 0;
 	unsigned head_or_side_are_trees;
 	unsigned long filemask = mask & ~dirmask;
 	struct string_list_item entry;
@@ -273,9 +271,16 @@ static int threeway_simple_merge_callback(int n,
 	assert(head_null == is_null_oid(&names[1].oid));
 	assert(side_null == is_null_oid(&names[2].oid));
 
-	/* If head matches base or remote matches base, we can resolve early */
+	/*
+	 * If head matches base, we can resolve early.  We can ignore base
+	 * (and everything under it if it's a tree) as a possible rename
+	 * source for something on side's side of history because a three
+	 * way merge of base matching head will just take whatever side
+	 * had anyway.
+	 */
 	if (!base_null && !head_null) {
-		head_match = oideq(&names[0].oid, &names[1].oid);
+		unsigned head_match = oideq(&names[0].oid, &names[1].oid);
+
 		if (head_match) {
 			/* head_match => use side version as resolution */
 			setup_path_info(&entry, info, names+2, filemask, 1);
@@ -283,8 +288,14 @@ static int threeway_simple_merge_callback(int n,
 		}
 		return mask;
 	}
+
+	/*
+	 * If side matches base, we can resolve early.  As with the previous
+	 * case, we can ignore base as a possible rename for anything on
+	 * head's side of history.
+	 */
 	if (!base_null && !side_null) {
-		side_match = oideq(&names[0].oid, &names[2].oid);
+		unsigned side_match = oideq(&names[0].oid, &names[2].oid);
 		if (side_match) {
 			/* side_match => use head version as resolution */
 			setup_path_info(&entry, info, names+1, filemask, 1);
@@ -294,9 +305,13 @@ static int threeway_simple_merge_callback(int n,
 	}
 
 	/*
-	 * If head & side are files and match, we can resolve; otherwise,
-	 * out of the remaining cases, we have some kind of conflict (though
-	 * rename detection elsewhere might allow us to unconflict).
+	 * If head & side are files and match, we can resolve.  Any renames
+	 * which have either of these two as targets can be ignored because
+	 * a three-way merge would end up matching these two files.  Also,
+	 * in the rare case of finding different matching bases, we'd end
+	 * up with a rename/rename(2to1) case but which wouldn't conflict
+	 * because the contents of both sides match so we can again ignore
+	 * the rename.
 	 */
 	if (!head_null && !side_null && !head_or_side_are_trees &&
 	    oideq(&names[1].oid, &names[2].oid)) {
@@ -307,20 +322,18 @@ static int threeway_simple_merge_callback(int n,
 		 */
 		setup_path_info(&entry, info, names+1, filemask, 1);
 		strmap_put(&opt->merged, entry.string, entry.util);
+	/*
+	 * None of the special cases above matched, so we have a
+	 * provisional conflict.  (Rename detection might allow us to
+	 * unconflict some more cases, but that comes later; for now just
+	 * record the different non-null file hashes.)
+	 */
 	} else {
 		setup_path_info(&entry, info, names, filemask, 0);
 		strmap_put(&opt->unmerged, entry.string, entry.util);
 	}
 
-	/* Record possible rename sources. */
-	if ((filemask & 1) && filemask != 7)
-		/*
-		 * base is a file and either head or side isn't, so record
-		 * this as a possible rename source.
-		 */
-		strmap_put(&opt->rename_from, entry.string, NULL);
-
-	// If dirmask, recurse into subdirectories
+	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
 		struct traverse_info newinfo;
 		struct name_entry *p;
@@ -667,7 +680,6 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 
 	strmap_init(&opt->priv->merged, 0);
 	strmap_init(&opt->priv->unmerged, 0);
-	strmap_init(&opt->priv->rename_from, 0);
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	return 0;
 }
