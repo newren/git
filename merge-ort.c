@@ -468,37 +468,6 @@ static int collect_merge_info(struct merge_options *opt,
 	return ret;
 }
 
-#if 0
-static int merge_entry_contents(struct merge_options *opt,
-				const struct cache_entry *o,
-				const struct cache_entry *a,
-				const struct cache_entry *b,
-				const char *branch1,
-				const char *branch2,
-				const int extra_marker_size,
-				struct cache_entry *result)
-{
-	BUG("Not yet implemented!");
-}
-
-static const struct cache_entry *get_next(struct index_state *index,
-					  int *cur)
-{
-	if (*cur < 0)
-		++*cur;
-	else /* Skip unmerged entries with the same name */
-		while (++*cur < index->cache_nr &&
-		       index->cache[*cur-1]->ce_namelen ==
-			 index->cache[*cur]->ce_namelen &&
-		       !strncmp(index->cache[*cur-1]->name,
-				index->cache[*cur]->name,
-				index->cache[*cur]->ce_namelen))
-			; /* skip */
-
-	return (*cur < index->cache_nr) ? index->cache[*cur] : NULL;
-}
-#endif
-
 /* Per entry merge function */
 static int process_entry(struct merge_options *opt,
 			 const char *path, struct conflict_info *entry)
