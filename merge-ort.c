@@ -32,6 +32,7 @@ struct merge_options_internal {
 	struct strmap merged;   /* maps path -> version_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct strmap possible_dir_rename_bases; /* set of paths */
+	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
 	int call_depth;
 	int needed_rename_limit;
 };
@@ -45,12 +46,13 @@ struct merged_info {
 	struct version_info result;
 	size_t path_len;
 	size_t basename_len;
+	unsigned result_is_null;
 };
 
 struct conflict_info {
 	struct merged_info merged;
 	struct version_info stages[3];
-	unsigned *df_counter[3];
+	unsigned df_conflict:1;
 	unsigned filemask:3;
 	unsigned processed:1;
 	unsigned clean:1;
@@ -215,13 +217,17 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    struct name_entry *names,
+			    unsigned is_null,     /* boolean */
+			    unsigned df_conflict, /* boolean */
 			    unsigned filemask,
-			    int resolved)
+			    int resolved          /* boolean */)
 {
 	size_t len = traverse_path_len(info, names->pathlen);
 	char *fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
 	struct conflict_info *path_info = xcalloc(1, sizeof(*path_info));
-	int i;
+
+	assert(!is_null || resolved);      /* is_null implies resolved */
+	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
 
 	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
@@ -231,7 +237,10 @@ static void setup_path_info(struct string_list_item *result,
 	if (resolved) {
 		path_info->merged.result.mode = names->mode;
 		oidcpy(&path_info->merged.result.oid, &names->oid);
+		path_info->merged.result_is_null = !!is_null;
 	} else {
+		int i;
+
 		for (i = 0; i < 3; i++) {
 			if (!(filemask & (1ul << i)))
 				continue;
@@ -239,7 +248,7 @@ static void setup_path_info(struct string_list_item *result,
 			oidcpy(&path_info->stages[i].oid, &names[i].oid);
 		}
 		path_info->filemask = filemask;
-		/* path_info->df_conflicts = ????; */
+		path_info->df_conflict = !!df_conflict;
 	}
 	result->string = fullpath;
 	result->util = path_info;
@@ -253,16 +262,13 @@ static int threeway_simple_merge_callback(int n,
 {
 	/*
 	 * n is 3.  Always.
-	 * common ancestor (base) stored in index 0, uses a mask of 1
-	 * parent 1        (par1) stored in index 1, uses a mask of 2
-	 * parent 2        (par2) stored in index 2, uses a mask of 3
+	 * common ancestor (base) has mask 1, and stored in index 0 of names
+	 * parent 1        (par1) has mask 2, and stored in index 1 of names
+	 * parent 2        (par2) has mask 4, and stored in index 2 of names
 	 */
 	struct merge_options_internal *opt = info->data;
-	struct string_list_item entry;
-	unsigned long filemask = mask & ~dirmask;
-#if 0
-	unsigned long conflicts = info->df_conflicts | dirmask;
-#endif
+	struct string_list_item pi;  /* Path Info */
+	unsigned filemask = mask & ~dirmask;
 	unsigned base_null = !(mask & 1);
 	unsigned par1_null = !(mask & 2);
 	unsigned par2_null = !(mask & 4);
@@ -270,6 +276,13 @@ static int threeway_simple_merge_callback(int n,
 	unsigned par2_is_tree = (dirmask & 4);
 	unsigned par1_matches_base = oideq(&names[0].oid, &names[1].oid);
 	unsigned par2_matches_base = oideq(&names[0].oid, &names[2].oid);
+	/*
+	 * Note: We only label files with df_conflict, not directories.
+	 * Since directories stay where they are, and files move out of the
+	 * way to make room for a directory, we don't care if there was a
+	 * df_conflict for a parent directory of the current path.
+	 */
+	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
 	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
@@ -292,9 +305,9 @@ static int threeway_simple_merge_callback(int n,
 	 * underneath.
 	 */
 	if (par1_matches_base && par2_matches_base) {
-
-		setup_path_info(&entry, info, names, filemask, 1);
-		strmap_put(&opt->merged, entry.string, entry.util);
+		/* base, par1, & par2 all match; use base as resolution */
+		setup_path_info(&pi, info, names+0, base_null, 0, filemask, 1);
+		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -303,15 +316,15 @@ static int threeway_simple_merge_callback(int n,
 	 * early because par1 matching base implies:
 	 *    * par1 has no interesting contents or changes; use par2 versions
 	 *    * par1 has no content changes to include in renames on par2 side
-	 *    * par1 has no new files to move with par2's directory renames
+	 *    * par1 contains no new files to move with par2's directory renames
 	 * We can't resolve early if par2 is a tree though, because there
 	 * may be new files on par2's side that are rename targets that need
 	 * to be merged with changes from elsewhere on par1's side of history.
 	 */
 	if (!par1_null && par1_matches_base && !par2_is_tree) {
-		/* par1_matches_base => use par2 version as resolution */
-		setup_path_info(&entry, info, names+2, filemask, 1);
-		strmap_put(&opt->merged, entry.string, entry.util);
+		/* use par2 version as resolution */
+		setup_path_info(&pi, info, names+2, par2_null, 0, filemask, 1);
+		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -320,9 +333,9 @@ static int threeway_simple_merge_callback(int n,
 	 * early.  Same reasoning as for above when par1 and par2 swapped.
 	 */
 	if (!par2_null && par2_matches_base && !par1_is_tree) {
-		/* par2_matches_base => use par1 version as resolution */
-		setup_path_info(&entry, info, names+1, filemask, 1);
-		strmap_put(&opt->merged, entry.string, entry.util);
+		/* use par1 version as resolution */
+		setup_path_info(&pi, info, names+1, par1_null, 0, filemask, 1);
+		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -332,8 +345,10 @@ static int threeway_simple_merge_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&entry, info, names, filemask, 0);
-	strmap_put(&opt->unmerged, entry.string, entry.util);
+	setup_path_info(&pi, info, names, 0, df_conflict, filemask, 0);
+	strmap_put(&opt->unmerged, pi.string, pi.util);
+	if (filemask == 0)
+		opt->nr_dir_only_entries += 1;
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
@@ -341,9 +356,9 @@ static int threeway_simple_merge_callback(int n,
 	 *     dirmask & 1 must be true)
 	 *   - Directory cannot exist on both sides or it isn't renamed
 	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
-	 *   - If directory does not exist in either parent1 or parent2, then
-	 *     there are no new files to send along with the directory rename
-	 *     so there's no point detecting it[1].  (i.e. Thus, either
+	 *   - If directory exists in neither parent1 nor parent2, then
+	 *     there are no new files to send along with the directory
+	 *     rename so there's no point detecting it[1].  (Thus, either
 	 *     dirmask & 2 or dirmask & 4 must be true)
 	 *   - If the side that didn't rename a directory also didn't
 	 *     modify it at all (i.e. the par[12]_matches_base cases
@@ -353,8 +368,9 @@ static int threeway_simple_merge_callback(int n,
 	 *     it's okay that we returned early for the
 	 *     par[12]_matches_base cases above.
 	 *
-	 * [1] At best, both sides renamed it to the same place (which will
-	 *     be handled by all individual files being renamed to the same
+	 * [1] When neither parent1 nor parent2 has the directory then at
+	 *     best, both sides renamed it to the same place (which will be
+	 *     handled by all individual files being renamed to the same
 	 *     place and no dir rename detection is needed).  At worst,
 	 *     they both renamed it differently (but all individual files
 	 *     are renamed to different places which will flag errors so
@@ -366,7 +382,7 @@ static int threeway_simple_merge_callback(int n,
 		 * whose source path doesn't start with one of the directory
 		 * paths in possible_dir_rename_bases.
 		 */
-		strmap_put(&opt->possible_dir_rename_bases, entry.string, NULL);
+		strmap_put(&opt->possible_dir_rename_bases, pi.string, NULL);
 	}
 
 	/* If dirmask, recurse into subdirectories */
@@ -388,7 +404,13 @@ static int threeway_simple_merge_callback(int n,
 		newinfo.namelen = p->pathlen;
 		newinfo.mode = p->mode;
 		newinfo.pathlen = st_add3(newinfo.pathlen, p->pathlen, 1);
-		newinfo.df_conflicts |= (mask & ~dirmask);
+		/*
+		 * If we did care about parents directories having a D/F
+		 * conflict, then we'd include
+		 *    newinfo.df_conflicts |= (mask & ~dirmask);
+		 * here.  But we don't, see comment near setting of local
+		 * df_conflict near the beginning of this function.
+		 */
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
 			if (i == 1 && par1_matches_base)
