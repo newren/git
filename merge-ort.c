@@ -254,39 +254,39 @@ static void setup_path_info(struct string_list_item *result,
 	result->util = path_info;
 }
 
-static int threeway_simple_merge_callback(int n,
-					  unsigned long mask,
-					  unsigned long dirmask,
-					  struct name_entry *names,
-					  struct traverse_info *info)
+static int collect_merge_info_callback(int n,
+				       unsigned long mask,
+				       unsigned long dirmask,
+				       struct name_entry *names,
+				       struct traverse_info *info)
 {
 	/*
 	 * n is 3.  Always.
 	 * common ancestor (base) has mask 1, and stored in index 0 of names
-	 * parent 1        (par1) has mask 2, and stored in index 1 of names
-	 * parent 2        (par2) has mask 4, and stored in index 2 of names
+	 * head of side 1  (sid1) has mask 2, and stored in index 1 of names
+	 * head of side 2  (sid2) has mask 4, and stored in index 2 of names
 	 */
 	struct merge_options_internal *opt = info->data;
 	struct string_list_item pi;  /* Path Info */
 	unsigned filemask = mask & ~dirmask;
 	unsigned base_null = !(mask & 1);
-	unsigned par1_null = !(mask & 2);
-	unsigned par2_null = !(mask & 4);
-	unsigned par1_is_tree = (dirmask & 2);
-	unsigned par2_is_tree = (dirmask & 4);
-	unsigned par1_matches_base = oideq(&names[0].oid, &names[1].oid);
-	unsigned par2_matches_base = oideq(&names[0].oid, &names[2].oid);
+	unsigned sid1_null = !(mask & 2);
+	unsigned sid2_null = !(mask & 4);
+	unsigned sid1_is_tree = (dirmask & 2);
+	unsigned sid2_is_tree = (dirmask & 4);
+	unsigned sid1_matches_base = oideq(&names[0].oid, &names[1].oid);
+	unsigned sid2_matches_base = oideq(&names[0].oid, &names[2].oid);
 	/*
 	 * Note: We only label files with df_conflict, not directories.
 	 * Since directories stay where they are, and files move out of the
 	 * way to make room for a directory, we don't care if there was a
-	 * df_conflict for a parent directory of the current path.
+	 * directory/file conflict for a parent directory of the current path.
 	 */
 	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
 	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
-		BUG("Called threeway_simple_merge_callback wrong");
+		BUG("Called collect_merge_info_callback wrong");
 
 	/*
 	 * A bunch of sanity checks verifying that traverse_trees() calls
@@ -294,47 +294,51 @@ static int threeway_simple_merge_callback(int n,
 	 * though maybe they are helpful to future code readers.
 	 */
 	assert(base_null == is_null_oid(&names[0].oid));
-	assert(par1_null == is_null_oid(&names[1].oid));
-	assert(par2_null == is_null_oid(&names[2].oid));
-	assert(!base_null || !par1_null || !par2_null);
+	assert(sid1_null == is_null_oid(&names[1].oid));
+	assert(sid2_null == is_null_oid(&names[2].oid));
+	assert(!base_null || !sid1_null || !sid2_null);
 	assert(mask > 0 && mask < 8);
 
+	/* Other invariant checks, mostly for documentation purposes. */
+	assert(mask == (dirmask | filemask));
+
 	/*
-	 * If base, par1, and par2 all match, we can resolve early.  Even
+	 * If base, sid1, and sid2 all match, we can resolve early.  Even
 	 * if these are trees, there will be no renames or anything
 	 * underneath.
 	 */
-	if (par1_matches_base && par2_matches_base) {
-		/* base, par1, & par2 all match; use base as resolution */
+	if (sid1_matches_base && sid2_matches_base) {
+		/* base, sid1, & sid2 all match; use base as resolution */
 		setup_path_info(&pi, info, names+0, base_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
 	/*
-	 * If par1 matches base, and par2 is not a tree, we can resolve
-	 * early because par1 matching base implies:
-	 *    * par1 has no interesting contents or changes; use par2 versions
-	 *    * par1 has no content changes to include in renames on par2 side
-	 *    * par1 contains no new files to move with par2's directory renames
-	 * We can't resolve early if par2 is a tree though, because there
-	 * may be new files on par2's side that are rename targets that need
-	 * to be merged with changes from elsewhere on par1's side of history.
+	 * If sid1 matches base, and sid2 is not a tree, we can resolve
+	 * early because sid1 matching base implies:
+	 *    * sid1 has no interesting contents or changes; use sid2 versions
+	 *    * sid1 has no content changes to include in renames on sid2 side
+	 *    * sid1 contains no new files to move with sid2's directory renames
+	 * We can't resolve early if sid2 is a tree though, because there
+	 * may be new files on sid2's side that are rename targets that need
+	 * to be merged with changes from elsewhere on sid1's side of history.
 	 */
-	if (!par1_null && par1_matches_base && !par2_is_tree) {
-		/* use par2 version as resolution */
-		setup_path_info(&pi, info, names+2, par2_null, 0, filemask, 1);
+	if (!sid1_null && sid1_matches_base && !sid2_is_tree) {
+		/* use sid2 version as resolution */
+		setup_path_info(&pi, info, names+2, sid2_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
 	/*
-	 * If par2 matches base, and par1 is not a tree, we can resolve
-	 * early.  Same reasoning as for above when par1 and par2 swapped.
+	 * If sid2 matches base, and sid1 is not a tree, we can resolve
+	 * early.  Same reasoning as for above but with sid1 and sid2
+	 * swapped.
 	 */
-	if (!par2_null && par2_matches_base && !par1_is_tree) {
-		/* use par1 version as resolution */
-		setup_path_info(&pi, info, names+1, par1_null, 0, filemask, 1);
+	if (!sid2_null && sid2_matches_base && !sid1_is_tree) {
+		/* use sid1 version as resolution */
+		setup_path_info(&pi, info, names+1, sid1_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -356,7 +360,7 @@ static int threeway_simple_merge_callback(int n,
 	 *     dirmask & 1 must be true)
 	 *   - Directory cannot exist on both sides or it isn't renamed
 	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
-	 *   - If directory exists in neither parent1 nor parent2, then
+	 *   - If directory exists in neither side1 nor side2, then
 	 *     there are no new files to send along with the directory
 	 *     rename so there's no point detecting it[1].  (Thus, either
 	 *     dirmask & 2 or dirmask & 4 must be true)
@@ -368,7 +372,7 @@ static int threeway_simple_merge_callback(int n,
 	 *     it's okay that we returned early for the
 	 *     par[12]_matches_base cases above.
 	 *
-	 * [1] When neither parent1 nor parent2 has the directory then at
+	 * [1] When neither side1 nor side2 has the directory then at
 	 *     best, both sides renamed it to the same place (which will be
 	 *     handled by all individual files being renamed to the same
 	 *     place and no dir rename detection is needed).  At worst,
@@ -413,9 +417,9 @@ static int threeway_simple_merge_callback(int n,
 		 */
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
-			if (i == 1 && par1_matches_base)
+			if (i == 1 && sid1_matches_base)
 				t[1] = t[0];
-			else if (i == 2 && par2_matches_base)
+			else if (i == 2 && sid2_matches_base)
 				t[2] = t[0];
 			else if (i == 2 && oideq(&names[2].oid, &names[1].oid))
 				t[2] = t[1];
@@ -439,23 +443,23 @@ static int threeway_simple_merge_callback(int n,
 	return mask;
 }
 
-static int preliminary_merge_trees(struct merge_options *opt,
-				   struct tree *base,
-				   struct tree *parent1,
-				   struct tree *parent2)
+static int collect_merge_info(struct merge_options *opt,
+			      struct tree *base,
+			      struct tree *side1,
+			      struct tree *side2)
 {
 	int ret;
 	struct tree_desc t[3];
 	struct traverse_info info;
 
 	setup_traverse_info(&info, "");
-	info.fn = threeway_simple_merge_callback;
+	info.fn = collect_merge_info_callback;
 	info.data = opt;
 	info.show_all_errors = 1;
 
 	init_tree_desc_from_tree(t+0, base);
-	init_tree_desc_from_tree(t+1, parent1);
-	init_tree_desc_from_tree(t+2, parent2);
+	init_tree_desc_from_tree(t+1, side1);
+	init_tree_desc_from_tree(t+2, side2);
 
 	trace_performance_enter();
 	ret = traverse_trees(NULL, 3, t, &info);
@@ -555,11 +559,11 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return 1;
 	}
 
-	code = preliminary_merge_trees(opt, merge_base, head, merge);
+	code = collect_merge_info(opt, merge_base, head, merge);
 
 	if (code != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
-			err(opt, _("merging of trees %s and %s failed"),
+			err(opt, _("collecting merge info for trees %s and %s failed"),
 			    oid_to_hex(&head->object.oid),
 			    oid_to_hex(&merge->object.oid));
 		return -1;
