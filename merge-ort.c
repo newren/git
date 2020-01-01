@@ -195,12 +195,6 @@ static inline int merge_detect_rename(struct merge_options *opt)
 }
 #endif
 
-static void init_tree_desc_from_tree(struct tree_desc *desc, struct tree *tree)
-{
-	parse_tree(tree);
-	init_tree_desc(desc, tree->buffer, tree->size);
-}
-
 static struct commit_list *reverse_commit_list(struct commit_list *list)
 {
 	struct commit_list *next = NULL, *current, *backup;
@@ -457,9 +451,12 @@ static int collect_merge_info(struct merge_options *opt,
 	info.data = opt;
 	info.show_all_errors = 1;
 
-	init_tree_desc_from_tree(t+0, base);
-	init_tree_desc_from_tree(t+1, side1);
-	init_tree_desc_from_tree(t+2, side2);
+	parse_tree(base);
+	parse_tree(side1);
+	parse_tree(side2);
+	init_tree_desc(t+0, base->buffer, base->size);
+	init_tree_desc(t+1, side1->buffer, side1->size);
+	init_tree_desc(t+2, side2->buffer, side2->size);
 
 	trace_performance_enter();
 	ret = traverse_trees(NULL, 3, t, &info);
