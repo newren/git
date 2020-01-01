@@ -256,20 +256,20 @@ static int collect_merge_info_callback(int n,
 {
 	/*
 	 * n is 3.  Always.
-	 * common ancestor (base) has mask 1, and stored in index 0 of names
-	 * head of side 1  (sid1) has mask 2, and stored in index 1 of names
-	 * head of side 2  (sid2) has mask 4, and stored in index 2 of names
+	 * common ancestor (mbase) has mask 1, and stored in index 0 of names
+	 * head of side 1  (side1) has mask 2, and stored in index 1 of names
+	 * head of side 2  (side2) has mask 4, and stored in index 2 of names
 	 */
 	struct merge_options_internal *opt = info->data;
 	struct string_list_item pi;  /* Path Info */
 	unsigned filemask = mask & ~dirmask;
-	unsigned base_null = !(mask & 1);
-	unsigned sid1_null = !(mask & 2);
-	unsigned sid2_null = !(mask & 4);
-	unsigned sid1_is_tree = (dirmask & 2);
-	unsigned sid2_is_tree = (dirmask & 4);
-	unsigned sid1_matches_base = oideq(&names[0].oid, &names[1].oid);
-	unsigned sid2_matches_base = oideq(&names[0].oid, &names[2].oid);
+	unsigned mbase_null = !(mask & 1);
+	unsigned side1_null = !(mask & 2);
+	unsigned side2_null = !(mask & 4);
+	unsigned side1_is_tree = (dirmask & 2);
+	unsigned side2_is_tree = (dirmask & 4);
+	unsigned side1_matches_mbase = oideq(&names[0].oid, &names[1].oid);
+	unsigned side2_matches_mbase = oideq(&names[0].oid, &names[2].oid);
 	unsigned sides_match = oideq(&names[1].oid, &names[2].oid);
 	/*
 	 * Note: We only label files with df_conflict, not directories.
@@ -288,40 +288,40 @@ static int collect_merge_info_callback(int n,
 	 * us the way I expect.  Could just remove these at some point,
 	 * though maybe they are helpful to future code readers.
 	 */
-	assert(base_null == is_null_oid(&names[0].oid));
-	assert(sid1_null == is_null_oid(&names[1].oid));
-	assert(sid2_null == is_null_oid(&names[2].oid));
-	assert(!base_null || !sid1_null || !sid2_null);
+	assert(mbase_null == is_null_oid(&names[0].oid));
+	assert(side1_null == is_null_oid(&names[1].oid));
+	assert(side2_null == is_null_oid(&names[2].oid));
+	assert(!mbase_null || !side1_null || !side2_null);
 	assert(mask > 0 && mask < 8);
 
 	/* Other invariant checks, mostly for documentation purposes. */
 	assert(mask == (dirmask | filemask));
 
 	/*
-	 * If base, sid1, and sid2 all match, we can resolve early.  Even
+	 * If mbase, side1, and side2 all match, we can resolve early.  Even
 	 * if these are trees, there will be no renames or anything
 	 * underneath.
 	 */
-	if (sid1_matches_base && sid2_matches_base) {
-		/* base, sid1, & sid2 all match; use base as resolution */
-		setup_path_info(&pi, info, names+0, base_null, 0, filemask, 1);
+	if (side1_matches_mbase && side2_matches_mbase) {
+		/* mbase, side1, & side2 all match; use mbase as resolution */
+		setup_path_info(&pi, info, names+0, mbase_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
 	/*
-	 * If sid1 matches base, and sid2 is not a tree, we can resolve
-	 * early because sid1 matching base implies:
-	 *    * sid1 has no interesting contents or changes; use sid2 versions
-	 *    * sid1 has no content changes to include in renames on sid2 side
-	 *    * sid1 contains no new files to move with sid2's directory renames
-	 * We can't resolve early if sid2 is a tree though, because there
-	 * may be new files on sid2's side that are rename targets that need
-	 * to be merged with changes from elsewhere on sid1's side of history.
+	 * If side1 matches mbase, and side2 is not a tree, we can resolve
+	 * early because side1 matching mbase implies:
+	 *   - side1 has no interesting contents or changes; use side2 versions
+	 *   - side1 has no content changes to include in renames on side2 side
+	 *   - side1 contains no new files to move with side2's directory renames
+	 * We can't resolve early if side2 is a tree though, because there
+	 * may be new files on side2's side that are rename targets that need
+	 * to be merged with changes from elsewhere on side1's side of history.
 	 */
-	if (!sid1_null && sid1_matches_base && !sid2_is_tree) {
-		/* use sid2 version as resolution */
-		setup_path_info(&pi, info, names+2, sid2_null, 0, filemask, 1);
+	if (!side1_null && side1_matches_mbase && !side2_is_tree) {
+		/* use side2 version as resolution */
+		setup_path_info(&pi, info, names+2, side2_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -329,25 +329,25 @@ static int collect_merge_info_callback(int n,
 	/*
 	 * If all three paths are files, there are no renames under or for
 	 * this path.  If additionally the sides match, we can take either
-	 * as the resolution.  (The case where a side matches the base was
+	 * as the resolution.  (The case where a side matches the mbase was
 	 * handled above, and more generally since that case can handle
 	 * the match being a directory too.)
 	 */
 	if (filemask == 7 && sides_match) {
-		/* use sid1 (== sid2) version as resolution */
+		/* use side1 (== side2) version as resolution */
 		setup_path_info(&pi, info, names+1, 0, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
 
 	/*
-	 * If sid2 matches base, and sid1 is not a tree, we can resolve
-	 * early.  Same reasoning as for above but with sid1 and sid2
+	 * If side2 matches mbase, and side1 is not a tree, we can resolve
+	 * early.  Same reasoning as for above but with side1 and side2
 	 * swapped.
 	 */
-	if (!sid2_null && sid2_matches_base && !sid1_is_tree) {
-		/* use sid1 version as resolution */
-		setup_path_info(&pi, info, names+1, sid1_null, 0, filemask, 1);
+	if (!side2_null && side2_matches_mbase && !side1_is_tree) {
+		/* use side1 version as resolution */
+		setup_path_info(&pi, info, names+1, side1_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -365,7 +365,7 @@ static int collect_merge_info_callback(int n,
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
-	 *   - Directory has to exist in base to have been renamed (i.e.
+	 *   - Directory has to exist in mbase to have been renamed (i.e.
 	 *     dirmask & 1 must be true)
 	 *   - Directory cannot exist on both sides or it isn't renamed
 	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
@@ -374,12 +374,12 @@ static int collect_merge_info_callback(int n,
 	 *     rename so there's no point detecting it[1].  (Thus, either
 	 *     dirmask & 2 or dirmask & 4 must be true)
 	 *   - If the side that didn't rename a directory also didn't
-	 *     modify it at all (i.e. the par[12]_matches_base cases
+	 *     modify it at all (i.e. the par[12]_matches_mbase cases
 	 *     checked above were true), then we don't need to detect the
 	 *     directory rename as there are not either any new files or
 	 *     file modifications to send along with the rename.  Thus,
 	 *     it's okay that we returned early for the
-	 *     par[12]_matches_base cases above.
+	 *     par[12]_matches_mbase cases above.
 	 *
 	 * [1] When neither side1 nor side2 has the directory then at
 	 *     best, both sides renamed it to the same place (which will be
@@ -426,9 +426,9 @@ static int collect_merge_info_callback(int n,
 		 */
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
-			if (i == 1 && sid1_matches_base)
+			if (i == 1 && side1_matches_mbase)
 				t[1] = t[0];
-			else if (i == 2 && sid2_matches_base)
+			else if (i == 2 && side2_matches_mbase)
 				t[2] = t[0];
 			else if (i == 2 && sides_match)
 				t[2] = t[1];
@@ -453,7 +453,7 @@ static int collect_merge_info_callback(int n,
 }
 
 static int collect_merge_info(struct merge_options *opt,
-			      struct tree *base,
+			      struct tree *merge_base,
 			      struct tree *side1,
 			      struct tree *side2)
 {
@@ -466,10 +466,10 @@ static int collect_merge_info(struct merge_options *opt,
 	info.data = opt;
 	info.show_all_errors = 1;
 
-	parse_tree(base);
+	parse_tree(merge_base);
 	parse_tree(side1);
 	parse_tree(side2);
-	init_tree_desc(t+0, base->buffer, base->size);
+	init_tree_desc(t+0, merge_base->buffer, merge_base->size);
 	init_tree_desc(t+1, side1->buffer, side1->size);
 	init_tree_desc(t+2, side2->buffer, side2->size);
 
