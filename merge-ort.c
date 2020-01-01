@@ -270,6 +270,7 @@ static int collect_merge_info_callback(int n,
 	unsigned sid2_is_tree = (dirmask & 4);
 	unsigned sid1_matches_base = oideq(&names[0].oid, &names[1].oid);
 	unsigned sid2_matches_base = oideq(&names[0].oid, &names[2].oid);
+	unsigned sides_match = oideq(&names[1].oid, &names[2].oid);
 	/*
 	 * Note: We only label files with df_conflict, not directories.
 	 * Since directories stay where they are, and files move out of the
@@ -321,6 +322,20 @@ static int collect_merge_info_callback(int n,
 	if (!sid1_null && sid1_matches_base && !sid2_is_tree) {
 		/* use sid2 version as resolution */
 		setup_path_info(&pi, info, names+2, sid2_null, 0, filemask, 1);
+		strmap_put(&opt->merged, pi.string, pi.util);
+		return mask;
+	}
+
+	/*
+	 * If all three paths are files, there are no renames under or for
+	 * this path.  If additionally the sides match, we can take either
+	 * as the resolution.  (The case where a side matches the base was
+	 * handled above, and more generally since that case can handle
+	 * the match being a directory too.)
+	 */
+	if (filemask == 7 && sides_match) {
+		/* use sid1 (== sid2) version as resolution */
+		setup_path_info(&pi, info, names+1, 0, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -415,7 +430,7 @@ static int collect_merge_info_callback(int n,
 				t[1] = t[0];
 			else if (i == 2 && sid2_matches_base)
 				t[2] = t[0];
-			else if (i == 2 && oideq(&names[2].oid, &names[1].oid))
+			else if (i == 2 && sides_match)
 				t[2] = t[1];
 			else {
 				const struct object_id *oid = NULL;
