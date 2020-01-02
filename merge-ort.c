@@ -35,6 +35,7 @@ struct merge_options_internal {
 	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
 	int call_depth;
 	int needed_rename_limit;
+	unsigned inside_possibly_renamed_dir:1;
 };
 
 struct version_info {
@@ -262,6 +263,7 @@ static int collect_merge_info_callback(int n,
 	 */
 	struct merge_options_internal *opt = info->data;
 	struct string_list_item pi;  /* Path Info */
+	unsigned prev_iprd = opt->inside_possibly_renamed_dir; /* prev value */
 	unsigned filemask = mask & ~dirmask;
 	unsigned mbase_null = !(mask & 1);
 	unsigned side1_null = !(mask & 2);
@@ -310,28 +312,9 @@ static int collect_merge_info_callback(int n,
 	}
 
 	/*
-	 * If side1 matches mbase, and side2 is not a tree, we can resolve
-	 * early because side1 matching mbase implies:
-	 *   - side1 has no interesting contents or changes; use side2 versions
-	 *   - side1 has no content changes to include in renames on side2 side
-	 *   - side1 contains no new files to move with side2's directory renames
-	 * We can't resolve early if side2 is a tree though, because there
-	 * may be new files on side2's side that are rename targets that need
-	 * to be merged with changes from elsewhere on side1's side of history.
-	 */
-	if (!side1_null && side1_matches_mbase && !side2_is_tree) {
-		/* use side2 version as resolution */
-		setup_path_info(&pi, info, names+2, side2_null, 0, filemask, 1);
-		strmap_put(&opt->merged, pi.string, pi.util);
-		return mask;
-	}
-
-	/*
-	 * If all three paths are files, there are no renames under or for
-	 * this path.  If additionally the sides match, we can take either
-	 * as the resolution.  (The case where a side matches the mbase was
-	 * handled above, and more generally since that case can handle
-	 * the match being a directory too.)
+	 * If all three paths are files, then there will be no renames
+	 * either for or under this path.  If additionally the sides match,
+	 * we can take either as the resolution.
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
@@ -341,11 +324,30 @@ static int collect_merge_info_callback(int n,
 	}
 
 	/*
+	 * If side1 matches mbase, and side2 is not a tree, we can resolve
+	 * early because side1 matching mbase implies:
+	 *   - side1 has no interesting contents or changes; use side2 versions
+	 *   - side1 has no content changes to include in renames on side2 side
+	 *   - side1 contains no new files to move with side2's directory renames
+	 * We can't resolve early if side2 is a tree though, because there
+	 * may be new files on side2's side that are rename targets that need
+	 * to be merged with changes from elsewhere on side1's side of history.
+	 */
+	if (!opt->inside_possibly_renamed_dir &&
+	    !side1_null && side1_matches_mbase && !side2_is_tree) {
+		/* use side2 version as resolution */
+		setup_path_info(&pi, info, names+2, side2_null, 0, filemask, 1);
+		strmap_put(&opt->merged, pi.string, pi.util);
+		return mask;
+	}
+
+	/*
 	 * If side2 matches mbase, and side1 is not a tree, we can resolve
 	 * early.  Same reasoning as for above but with side1 and side2
 	 * swapped.
 	 */
-	if (!side2_null && side2_matches_mbase && !side1_is_tree) {
+	if (!opt->inside_possibly_renamed_dir &&
+	    !side2_null && side2_matches_mbase && !side1_is_tree) {
 		/* use side1 version as resolution */
 		setup_path_info(&pi, info, names+1, side1_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
@@ -396,6 +398,7 @@ static int collect_merge_info_callback(int n,
 		 * paths in possible_dir_rename_bases.
 		 */
 		strmap_put(&opt->possible_dir_rename_bases, pi.string, NULL);
+		opt->inside_possibly_renamed_dir = 1;
 	}
 
 	/* If dirmask, recurse into subdirectories */
@@ -418,11 +421,11 @@ static int collect_merge_info_callback(int n,
 		newinfo.mode = p->mode;
 		newinfo.pathlen = st_add3(newinfo.pathlen, p->pathlen, 1);
 		/*
-		 * If we did care about parents directories having a D/F
+		 * If we did care about parent directories having a D/F
 		 * conflict, then we'd include
 		 *    newinfo.df_conflicts |= (mask & ~dirmask);
-		 * here.  But we don't, see comment near setting of local
-		 * df_conflict near the beginning of this function.
+		 * here.  But we don't.  (See comment near setting of local
+		 * df_conflict variable near the beginning of this function).
 		 */
 
 		for (i = 0; i < 3; i++, dirmask >>= 1) {
@@ -442,6 +445,7 @@ static int collect_merge_info_callback(int n,
 		}
 
 		ret = traverse_trees(NULL, 3, t, &newinfo);
+		opt->inside_possibly_renamed_dir = prev_iprd;
 
 		for (i = 0; i < 3; i++)
 			free(buf[i]);
