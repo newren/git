@@ -1,0 +1,35 @@
+Stuff to nuke
+  * Don't need the unpack-trees.[ch] anymore, though
+      cdeec536ea (unpack-trees: exit check_updates() early if just doing a dry run, 2019-11-09)
+      bfb6cba9ce (unpack-trees: exit check_updates() early if updates not requested, 2017-12-21)
+    can both be upstreamed.
+  * testit.py obviously wasn't meant for final version just for demonstrating O(N^2)
+  * TODO, ort-cover-lettter, and ort-todo, and stuff-missing.txt can be removed
+
+  * throw away merge-ort patches which:
+    * change how unpack_trees is called
+    * "avoid unnecessary discard and re-read of cache"
+    * everything with "*_would_be_overwritten", update_file[_flags], update_working_tree
+    * "WIP: towards simple unpack_trees usage"
+    * "more merge-ort WIP: now with process_entry()"
+
+Overall structure
+  [Note this covers everything through
+    "Handle directory renames better in collect_merge_info_callback"
+  ]
+  * Add strmap.[ch] (how many commits?)
+    * Basics like Peff had?
+    * Then my new functions (e.g. strmap_for_each_entry, strmap_empty)?
+    * Adding in strdup_strings?
+  * First two commits creating merge-ort are good
+  * collect_merge_info*
+    * add plain data structures first
+    * add various sanity checks
+    * add barebones functions (add to opt->unmerged unconditionally, filemask)
+    * slowly add other complications:
+      * df_conflicts
+      * optimizations
+        * all three sides match
+        * filemask == 7 && sides_match
+        * tracking possible directory rename bases
+        * side matches base
