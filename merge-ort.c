@@ -33,6 +33,7 @@ struct merge_options_internal {
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct strmap possible_dir_rename_bases; /* set of paths */
 	struct strmap submodule_directory_conflicts; /* set of paths */
+	const char *current_dir_name;
 	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
 	int call_depth;
 	int needed_rename_limit;
@@ -46,8 +47,15 @@ struct version_info {
 
 struct merged_info {
 	struct version_info result;
-	size_t path_len;
-	size_t basename_len;
+	 /*
+	  * Containing directory name.  Note that we assume directory_name is
+	  * constructed such that
+	  *    strcmp(dir1_name, dir2_name) == 0 iff dir1_name == dir2_name,
+	  * i.e. string equality is equivalent to pointer equality.  For this
+	  * to hold, we have to be careful setting directory_name.
+	  */
+	const char *directory_name;
+	size_t basename_offset;
 	unsigned result_is_null;
 };
 
@@ -213,6 +221,7 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    struct name_entry *names,
+			    const char *current_dir_name,
 			    unsigned is_null,     /* boolean */
 			    unsigned df_conflict, /* boolean */
 			    unsigned filemask,
@@ -228,8 +237,8 @@ static void setup_path_info(struct string_list_item *result,
 	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
 					  sizeof(struct conflict_info));
-	path_info->merged.path_len = len;
-	path_info->merged.basename_len = names->pathlen;
+	path_info->merged.directory_name = current_dir_name;
+	path_info->merged.basename_offset = info->pathlen + !!info->pathlen;
 	if (resolved) {
 		path_info->merged.result.mode = names->mode;
 		oidcpy(&path_info->merged.result.oid, &names->oid);
@@ -307,7 +316,8 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, info, names+0, mbase_null, 0, filemask, 1);
+		setup_path_info(&pi, info, names+0, opt->current_dir_name,
+				mbase_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -319,7 +329,8 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, info, names+1, 0, 0, filemask, 1);
+		setup_path_info(&pi, info, names+1, opt->current_dir_name,
+				0, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -337,7 +348,8 @@ static int collect_merge_info_callback(int n,
 	if (!opt->inside_possibly_renamed_dir &&
 	    !side1_null && side1_matches_mbase && !side2_is_tree) {
 		/* use side2 version as resolution */
-		setup_path_info(&pi, info, names+2, side2_null, 0, filemask, 1);
+		setup_path_info(&pi, info, names+2, opt->current_dir_name,
+				side2_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -350,7 +362,8 @@ static int collect_merge_info_callback(int n,
 	if (!opt->inside_possibly_renamed_dir &&
 	    !side2_null && side2_matches_mbase && !side1_is_tree) {
 		/* use side1 version as resolution */
-		setup_path_info(&pi, info, names+1, side1_null, 0, filemask, 1);
+		setup_path_info(&pi, info, names+1, opt->current_dir_name,
+				side1_null, 0, filemask, 1);
 		strmap_put(&opt->merged, pi.string, pi.util);
 		return mask;
 	}
@@ -361,7 +374,8 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, info, names, 0, df_conflict, filemask, 0);
+	setup_path_info(&pi, info, names, opt->current_dir_name,
+			0, df_conflict, filemask, 0);
 	strmap_put(&opt->unmerged, pi.string, pi.util);
 	if (filemask == 0)
 		opt->nr_dir_only_entries += 1;
@@ -408,6 +422,7 @@ static int collect_merge_info_callback(int n,
 		struct name_entry *p;
 		struct tree_desc t[3];
 		void *buf[3] = {NULL,};
+		const char *original_dir_name;
 		int ret;
 		int i;
 
@@ -445,7 +460,10 @@ static int collect_merge_info_callback(int n,
 			}
 		}
 
+		original_dir_name = opt->current_dir_name;
+		opt->current_dir_name = pi.string;
 		ret = traverse_trees(NULL, 3, t, &newinfo);
+		opt->current_dir_name = original_dir_name;
 		opt->inside_possibly_renamed_dir = prev_iprd;
 
 		for (i = 0; i < 3; i++)
@@ -569,6 +587,7 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree **result)
 {
 	int code, clean;
+	char root_dir[1] = "\0";
 
 	if (opt->subtree_shift) {
 		merge = shift_tree_object(opt->repo, head, merge,
@@ -583,6 +602,7 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return 1;
 	}
 
+	opt->priv->current_dir_name = root_dir;
 	code = collect_merge_info(opt, merge_base, head, merge);
 
 	if (code != 0) {
