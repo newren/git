@@ -32,6 +32,7 @@ struct merge_options_internal {
 	struct strmap merged;   /* maps path -> version_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct strmap possible_dir_rename_bases; /* set of paths */
+	struct strmap submodule_directory_conflicts; /* set of paths */
 	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
 	int call_depth;
 	int needed_rename_limit;
