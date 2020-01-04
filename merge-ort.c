@@ -486,31 +486,73 @@ static int collect_merge_info(struct merge_options *opt,
 }
 
 /* Per entry merge function */
-static int process_entry(struct merge_options *opt,
-			 const char *path, struct conflict_info *entry)
+static void process_entry(struct merge_options *opt, struct str_entry *entry)
+			  /*
+			  const char *path, struct conflict_info *entry)
+			  */
 {
-	int clean_merge = 1;
+	/* const char *path = entry->item.string; */
+	struct conflict_info *ci = entry->item.util;
+
 	/* int normalize = opt->renormalize; */
 
-	//struct version_info *o = &entry->stages[1];
-	struct version_info *a = &entry->stages[2];
-	//struct version_info *b = &entry->stages[3];
-	/* o->path = a->path = b->path = (char*)path; */
+#if 0
+	struct version_info *o = &ci->stages[1];
+	struct version_info *a = &ci->stages[2];
+	struct version_info *b = &ci->stages[3];
+#endif
 
-	entry->processed = 1;
-	/* FIXME: Handle renamed cases */
-	/* FIXME: Next two blocks implements an 'ours' strategy. */
-	if (a->mode != 0 && !is_null_oid(&a->oid)) {
-		entry->stages[0].mode = a->mode;
-		oidcpy(&entry->stages[0].oid, &a->oid);
-		entry->clean = 1;
-	} else {
-		entry->stages[0].mode = 0;
-		oidcpy(&entry->stages[0].oid, &null_oid);
-		entry->clean = 1;
+	assert(!ci->processed);
+	ci->processed = 1;
+	assert(ci->filemask >=0 && ci->filemask < 8);
+	if (ci->filemask == 0) {
+		/*
+		 * This is a placeholder for directories that were recursed into.
+		 * Nothing to do.
+		 */
+		return;
 	}
+	if (ci->df_conflict) {
+		assert(ci->filemask >= 1 && ci->filemask <= 6);
+		/*
+		 * FIXME: Move the files out of the way, then fall-through to
+		 * below entries for the alternate record.
+		 */
+	}
+	if (ci->filemask >= 6) {
+#if 0
+		struct merge_file_info *mfi;
+		unsigned clean_merge;
+#endif
 
-	return clean_merge;
+		assert(!ci->df_conflict);
+#if 0
+		clean_merge = handle_content_merge(&mfi, opt, path,
+						   o, a, b, NULL);
+		if (clean_merge) {
+			/* FIXME: implement */
+		}
+#endif
+	}
+	if (ci->filemask == 3 || ci->filemask == 5) {
+		/* FIXME: Handle modify/delete */
+		int side = (ci->filemask == 5) ? 3 : 2;
+		ci->merged.result.mode = ci->stages[side].mode;
+		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
+		ci->clean = 0;
+	} else if (ci->filemask == 2 || ci->filemask == 4) {
+		/* Added on one side */
+		int side = (ci->filemask == 4) ? 3 : 2;
+		ci->merged.result.mode = ci->stages[side].mode;
+		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
+		ci->clean = 1;
+	} else if (ci->filemask == 1) {
+		/* Deleted on both sides */
+		ci->merged.result_is_null = 1;
+		ci->merged.result.mode = 0;
+		oidcpy(&ci->merged.result.oid, &null_oid);
+		ci->clean = 1;
+	}
 }
 
 /*
@@ -527,10 +569,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree **result)
 {
 	int code, clean;
-
-	if (opt->priv->call_depth) {
-		discard_index(opt->repo->index);
-	}
 
 	if (opt->subtree_shift) {
 		merge = shift_tree_object(opt->repo, head, merge,
@@ -555,29 +593,17 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 	}
 
-	if (strmap_empty(&opt->priv->unmerged)) {
+	if (strmap_get_size(&opt->priv->unmerged) ==
+	    opt->priv->nr_dir_only_entries) {
 		clean = 1;
 	} else {
 		struct hashmap_iter iter;
 		struct str_entry *entry;
 		clean = 0;
 		strmap_for_each_entry(&opt->priv->unmerged, &iter, entry) {
-			const char *path = entry->item.string;
-			struct conflict_info *e = entry->item.util;
-			if (!e->processed) {
-				int ret = process_entry(opt, path, e);
-				if (!ret)
-					clean = 0;
-				else if (ret < 0) {
-					return ret;
-				}
-			}
+			process_entry(opt, entry);
 		}
 	}
-
-	if (opt->priv->call_depth &&
-	    !(*result = write_in_core_index_as_tree(opt->repo)))
-		return -1;
 
 	return clean;
 }
