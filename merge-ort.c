@@ -56,7 +56,8 @@ struct merged_info {
 	  */
 	const char *directory_name;
 	size_t basename_offset;
-	unsigned result_is_null;
+	unsigned result_is_null:1;
+	unsigned clean:1;
 };
 
 struct conflict_info {
@@ -65,7 +66,6 @@ struct conflict_info {
 	unsigned df_conflict:1;
 	unsigned filemask:3;
 	unsigned processed:1;
-	unsigned clean:1;
 };
 
 
@@ -557,19 +557,19 @@ static void process_entry(struct merge_options *opt, struct str_entry *entry)
 		int side = (ci->filemask == 5) ? 3 : 2;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
-		ci->clean = 0;
+		ci->merged.clean = 0;
 	} else if (ci->filemask == 2 || ci->filemask == 4) {
 		/* Added on one side */
 		int side = (ci->filemask == 4) ? 3 : 2;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
-		ci->clean = 1;
+		ci->merged.clean = 1;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
 		ci->merged.result_is_null = 1;
 		ci->merged.result.mode = 0;
 		oidcpy(&ci->merged.result.oid, &null_oid);
-		ci->clean = 1;
+		ci->merged.clean = 1;
 	}
 }
 
