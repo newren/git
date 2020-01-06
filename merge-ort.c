@@ -271,9 +271,10 @@ static int collect_merge_info_callback(int n,
 	 * head of side 1  (side1) has mask 2, and stored in index 1 of names
 	 * head of side 2  (side2) has mask 4, and stored in index 2 of names
 	 */
-	struct merge_options_internal *opt = info->data;
+	struct merge_options *opt = info->data;
+	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
-	unsigned prev_iprd = opt->inside_possibly_renamed_dir; /* prev value */
+	unsigned prev_iprd = opti->inside_possibly_renamed_dir; /* prev value */
 	unsigned filemask = mask & ~dirmask;
 	unsigned mbase_null = !(mask & 1);
 	unsigned side1_null = !(mask & 2);
@@ -316,9 +317,9 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, info, names+0, opt->current_dir_name,
+		setup_path_info(&pi, info, names+0, opti->current_dir_name,
 				mbase_null, 0, filemask, 1);
-		strmap_put(&opt->merged, pi.string, pi.util);
+		strmap_put(&opti->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -329,9 +330,9 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, info, names+1, opt->current_dir_name,
+		setup_path_info(&pi, info, names+1, opti->current_dir_name,
 				0, 0, filemask, 1);
-		strmap_put(&opt->merged, pi.string, pi.util);
+		strmap_put(&opti->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -345,12 +346,12 @@ static int collect_merge_info_callback(int n,
 	 * may be new files on side2's side that are rename targets that need
 	 * to be merged with changes from elsewhere on side1's side of history.
 	 */
-	if (!opt->inside_possibly_renamed_dir &&
+	if (!opti->inside_possibly_renamed_dir &&
 	    !side1_null && side1_matches_mbase && !side2_is_tree) {
 		/* use side2 version as resolution */
-		setup_path_info(&pi, info, names+2, opt->current_dir_name,
+		setup_path_info(&pi, info, names+2, opti->current_dir_name,
 				side2_null, 0, filemask, 1);
-		strmap_put(&opt->merged, pi.string, pi.util);
+		strmap_put(&opti->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -359,12 +360,12 @@ static int collect_merge_info_callback(int n,
 	 * early.  Same reasoning as for above but with side1 and side2
 	 * swapped.
 	 */
-	if (!opt->inside_possibly_renamed_dir &&
+	if (!opti->inside_possibly_renamed_dir &&
 	    !side2_null && side2_matches_mbase && !side1_is_tree) {
 		/* use side1 version as resolution */
-		setup_path_info(&pi, info, names+1, opt->current_dir_name,
+		setup_path_info(&pi, info, names+1, opti->current_dir_name,
 				side1_null, 0, filemask, 1);
-		strmap_put(&opt->merged, pi.string, pi.util);
+		strmap_put(&opti->merged, pi.string, pi.util);
 		return mask;
 	}
 
@@ -374,11 +375,11 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, info, names, opt->current_dir_name,
+	setup_path_info(&pi, info, names, opti->current_dir_name,
 			0, df_conflict, filemask, 0);
-	strmap_put(&opt->unmerged, pi.string, pi.util);
+	strmap_put(&opti->unmerged, pi.string, pi.util);
 	if (filemask == 0)
-		opt->nr_dir_only_entries += 1;
+		opti->nr_dir_only_entries += 1;
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
@@ -412,8 +413,8 @@ static int collect_merge_info_callback(int n,
 		 * whose source path doesn't start with one of the directory
 		 * paths in possible_dir_rename_bases.
 		 */
-		strmap_put(&opt->possible_dir_rename_bases, pi.string, NULL);
-		opt->inside_possibly_renamed_dir = 1;
+		strmap_put(&opti->possible_dir_rename_bases, pi.string, NULL);
+		opti->inside_possibly_renamed_dir = 1;
 	}
 
 	/* If dirmask, recurse into subdirectories */
@@ -460,11 +461,11 @@ static int collect_merge_info_callback(int n,
 			}
 		}
 
-		original_dir_name = opt->current_dir_name;
-		opt->current_dir_name = pi.string;
+		original_dir_name = opti->current_dir_name;
+		opti->current_dir_name = pi.string;
 		ret = traverse_trees(NULL, 3, t, &newinfo);
-		opt->current_dir_name = original_dir_name;
-		opt->inside_possibly_renamed_dir = prev_iprd;
+		opti->current_dir_name = original_dir_name;
+		opti->inside_possibly_renamed_dir = prev_iprd;
 
 		for (i = 0; i < 3; i++)
 			free(buf[i]);
