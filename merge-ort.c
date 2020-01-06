@@ -29,12 +29,18 @@
 #include "unpack-trees.h"
 
 struct merge_options_internal {
-	struct strmap merged;   /* maps path -> version_info */
+	struct strmap paths;    /* maps path -> (merged|conflict)_info */
+#if 0
 	struct strmap unmerged; /* maps path -> conflict_info */
+#endif
 	struct strmap possible_dir_rename_bases; /* set of paths */
+#if 0
 	struct strmap submodule_directory_conflicts; /* set of paths */
+#endif
 	const char *current_dir_name;
+#if 0
 	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
+#endif
 	int call_depth;
 	int needed_rename_limit;
 	unsigned inside_possibly_renamed_dir:1;
@@ -319,7 +325,7 @@ static int collect_merge_info_callback(int n,
 		/* mbase, side1, & side2 all match; use mbase as resolution */
 		setup_path_info(&pi, info, names+0, opti->current_dir_name,
 				mbase_null, 0, filemask, 1);
-		strmap_put(&opti->merged, pi.string, pi.util);
+		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -332,7 +338,7 @@ static int collect_merge_info_callback(int n,
 		/* use side1 (== side2) version as resolution */
 		setup_path_info(&pi, info, names+1, opti->current_dir_name,
 				0, 0, filemask, 1);
-		strmap_put(&opti->merged, pi.string, pi.util);
+		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -351,7 +357,7 @@ static int collect_merge_info_callback(int n,
 		/* use side2 version as resolution */
 		setup_path_info(&pi, info, names+2, opti->current_dir_name,
 				side2_null, 0, filemask, 1);
-		strmap_put(&opti->merged, pi.string, pi.util);
+		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -365,7 +371,7 @@ static int collect_merge_info_callback(int n,
 		/* use side1 version as resolution */
 		setup_path_info(&pi, info, names+1, opti->current_dir_name,
 				side1_null, 0, filemask, 1);
-		strmap_put(&opti->merged, pi.string, pi.util);
+		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -377,9 +383,11 @@ static int collect_merge_info_callback(int n,
 	 */
 	setup_path_info(&pi, info, names, opti->current_dir_name,
 			0, df_conflict, filemask, 0);
-	strmap_put(&opti->unmerged, pi.string, pi.util);
+	strmap_put(&opti->paths, pi.string, pi.util);
+#if 0
 	if (filemask == 0)
 		opti->nr_dir_only_entries += 1;
+#endif
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
@@ -505,13 +513,13 @@ static int collect_merge_info(struct merge_options *opt,
 }
 
 /* Per entry merge function */
-static void process_entry(struct merge_options *opt, struct str_entry *entry)
+static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			  /*
 			  const char *path, struct conflict_info *entry)
 			  */
 {
-	/* const char *path = entry->item.string; */
-	struct conflict_info *ci = entry->item.util;
+	/* const char *path = e->string; */
+	struct conflict_info *ci = e->util;
 
 	/* int normalize = opt->renormalize; */
 
@@ -574,6 +582,162 @@ static void process_entry(struct merge_options *opt, struct str_entry *entry)
 	}
 }
 
+static void write_tree(struct object_id *result_oid,
+		       struct string_list *versions,
+		       unsigned int offset)
+{
+	size_t maxlen = 0;
+	unsigned int nr = versions->nr - offset;
+	struct strbuf buf = STRBUF_INIT;
+	struct string_list relevant_entries = STRING_LIST_INIT_NODUP;
+	int i;
+
+	/*
+	 * We want to sort the last (versions->nr-offset) entries in versions.
+	 * Do so by abusing the string_list API a bit: make another string_list
+	 * that contains just those entries and then sort them.
+	 *
+	 * We won't use relevant_entries again and will let it just pop off the
+	 * stack, so there won't be allocation worries or anything.
+	 */
+	relevant_entries.items = versions->items + offset;
+	relevant_entries.nr = versions->nr - offset;
+	string_list_sort(&relevant_entries);
+
+	/* Pre-allocate some space in buf */
+	for (i = 0; i < nr; i++) {
+		maxlen += strlen(versions->items[offset+i].string) + 34;
+	}
+	strbuf_reset(&buf);
+	strbuf_grow(&buf, maxlen);
+
+	/* Write each entry out to buf */
+	for (i = 0; i < nr; i++) {
+		struct merged_info *mi = versions->items[offset+i].util;
+		struct version_info *ri = &mi->result;
+		strbuf_addf(&buf, "%o %s%c",
+			    ri->mode,
+			    versions->items[offset+i].string, '\0');
+		strbuf_add(&buf, ri->oid.hash, the_hash_algo->rawsz);
+	}
+
+	/* Write this object file out, and record in result_oid */
+	write_object_file(buf.buf, buf.len, tree_type, result_oid);
+}
+
+struct directory_versions {
+	struct string_list versions;
+	struct string_list offsets;
+	const char *last_directory;
+	unsigned last_directory_len;
+};
+
+static void write_completed_directories(struct merge_options *opt,
+					struct merged_info *ne, /* next_entry */
+					struct directory_versions *info)
+{
+	const char *prev_dir;
+	struct merged_info *dir_info;
+
+	if (ne->directory_name == info->last_directory)
+		return;
+
+	/*
+	 * If we are just starting (last_directory is NULL), or last_directory
+	 * is a prefix of the current directory, then we can just update
+	 * last_directory and record the offset where we started this directory.
+	 */
+	if (info->last_directory == NULL ||
+	    !strncmp(ne->directory_name, info->last_directory,
+		     info->last_directory_len)) {
+		uintptr_t offset = info->versions.nr;
+
+		info->last_directory = ne->directory_name;
+		info->last_directory_len = strlen(info->last_directory);
+		string_list_append(&info->offsets,
+				   info->last_directory)->util = (void*)offset;
+	}
+
+	/*
+	 * At this point, ne (next entry) is within a different directory
+	 * than the last entry, so we need to create a tree object for all
+	 * the entires in info->versions that are under info->last_directory.
+	 */
+	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
+	dir_info->result.mode = S_IFDIR;
+	write_tree(&dir_info->result.oid,
+		   &info->versions,
+		   (uintptr_t)info->offsets.items[info->offsets.nr-1].util);
+
+	/*
+	 * We've now used several entries from info->versions and one entry
+	 * from info->offsets, so we get rid of those values.
+	 */
+	info->offsets.nr--;
+	info->versions.nr = (uintptr_t)info->offsets.items[info->offsets.nr].util;
+
+	/*
+	 * Now we've got an OID for last_directory in dir_info.  We need to
+	 * add it to info->versions for it to be part of the computation of
+	 * its parent directories' OID.  But first, we have to find out what
+	 * its' parent name was and whether that matches the previous
+	 * info->offsets or we need to set up a new one.
+	 */
+	prev_dir = info->offsets.items[info->offsets.nr-1].string;
+	if (ne->directory_name != prev_dir) {
+		uintptr_t c = info->versions.nr;
+		string_list_append(&info->offsets,
+				   ne->directory_name)->util = (void*)c;
+	}
+
+	/*
+	 * Okay, finally record OID for last_directory in info->versions,
+	 * and update last_directory.
+	 */
+	string_list_append(&info->versions,
+			   info->last_directory)->util = dir_info;
+	info->last_directory = ne->directory_name;
+	info->last_directory_len = strlen(info->last_directory);
+}
+
+static void process_entries(struct merge_options *opt)
+{
+	struct hashmap_iter iter;
+	struct str_entry *e;
+	struct string_list plist = STRING_LIST_INIT_NODUP;
+	struct string_list_item *entry;
+	struct directory_versions dir_metadata;
+
+	/* Hack to pre-allocated both to the desired size */
+	ALLOC_GROW(plist.items, strmap_get_size(&opt->priv->paths), plist.alloc);
+
+	/* Put every entry from paths into plist, then sort */
+	strmap_for_each_entry(&opt->priv->paths, &iter, e) {
+		string_list_append(&plist, e->item.string)->util = e->item.util;
+	}
+	/* both.cmp = string_list_df_name_compare; */
+	string_list_sort(&plist);
+
+	/*
+	 * Iterate over the items in both in reverse order, so we can handle
+	 * contained directories before the containing directory.
+	 */
+	string_list_init(&dir_metadata.versions, 0);
+	string_list_init(&dir_metadata.offsets, 0);
+	dir_metadata.last_directory = NULL;
+	dir_metadata.last_directory_len = 0;
+	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
+		struct merged_info *mi = entry->util;
+		const char *basename;
+
+		write_completed_directories(opt, mi, &dir_metadata);
+		process_entry(opt, entry);
+		basename = entry->string + mi->basename_offset;
+		string_list_append(&dir_metadata.versions, basename)->util = &mi->result;
+	}
+	assert(dir_metadata.versions.nr == 1);
+}
+
 /*
  * Drop-in replacement for merge_trees_internal().
  * Differences:
@@ -614,18 +778,9 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 	}
 
-	if (strmap_get_size(&opt->priv->unmerged) ==
-	    opt->priv->nr_dir_only_entries) {
-		clean = 1;
-	} else {
-		struct hashmap_iter iter;
-		struct str_entry *entry;
-		clean = 0;
-		strmap_for_each_entry(&opt->priv->unmerged, &iter, entry) {
-			process_entry(opt, entry);
-		}
-	}
+	process_entries(opt);
 
+	clean = 1;
 	return clean;
 }
 
@@ -778,8 +933,10 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		return -1;
 	}
 
-	strmap_init(&opt->priv->merged, 0);
+	strmap_init(&opt->priv->paths, 0);
+#if 0
 	strmap_init(&opt->priv->unmerged, 0);
+#endif
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	return 0;
 }
@@ -800,17 +957,19 @@ static void merge_finalize(struct merge_options *opt)
 	strmap_clear(&opt->priv->possible_dir_rename_bases, 1);
 
 	/*
-	 * We marked opt->priv->[un]merged with strdup_strings = 0, so that
-	 * we wouldn't have to make another copy of the fullpath created by
+	 * We marked opt->priv->paths with strdup_strings = 0, so that we
+	 * wouldn't have to make another copy of the fullpath created by
 	 * make_traverse_path from setup_path_info().  But, now that we've
 	 * used it and have no other references to these strings, it is time
 	 * to deallocate them, which we do by just setting strdup_string = 1
 	 * before the strmaps are cleared.
 	 */
+	opt->priv->paths.strdup_strings = 1;
+	strmap_clear(&opt->priv->paths, 1);
+#if 0
 	opt->priv->unmerged.strdup_strings = 1;
-	opt->priv->merged.strdup_strings = 1;
 	strmap_clear(&opt->priv->unmerged, 1);
-	strmap_clear(&opt->priv->merged, 1);
+#endif
 
 	FREE_AND_NULL(opt->priv);
 }
