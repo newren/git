@@ -1,0 +1,27 @@
+Things it does that are useless at best or detrimental at worst:
+  * Spends considerable effort comparing with the current index (mostly to
+    ensure that the current index matches the HEAD tree)
+  * Spends a lot of time create cache entries, which have data we don't need
+    and misses data we do want/need
+  * Updates the working copy as it goes, unless told not to.  (Also, it worries
+    a lot about SKIP_WORKTREE.)
+
+Things it does that makes our work hard:
+  * Represents D/F conflicts poorly (index)
+  * Due to full-index, prevents preliminary tree merging (must recurse)
+
+Things we have to recompute because it doesn't save:
+  * Which files have D/F conflicts
+  * filemasks
+  * is_null
+  * path_len
+  * basename_len
+  * which files/directories exist
+  * which directories might be directory rename sources
+  
+Things you think we miss out on but don't:
+  * unpack_trees has this nice optimization where it can notice when the trees
+    being unpacked are all the same and match the current cache tree.  It then
+    notes it can just copy entries from the current index instead of recursing.
+    However, I don't need to copy a lot of cache entries, I can just note that
+    the *tree* already has the correct resolution.  I'm okay with a tree.
