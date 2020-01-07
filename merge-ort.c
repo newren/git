@@ -30,9 +30,7 @@
 
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
-#if 0
 	struct strmap unmerged; /* maps path -> conflict_info */
-#endif
 	struct strmap possible_dir_rename_bases; /* set of paths */
 #if 0
 	struct strmap submodule_directory_conflicts; /* set of paths */
@@ -512,13 +510,43 @@ static int collect_merge_info(struct merge_options *opt,
 	return ret;
 }
 
+/* add a string to a strbuf, but converting "/" to "_" */
+static void add_flattened_path(struct strbuf *out, const char *s)
+{
+	size_t i = out->len;
+	strbuf_addstr(out, s);
+	for (; i < out->len; i++)
+		if (out->buf[i] == '/')
+			out->buf[i] = '_';
+}
+
+static char *unique_path(struct merge_options *opt,
+			 const char *path,
+			 const char *branch)
+{
+	struct strbuf newpath = STRBUF_INIT;
+	int suffix = 0;
+	size_t base_len;
+
+	strbuf_addf(&newpath, "%s~", path);
+	add_flattened_path(&newpath, branch);
+
+	base_len = newpath.len;
+	while (strmap_contains(&opt->priv->paths, newpath.buf)) {
+		strbuf_setlen(&newpath, base_len);
+		strbuf_addf(&newpath, "_%d", suffix++);
+	}
+
+	return strbuf_detach(&newpath, NULL);
+}
+
 /* Per entry merge function */
 static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			  /*
 			  const char *path, struct conflict_info *entry)
 			  */
 {
-	/* const char *path = e->string; */
+	const char *path = e->string;
 	struct conflict_info *ci = e->util;
 
 	/* int normalize = opt->renormalize; */
@@ -539,12 +567,38 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		 */
 		return;
 	}
-	if (ci->df_conflict) {
-		assert(ci->filemask >= 1 && ci->filemask <= 6);
+	if (ci->df_conflict && ci->filemask != 1 &&
+	    ci->merged.result.mode != 0) {
 		/*
-		 * FIXME: Move the files out of the way, then fall-through to
-		 * below entries for the alternate record.
+		 * This started out as a D/F conflict, and the entries in
+		 * the competing directory were not removed by the merge as
+		 * evidenced by write_completed_directories() writing a value
+		 * to ci->merged.result.mode.  If filemask were 1, we could
+		 * just ignore the file as having been deleted on both sides,
+		 * but it still exists on at least one side.  So, we need to
+		 * move this path to some new location to make room for the
+		 * directory.
 		 */
+		struct conflict_info *new_ci;
+		const char *branch;
+
+		assert(ci->merged.result.mode == S_IFDIR);
+		assert(ci->filemask >= 2 && ci->filemask <= 6);
+		assert(ci->filemask != 6 || opt->priv->call_depth > 0);
+
+		new_ci = xcalloc(1, sizeof(*ci));
+		/* We don't really want new_ci->merged.result copied, but it'll
+		 * be overwritten below so it doesn't matter, and we do want
+		 * the rest of ci copied.
+		 */
+		memcpy(new_ci, ci, sizeof(*ci));
+
+		branch = (ci->filemask & 2) ? opt->branch1 : opt->branch2;
+		path = unique_path(opt, path, branch);
+		strmap_put(&opt->priv->paths, path, new_ci);
+
+		/* Point ci at the new entry so it can be worked on */
+		ci = new_ci;
 	}
 	if (ci->filemask >= 6) {
 #if 0
@@ -572,7 +626,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		int side = (ci->filemask == 4) ? 3 : 2;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
-		ci->merged.clean = 1;
+		ci->merged.clean = !ci->df_conflict;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
 		ci->merged.result_is_null = 1;
@@ -580,6 +634,8 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		oidcpy(&ci->merged.result.oid, &null_oid);
 		ci->merged.clean = 1;
 	}
+	if (!ci->merged.clean)
+		strmap_put(&opt->priv->unmerged, path, ci);
 }
 
 static void write_tree(struct object_id *result_oid,
@@ -934,9 +990,7 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	}
 
 	strmap_init(&opt->priv->paths, 0);
-#if 0
 	strmap_init(&opt->priv->unmerged, 0);
-#endif
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	return 0;
 }
@@ -962,14 +1016,14 @@ static void merge_finalize(struct merge_options *opt)
 	 * make_traverse_path from setup_path_info().  But, now that we've
 	 * used it and have no other references to these strings, it is time
 	 * to deallocate them, which we do by just setting strdup_string = 1
-	 * before the strmaps are cleared.
+	 * before the strmaps are cleared.  Note that all strings in
+	 * opt->priv->unmerged are a subset of those in opt->priv->paths, and
+	 * we don't want to deallocate strings twice, so we only deallocate
+	 * for opt->priv->paths.
 	 */
 	opt->priv->paths.strdup_strings = 1;
 	strmap_clear(&opt->priv->paths, 1);
-#if 0
-	opt->priv->unmerged.strdup_strings = 1;
 	strmap_clear(&opt->priv->unmerged, 1);
-#endif
 
 	FREE_AND_NULL(opt->priv);
 }
