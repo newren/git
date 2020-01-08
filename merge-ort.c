@@ -583,8 +583,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		const char *branch;
 
 		assert(ci->merged.result.mode == S_IFDIR);
-		assert(ci->filemask >= 2 && ci->filemask <= 6);
-		assert(ci->filemask != 6 || opt->priv->call_depth > 0);
+		assert(ci->filemask >= 2 && ci->filemask <= 5);
 
 		new_ci = xcalloc(1, sizeof(*ci));
 		/* We don't really want new_ci->merged.result copied, but it'll
@@ -598,6 +597,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		strmap_put(&opt->priv->paths, path, new_ci);
 
 		/* Point ci at the new entry so it can be worked on */
+		ci->filemask = 0;
 		ci = new_ci;
 	}
 	if (ci->filemask >= 6) {
