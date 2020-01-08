@@ -1,11 +1,10 @@
-* process_entry:
-  * create new-unmerged entries for D/F conflicts, and sometimes path
-    conflicts (e.g. modify/delete).  Write to both opti->paths and
-    opti->unmerged.
-  * write still-unmerged entries to opti->unmerged.
 * conflict messages need to be printed, usually
 * Write code to update index too.
 
+
+* Stuff to not forget:
+  * Normalization code from merge-recursive.c -- modify/delete might actually
+    be a not-modified/delete.
 
 Old stuff, probably delete:
 * Do a bunch of clean up to get a nice clean history; store now-unnecessary

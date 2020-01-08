@@ -33,3 +33,53 @@ Overall structure
         * filemask == 7 && sides_match
         * tracking possible directory rename bases
         * side matches base
+
+
+
+Sections to highlight in merge-ort:
+  * Output
+    show
+    flush_output
+    output
+    err
+    output_commit_title
+    print_commit
+
+  * Collect info
+    setup_path_info
+    collect_merge_info_callback
+    collect_merge_info
+
+  * 3-way content merging
+    merge_submodule
+    merge_3way
+    handle_content_merge
+
+  ? Miscellaneous?
+    merge_detect_rename
+
+  ?
+    add_flattened_path
+    unique_path
+
+  * Converting internal data structures to a tree object
+    write_tree
+    write_completed_directories
+
+  * Resolution loop
+    process_entry
+    process_entries
+
+  * Implementation of deprecated API, part 1 (tweaking of tree/commit objects)
+    shift_tree_object
+    set_commit_tree
+    make_virtual_commit
+    reverse_commit_list
+  * Implementation of deprecated API, part 1
+    merge_ort_nonrecursive_internal
+    merge_ort_internal
+    merge_start
+    merge_finalize
+  * Deprecated API
+    merge_ort_nonrecursive
+    merge_ort
