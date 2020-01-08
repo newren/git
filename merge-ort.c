@@ -27,7 +27,9 @@
 #include "dir.h"
 #include "ll-merge.h"
 #include "object-store.h"
+#include "revision.h"
 #include "strmap.h"
+#include "submodule.h"
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
 
@@ -204,6 +206,16 @@ static void output_commit_title(struct merge_options *opt, struct commit *commit
 		}
 	}
 	flush_output(opt);
+}
+
+static void print_commit(struct commit *commit)
+{
+	struct strbuf sb = STRBUF_INIT;
+	struct pretty_print_context ctx = {0};
+	ctx.date_mode.type = DATE_NORMAL;
+	format_commit_message(commit, " %h: %m %s", &sb, &ctx);
+	fprintf(stderr, "%s\n", sb.buf);
+	strbuf_release(&sb);
 }
 
 #if 0
@@ -547,6 +559,69 @@ static char *unique_path(struct merge_options *opt,
 	return strbuf_detach(&newpath, NULL);
 }
 
+static int find_first_merges(struct repository *repo,
+			     const char *path,
+			     struct commit *a,
+			     struct commit *b,
+			     struct object_array *result)
+{
+	int i, j;
+	struct object_array merges = OBJECT_ARRAY_INIT;
+	struct commit *commit;
+	int contains_another;
+
+	char merged_revision[GIT_MAX_HEXSZ + 2];
+	const char *rev_args[] = { "rev-list", "--merges", "--ancestry-path",
+				   "--all", merged_revision, NULL };
+	struct rev_info revs;
+	struct setup_revision_opt rev_opts;
+
+	memset(result, 0, sizeof(struct object_array));
+	memset(&rev_opts, 0, sizeof(rev_opts));
+
+	/* get all revisions that merge commit a */
+	xsnprintf(merged_revision, sizeof(merged_revision), "^%s",
+		  oid_to_hex(&a->object.oid));
+	repo_init_revisions(repo, &revs, NULL);
+	rev_opts.submodule = path;
+	/* FIXME: can't handle linked worktrees in submodules yet */
+	revs.single_worktree = path != NULL;
+	setup_revisions(ARRAY_SIZE(rev_args)-1, rev_args, &revs, &rev_opts);
+
+	/* save all revisions from the above list that contain b */
+	if (prepare_revision_walk(&revs))
+		die("revision walk setup failed");
+	while ((commit = get_revision(&revs)) != NULL) {
+		struct object *o = &(commit->object);
+		if (in_merge_bases(b, commit))
+			add_object_array(o, NULL, &merges);
+	}
+	reset_revision_walk();
+
+	/* Now we've got all merges that contain a and b. Prune all
+	 * merges that contain another found merge and save them in
+	 * result.
+	 */
+	for (i = 0; i < merges.nr; i++) {
+		struct commit *m1 = (struct commit *) merges.objects[i].item;
+
+		contains_another = 0;
+		for (j = 0; j < merges.nr; j++) {
+			struct commit *m2 = (struct commit *) merges.objects[j].item;
+			if (i != j && in_merge_bases(m2, m1)) {
+				contains_another = 1;
+				break;
+			}
+		}
+
+		if (!contains_another)
+			add_object_array(merges.objects[i].item, NULL, result);
+	}
+
+	object_array_clear(&merges);
+	return result->nr;
+}
+
 static int merge_submodule(struct merge_options *opt,
 			   const char *path,
 			   const struct object_id *o,
@@ -554,7 +629,114 @@ static int merge_submodule(struct merge_options *opt,
 			   const struct object_id *b,
 			   struct object_id *result)
 {
-	/* FIXME: Implement this */
+	struct commit *commit_o, *commit_a, *commit_b;
+	int parent_count;
+	struct object_array merges;
+
+	int i;
+	int search = !opt->priv->call_depth;
+
+	/* store a in result in case we fail */
+	/* FIXME: This is the WRONG resolution for the recursive case when
+	 * we need to be careful to avoid accidentally matching either side.
+	 * Should probably use o instead there, much like we do for merging
+	 * binaries.
+	 */
+	oidcpy(result, a);
+
+	/* we can not handle deletion conflicts */
+	if (is_null_oid(o))
+		return 0;
+	if (is_null_oid(a))
+		return 0;
+	if (is_null_oid(b))
+		return 0;
+
+	if (add_submodule_odb(path)) {
+		output(opt, 1, _("Failed to merge submodule %s (not checked out)"), path);
+		return 0;
+	}
+
+	if (!(commit_o = lookup_commit_reference(opt->repo, o)) ||
+	    !(commit_a = lookup_commit_reference(opt->repo, a)) ||
+	    !(commit_b = lookup_commit_reference(opt->repo, b))) {
+		output(opt, 1, _("Failed to merge submodule %s (commits not present)"), path);
+		return 0;
+	}
+
+	/* check whether both changes are forward */
+	if (!in_merge_bases(commit_o, commit_a) ||
+	    !in_merge_bases(commit_o, commit_b)) {
+		output(opt, 1, _("Failed to merge submodule %s (commits don't follow merge-base)"), path);
+		return 0;
+	}
+
+	/* Case #1: a is contained in b or vice versa */
+	if (in_merge_bases(commit_a, commit_b)) {
+		oidcpy(result, b);
+		if (show(opt, 3)) {
+			output(opt, 3, _("Fast-forwarding submodule %s to the following commit:"), path);
+			output_commit_title(opt, commit_b);
+		} else if (show(opt, 2))
+			output(opt, 2, _("Fast-forwarding submodule %s"), path);
+		else
+			; /* no output */
+
+		return 1;
+	}
+	if (in_merge_bases(commit_b, commit_a)) {
+		oidcpy(result, a);
+		if (show(opt, 3)) {
+			output(opt, 3, _("Fast-forwarding submodule %s to the following commit:"), path);
+			output_commit_title(opt, commit_a);
+		} else if (show(opt, 2))
+			output(opt, 2, _("Fast-forwarding submodule %s"), path);
+		else
+			; /* no output */
+
+		return 1;
+	}
+
+	/*
+	 * Case #2: There are one or more merges that contain a and b in
+	 * the submodule. If there is only one, then present it as a
+	 * suggestion to the user, but leave it marked unmerged so the
+	 * user needs to confirm the resolution.
+	 */
+
+	/* Skip the search if makes no sense to the calling context.  */
+	if (!search)
+		return 0;
+
+	/* find commit which merges them */
+	parent_count = find_first_merges(opt->repo, path, commit_a, commit_b,
+					 &merges);
+	switch (parent_count) {
+	case 0:
+		output(opt, 1, _("Failed to merge submodule %s (merge following commits not found)"), path);
+		break;
+
+	case 1:
+		output(opt, 1, _("Failed to merge submodule %s (not fast-forward)"), path);
+		output(opt, 2, _("Found a possible merge resolution for the submodule:\n"));
+		print_commit((struct commit *) merges.objects[0].item);
+		output(opt, 2, _(
+		       "If this is correct simply add it to the index "
+		       "for example\n"
+		       "by using:\n\n"
+		       "  git update-index --cacheinfo 160000 %s \"%s\"\n\n"
+		       "which will accept this suggestion.\n"),
+		       oid_to_hex(&merges.objects[0].item->oid), path);
+		break;
+
+	default:
+		output(opt, 1, _("Failed to merge submodule %s (multiple merges found)"), path);
+		for (i = 0; i < merges.nr; i++)
+			print_commit((struct commit *) merges.objects[i].item);
+	}
+
+	object_array_clear(&merges);
+	return 0;
 }
 
 static int merge_3way(struct merge_options *opt,
