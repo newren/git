@@ -289,9 +289,12 @@ static int collect_merge_info_callback(int n,
 	unsigned side2_null = !(mask & 4);
 	unsigned side1_is_tree = (dirmask & 2);
 	unsigned side2_is_tree = (dirmask & 4);
-	unsigned side1_matches_mbase = oideq(&names[0].oid, &names[1].oid);
-	unsigned side2_matches_mbase = oideq(&names[0].oid, &names[2].oid);
-	unsigned sides_match = oideq(&names[1].oid, &names[2].oid);
+	unsigned side1_matches_mbase = (names[0].mode == names[1].mode &&
+					oideq(&names[0].oid, &names[1].oid));
+	unsigned side2_matches_mbase = (names[0].mode == names[2].mode &&
+					oideq(&names[0].oid, &names[2].oid));
+	unsigned sides_match = (names[1].mode == names[2].mode &&
+				oideq(&names[1].oid, &names[2].oid));
 	/*
 	 * Note: We only label files with df_conflict, not directories.
 	 * Since directories stay where they are, and files move out of the
