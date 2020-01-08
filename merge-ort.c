@@ -18,15 +18,18 @@
 #include "merge-ort.h"
 
 #include "alloc.h"
+#include "blob.h"
 #include "cache-tree.h"
 #include "commit.h"
 #include "commit-reach.h"
 #include "diff.h"
 #include "diffcore.h"
 #include "dir.h"
+#include "ll-merge.h"
 #include "object-store.h"
 #include "strmap.h"
 #include "unpack-trees.h"
+#include "xdiff-interface.h"
 
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
@@ -67,6 +70,7 @@ struct merged_info {
 struct conflict_info {
 	struct merged_info merged;
 	struct version_info stages[3];
+	const char *pathnames[3];
 	unsigned df_conflict:1;
 	unsigned filemask:3;
 	unsigned processed:1;
@@ -540,6 +544,185 @@ static char *unique_path(struct merge_options *opt,
 	return strbuf_detach(&newpath, NULL);
 }
 
+static int merge_submodule(struct merge_options *opt,
+			   const char *path,
+			   const struct object_id *o,
+			   const struct object_id *a,
+			   const struct object_id *b,
+			   struct object_id *result)
+{
+	/* FIXME: Implement this */
+}
+
+static int merge_3way(struct merge_options *opt,
+		      const char *path,
+		      const struct version_info *o,
+		      const struct version_info *a,
+		      const struct version_info *b,
+		      const char *pathnames[3],
+		      const int extra_marker_size,
+		      mmbuffer_t *result_buf)
+{
+	mmfile_t orig, src1, src2;
+	struct ll_merge_options ll_opts = {0};
+	char *base, *name1, *name2;
+	int merge_status;
+
+	ll_opts.renormalize = opt->renormalize;
+	ll_opts.extra_marker_size = extra_marker_size;
+	ll_opts.xdl_opts = opt->xdl_opts;
+
+	if (opt->priv->call_depth) {
+		ll_opts.virtual_ancestor = 1;
+		ll_opts.variant = 0;
+	} else {
+		switch (opt->recursive_variant) {
+		case MERGE_VARIANT_OURS:
+			ll_opts.variant = XDL_MERGE_FAVOR_OURS;
+			break;
+		case MERGE_VARIANT_THEIRS:
+			ll_opts.variant = XDL_MERGE_FAVOR_THEIRS;
+			break;
+		default:
+			ll_opts.variant = 0;
+			break;
+		}
+	}
+
+	assert(pathnames[0] && pathnames[1] && pathnames[2] && opt->ancestor);
+	if (pathnames[0] == pathnames[1] && pathnames[1] == pathnames[2]) {
+		base  = mkpathdup("%s", opt->ancestor);
+		name1 = mkpathdup("%s", opt->branch1);
+		name2 = mkpathdup("%s", opt->branch2);
+	} else {
+		base  = mkpathdup("%s:%s", opt->ancestor, pathnames[0]);
+		name1 = mkpathdup("%s:%s", opt->branch1,  pathnames[1]);
+		name2 = mkpathdup("%s:%s", opt->branch2,  pathnames[2]);
+	}
+
+	read_mmblob(&orig, &o->oid);
+	read_mmblob(&src1, &a->oid);
+	read_mmblob(&src2, &b->oid);
+
+	merge_status = ll_merge(result_buf, path, &orig, base,
+				&src1, name1, &src2, name2,
+				opt->repo->index, &ll_opts);
+
+	free(base);
+	free(name1);
+	free(name2);
+	free(orig.ptr);
+	free(src1.ptr);
+	free(src2.ptr);
+	return merge_status;
+}
+
+static int handle_content_merge(struct merge_options *opt,
+				const char *path,
+				const struct version_info *o,
+				const struct version_info *a,
+				const struct version_info *b,
+				const char *pathnames[3],
+				const int extra_marker_size,
+				struct version_info *result)
+{
+	/*
+	 * path is the target location where we want to put the file, and
+	 * is used to determine any normalization rules in ll_merge.
+	 *
+	 * The normal case is that path and all entries in pathnames are
+	 * identical, though renames can affect which path we got one of
+	 * the three blobs to merge on various sides of history.
+	 *
+	 * extra_marker_size is the amount to extend conflict markers in
+	 * ll_merge; this is neeed if we have content merges of content
+	 * merges, which happens for example with rename/rename(2to1) and
+	 * rename/add conflicts.
+	 */
+	unsigned clean = 1;
+
+	if ((S_IFMT & a->mode) != (S_IFMT & b->mode)) {
+		/* Not both files, not both submodules, not both symlinks */
+		/* FIXME: this is a retarded resolution; if we can't have
+		 * both paths, submodule should take precedence, then file,
+		 * then symlink.  But it'd be better to rename paths elsewhere.
+		 */
+		clean = 0;
+		if (S_ISREG(a->mode)) {
+			result->mode = a->mode;
+			oidcpy(&result->oid, &a->oid);
+		} else {
+			result->mode = b->mode;
+			oidcpy(&result->oid, &b->oid);
+		}
+	} else {
+		/* Both files OR both submodules OR both symlinks */
+		assert(!oideq(&a->oid, &o->oid) || !oideq(&b->oid, &o->oid));
+
+		/*
+		 * Merge modes
+		 */
+		if (a->mode == b->mode || a->mode == o->mode)
+			result->mode = b->mode;
+		else {
+			assert(S_ISREG(a->mode));
+			result->mode = a->mode;
+			clean = (b->mode == o->mode);
+		}
+
+		/*
+		if (oideq(&a->oid, &b->oid) || oideq(&a->oid, &o->oid))
+			oidcpy(&result->oid, &b->oid);
+		else if (oideq(&b->oid, &o->oid))
+			oidcpy(&result->oid, &a->oid);
+		else */
+		if (S_ISREG(a->mode)) {
+			mmbuffer_t result_buf;
+			int ret = 0, merge_status;
+
+			merge_status = merge_3way(opt, path, o, a, b,
+						  pathnames, extra_marker_size,
+						  &result_buf);
+
+			if ((merge_status < 0) || !result_buf.ptr)
+				ret = err(opt, _("Failed to execute internal merge"));
+
+			if (!ret &&
+			    write_object_file(result_buf.ptr, result_buf.size,
+					      blob_type, &result->oid))
+				ret = err(opt, _("Unable to add %s to database"),
+					  path);
+
+			free(result_buf.ptr);
+			if (ret)
+				return -1;
+			clean &= (merge_status == 0);
+		} else if (S_ISGITLINK(a->mode)) {
+			clean = merge_submodule(opt, pathnames[0],
+						&o->oid, &a->oid, &b->oid,
+						&result->oid);
+		} else if (S_ISLNK(a->mode)) {
+			switch (opt->recursive_variant) {
+			case MERGE_VARIANT_NORMAL:
+				oidcpy(&result->oid, &a->oid);
+				if (!oideq(&a->oid, &b->oid))
+					clean = 0;
+				break;
+			case MERGE_VARIANT_OURS:
+				oidcpy(&result->oid, &a->oid);
+				break;
+			case MERGE_VARIANT_THEIRS:
+				oidcpy(&result->oid, &b->oid);
+				break;
+			}
+		} else
+			BUG("unsupported object type in the tree: %06o for %s",
+			    a->mode, path);
+	}
+
+	return clean;
+}
+
 /* Per entry merge function */
 static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			  /*
@@ -551,19 +734,13 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 
 	/* int normalize = opt->renormalize; */
 
-#if 0
-	struct version_info *o = &ci->stages[1];
-	struct version_info *a = &ci->stages[2];
-	struct version_info *b = &ci->stages[3];
-#endif
-
 	assert(!ci->processed);
 	ci->processed = 1;
 	assert(ci->filemask >=0 && ci->filemask < 8);
 	if (ci->filemask == 0) {
 		/*
-		 * This is a placeholder for directories that were recursed into.
-		 * Nothing to do.
+		 * This is a placeholder for directories that were recursed
+		 * into; nothing to do in this case.
 		 */
 		return;
 	}
@@ -601,19 +778,34 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		ci = new_ci;
 	}
 	if (ci->filemask >= 6) {
-#if 0
-		struct merge_file_info *mfi;
+		struct version_info merged_file;
 		unsigned clean_merge;
-#endif
+		struct version_info *o = &ci->stages[1];
+		struct version_info *a = &ci->stages[2];
+		struct version_info *b = &ci->stages[3];
 
 		assert(!ci->df_conflict);
-#if 0
-		clean_merge = handle_content_merge(&mfi, opt, path,
-						   o, a, b, NULL);
-		if (clean_merge) {
-			/* FIXME: implement */
+		clean_merge = handle_content_merge(opt, path, o, a, b,
+						   ci->pathnames,
+						   opt->priv->call_depth * 2,
+						   &merged_file);
+		ci->merged.clean = clean_merge;
+		ci->merged.result.mode = merged_file.mode;
+		oidcpy(&ci->merged.result.oid, &merged_file.oid);
+		/* Handle output stuff...
+		if (!clean_merge) {
+			if (S_ISREG(a->mode) && S_ISREG(b->mode)) {
+				output(opt, 2, _("Auto-merging %s"), filename);
+			}
+			const char *reason = _("content");
+			if (!is_valid(o))
+				reason = _("add/add");
+			if (S_ISGITLINK(mfi->blob.mode))
+				reason = _("submodule");
+			output(opt, 1, _("CONFLICT (%s): Merge conflict in %s"),
+			       reason, path);
 		}
-#endif
+		*/
 	}
 	if (ci->filemask == 3 || ci->filemask == 5) {
 		/* FIXME: Handle modify/delete */
