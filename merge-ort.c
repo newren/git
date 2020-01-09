@@ -1133,13 +1133,15 @@ static void write_completed_directories(struct merge_options *opt,
 	info->last_directory_len = strlen(info->last_directory);
 }
 
-static void process_entries(struct merge_options *opt)
+static void process_entries(struct merge_options *opt,
+			    struct object_id *result_oid)
 {
 	struct hashmap_iter iter;
 	struct str_entry *e;
 	struct string_list plist = STRING_LIST_INIT_NODUP;
 	struct string_list_item *entry;
 	struct directory_versions dir_metadata;
+	struct merged_info *merged;
 
 	/* Hack to pre-allocated both to the desired size */
 	ALLOC_GROW(plist.items, strmap_get_size(&opt->priv->paths), plist.alloc);
@@ -1169,6 +1171,58 @@ static void process_entries(struct merge_options *opt)
 		string_list_append(&dir_metadata.versions, basename)->util = &mi->result;
 	}
 	assert(dir_metadata.versions.nr == 1);
+	merged = dir_metadata.versions.items[0].util;
+	oidcpy(result_oid, &merged->result.oid);
+}
+
+static int checkout(struct merge_options *opt,
+		    struct tree *head,
+		    struct object_id *new_working_tree)
+{
+	int ret;
+	struct tree_desc trees[2];
+	struct tree *tree;
+	struct unpack_trees_options unpack_opts;
+
+	memset(&unpack_opts, 0, sizeof(unpack_opts));
+	unpack_opts.head_idx = -1;
+	unpack_opts.src_index = opt->repo->index;
+	unpack_opts.dst_index = opt->repo->index;
+
+	setup_unpack_trees_porcelain(&unpack_opts, "checkout");
+
+	refresh_index(opt->repo->index, REFRESH_QUIET, NULL, NULL, NULL);
+
+	if (unmerged_index(opt->repo->index)) {
+		error(_("you need to resolve your current index first"));
+		return -1;
+	}
+
+	/* 2-way merge to the new branch */
+	unpack_opts.update = 1;
+	unpack_opts.merge = 1;
+	unpack_opts.quiet = 1; /* FIXME: was opts->merge && old_branch_info->commit; */
+	unpack_opts.verbose_update = (opt->verbosity > 2);
+	unpack_opts.fn = twoway_merge;
+	if (1/* FIXME: opts->overwrite_ignore*/) {
+		unpack_opts.dir = xcalloc(1, sizeof(*unpack_opts.dir));
+		unpack_opts.dir->flags |= DIR_SHOW_IGNORED;
+		setup_standard_excludes(unpack_opts.dir);
+	}
+	parse_tree(head);
+	init_tree_desc(&trees[0], head->buffer, head->size);
+	tree = parse_tree_indirect(new_working_tree);
+	init_tree_desc(&trees[1], tree->buffer, tree->size);
+
+	ret = unpack_trees(2, trees, &unpack_opts);
+	clear_unpack_trees_porcelain(&unpack_opts);
+	return ret;
+}
+
+static int record_unmerged_index_entries(struct merge_options *opt)
+{
+	BUG("Uh, oh, this wasn't implemented.");
+	return 1;
 }
 
 /*
@@ -1184,8 +1238,9 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree *merge_base,
 					   struct tree **result)
 {
-	int code, clean;
+	int code;
 	char root_dir[1] = "\0";
+	struct object_id working_tree_oid;
 
 	if (opt->subtree_shift) {
 		merge = shift_tree_object(opt->repo, head, merge,
@@ -1211,10 +1266,17 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 	}
 
-	process_entries(opt);
+	process_entries(opt, &working_tree_oid);
+	if (checkout(opt, head, &working_tree_oid))
+		return -1; /* failure to function */
 
-	clean = 1;
-	return clean;
+	if (strmap_empty(&opt->priv->unmerged))
+		return 1; /* clean */
+
+	if (record_unmerged_index_entries(opt))
+		return -1; /* failure to function */
+
+	return 0; /* not clean */
 }
 
 /*
