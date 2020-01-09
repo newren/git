@@ -1,5 +1,11 @@
+* Today
+  * Commit code and pull to laptop before going home
+  * Respond to Junio to ask him to actually get v2 of en/unpack-trees-check-updates-simplify
+  * See if '-c merge.renames=0' speeds up the reported rebase problem
+
+
+* Write code to update index too (remove_marked_cache_entries()?  apply.c?)
 * conflict messages need to be printed, usually
-* Write code to update index too.
 
 
 * Stuff to not forget:
