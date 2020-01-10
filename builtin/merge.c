@@ -736,7 +736,7 @@ static int try_merge_strategy(const char *strategy, struct commit_list *common,
 			commit_list_insert(j->item, &reversed);
 
 		hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
-		if (!strcmp(strategy, "ort"))
+		if (!strcmp(strategy, "ort") || 1)
 			clean = merge_ort(&o, head, remoteheads->item,
 					  reversed, &result_tree);
 		else
