@@ -1066,13 +1066,13 @@ struct directory_versions {
 };
 
 static void write_completed_directories(struct merge_options *opt,
-					struct merged_info *ne, /* next_entry */
+					const char *new_directory_name,
 					struct directory_versions *info)
 {
 	const char *prev_dir;
 	struct merged_info *dir_info;
 
-	if (ne->directory_name == info->last_directory)
+	if (new_directory_name == info->last_directory)
 		return;
 
 	/*
@@ -1081,11 +1081,11 @@ static void write_completed_directories(struct merge_options *opt,
 	 * last_directory and record the offset where we started this directory.
 	 */
 	if (info->last_directory == NULL ||
-	    !strncmp(ne->directory_name, info->last_directory,
+	    !strncmp(new_directory_name, info->last_directory,
 		     info->last_directory_len)) {
 		uintptr_t offset = info->versions.nr;
 
-		info->last_directory = ne->directory_name;
+		info->last_directory = new_directory_name;
 		info->last_directory_len = strlen(info->last_directory);
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
@@ -1117,10 +1117,10 @@ static void write_completed_directories(struct merge_options *opt,
 	 * info->offsets or we need to set up a new one.
 	 */
 	prev_dir = info->offsets.items[info->offsets.nr-1].string;
-	if (ne->directory_name != prev_dir) {
+	if (new_directory_name != prev_dir) {
 		uintptr_t c = info->versions.nr;
 		string_list_append(&info->offsets,
-				   ne->directory_name)->util = (void*)c;
+				   new_directory_name)->util = (void*)c;
 	}
 
 	/*
@@ -1129,7 +1129,7 @@ static void write_completed_directories(struct merge_options *opt,
 	 */
 	string_list_append(&info->versions,
 			   info->last_directory)->util = dir_info;
-	info->last_directory = ne->directory_name;
+	info->last_directory = new_directory_name;
 	info->last_directory_len = strlen(info->last_directory);
 }
 
@@ -1165,7 +1165,8 @@ static void process_entries(struct merge_options *opt,
 		struct merged_info *mi = entry->util;
 		const char *basename;
 
-		write_completed_directories(opt, mi, &dir_metadata);
+		write_completed_directories(opt, mi->directory_name,
+					    &dir_metadata);
 		process_entry(opt, entry);
 		basename = entry->string + mi->basename_offset;
 		string_list_append(&dir_metadata.versions, basename)->util = &mi->result;
