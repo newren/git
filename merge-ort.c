@@ -946,6 +946,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 
 	/* int normalize = opt->renormalize; */
 
+	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
 	assert(!ci->merged.clean && !ci->processed);
 	ci->processed = 1;
 	assert(ci->filemask >=0 && ci->filemask < 8);
@@ -1056,6 +1057,9 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		ci->merged.clean = clean_merge;
 		ci->merged.result.mode = merged_file.mode;
 		oidcpy(&ci->merged.result.oid, &merged_file.oid);
+		printf("Content merging %s (%s); mode: %06o, hash: %s\n",
+		       path, ci->merged.clean ? "clean" : "unclean",
+		       ci->merged.result.mode, oid_to_hex(&ci->merged.result.oid));
 		/* Handle output stuff...
 		if (!clean_merge) {
 			if (S_ISREG(a->mode) && S_ISREG(b->mode)) {
@@ -1111,6 +1115,8 @@ static void write_tree(struct object_id *result_oid,
 	 * We won't use relevant_entries again and will let it just pop off the
 	 * stack, so there won't be allocation worries or anything.
 	 */
+	printf("Called write_tree with offset = %d\n", offset);
+	printf("  versions->nr = %d\n", versions->nr);
 	relevant_entries.items = versions->items + offset;
 	relevant_entries.nr = versions->nr - offset;
 	string_list_sort(&relevant_entries);
@@ -1123,9 +1129,12 @@ static void write_tree(struct object_id *result_oid,
 	strbuf_grow(&buf, maxlen);
 
 	/* Write each entry out to buf */
+	printf("  Writing a tree using:\n");
 	for (i = 0; i < nr; i++) {
 		struct merged_info *mi = versions->items[offset+i].util;
 		struct version_info *ri = &mi->result;
+		printf("%06o %s %s\n", ri->mode, versions->items[offset+i].string,
+		       oid_to_hex(&ri->oid));
 		strbuf_addf(&buf, "%o %s%c",
 			    ri->mode,
 			    versions->items[offset+i].string, '\0');
@@ -1169,6 +1178,8 @@ static void write_completed_directories(struct merge_options *opt,
 		info->last_directory_len = strlen(info->last_directory);
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
+		printf("Due to new_directory_name of %s, added (%s, %lu) to offsets\n",
+		       new_directory_name, info->last_directory, offset);
 		return;
 	}
 
@@ -1185,6 +1196,7 @@ static void write_completed_directories(struct merge_options *opt,
 		dir_info->result.mode = S_IFDIR;
 		write_tree(&dir_info->result.oid, &info->versions, offset);
 		wrote_a_new_tree = 1;
+		printf("New tree:\n");
 	}
 
 	/*
@@ -1193,6 +1205,8 @@ static void write_completed_directories(struct merge_options *opt,
 	 */
 	info->offsets.nr--;
 	info->versions.nr = offset;
+	printf("  Decremented info->offsets.nr to %d\n", info->offsets.nr);
+	printf("  Decreased info->versions.nr to %d\n", info->versions.nr);
 
 	/*
 	 * Now we've got an OID for last_directory in dir_info.  We need to
@@ -1207,15 +1221,20 @@ static void write_completed_directories(struct merge_options *opt,
 		uintptr_t c = info->versions.nr;
 		string_list_append(&info->offsets,
 				   new_directory_name)->util = (void*)c;
+		printf("  Appended (%s, %lu) to info->offsets\n",
+		       new_directory_name, c);
 	}
 
 	/*
 	 * Okay, finally record OID for last_directory in info->versions,
 	 * and update last_directory.
 	 */
-	if (wrote_a_new_tree)
+	if (wrote_a_new_tree) {
 		string_list_append(&info->versions,
 				   info->last_directory)->util = dir_info;
+		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
+		       info->last_directory, oid_to_hex(&dir_info->result.oid));
+	}
 	info->last_directory = new_directory_name;
 	info->last_directory_len = strlen(info->last_directory);
 }
@@ -1255,6 +1274,8 @@ static void process_entries(struct merge_options *opt,
 		struct conflict_info *ci = entry->util;
 		const char *basename;
 
+		printf("==>Handling %s\n", entry->string);
+
 		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
 		if (!ci->merged.clean)
@@ -1271,6 +1292,8 @@ static void process_entries(struct merge_options *opt,
 			basename = entry->string + ci->merged.basename_offset;
 			string_list_append(&dir_metadata.versions,
 					   basename)->util = &ci->merged.result;
+			printf("Added %s (%s) to dir_metadata.versions (now length %d)\n",
+			       basename, entry->string, dir_metadata.versions.nr);
 		}
 	}
 	if (dir_metadata.offsets.nr != 1 ||
@@ -1294,6 +1317,7 @@ static int checkout(struct merge_options *opt,
 	unpack_opts.src_index = opt->repo->index;
 	unpack_opts.dst_index = opt->repo->index;
 
+	printf("Switching over to tree %s\n", oid_to_hex(&next->object.oid));
 	setup_unpack_trees_porcelain(&unpack_opts, "merge");
 
 	/* FIXME: Do I need to refresh the index?? */
@@ -1321,7 +1345,9 @@ static int checkout(struct merge_options *opt,
 	init_tree_desc(&trees[1], next->buffer, next->size);
 
 	ret = unpack_trees(2, trees, &unpack_opts);
+	printf("ret from unpack_trees: %d\n", ret);
 	clear_unpack_trees_porcelain(&unpack_opts);
+	printf("after clear_unpack_trees_porcelain()\n");
 	return ret;
 }
 
