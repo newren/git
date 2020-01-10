@@ -65,7 +65,7 @@ struct merged_info {
 	  */
 	const char *directory_name;
 	size_t basename_offset;
-	unsigned result_is_null:1;
+	unsigned is_null:1;
 	unsigned clean:1;
 };
 
@@ -75,6 +75,7 @@ struct conflict_info {
 	const char *pathnames[3];
 	unsigned df_conflict:1;
 	unsigned filemask:3;
+	unsigned match_mask:3;
 	unsigned processed:1;
 };
 
@@ -240,33 +241,46 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
-			    struct name_entry *names,
 			    const char *current_dir_name,
+			    struct name_entry *names,
+			    struct name_entry *merged_version,
 			    unsigned is_null,     /* boolean */
 			    unsigned df_conflict, /* boolean */
 			    unsigned filemask,
 			    int resolved          /* boolean */)
 {
-	size_t len = traverse_path_len(info, names->pathlen);
-	char *fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
-	struct conflict_info *path_info = xcalloc(1, sizeof(*path_info));
+	struct conflict_info *path_info;
+	struct name_entry *p;
+	size_t len;
+	char *fullpath;
+
+	p = names;
+	while (!p->mode)
+		p++;
+
+	len = traverse_path_len(info, p->pathlen);
+	fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
 
 	assert(!is_null || resolved);      /* is_null implies resolved */
 	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
+	assert(resolved == (merged_version != NULL));
 
-	make_traverse_path(fullpath, len, info, names->path, names->pathlen);
+	/* len + 1 again to include the NUL byte */
+	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
 					  sizeof(struct conflict_info));
 	path_info->merged.directory_name = current_dir_name;
-	path_info->merged.basename_offset = info->pathlen + !!info->pathlen;
+	path_info->merged.basename_offset = info->pathlen;
+	path_info->merged.clean = !!resolved;
 	if (resolved) {
-		path_info->merged.result.mode = names->mode;
-		oidcpy(&path_info->merged.result.oid, &names->oid);
-		path_info->merged.result_is_null = !!is_null;
+		path_info->merged.result.mode = merged_version->mode;
+		oidcpy(&path_info->merged.result.oid, &merged_version->oid);
+		path_info->merged.is_null = !!is_null;
 	} else {
 		int i;
 
 		for (i = 0; i < 3; i++) {
+			path_info->pathnames[i] = fullpath;
 			if (!(filemask & (1ul << i)))
 				continue;
 			path_info->stages[i].mode = names[i].mode;
@@ -301,11 +315,14 @@ static int collect_merge_info_callback(int n,
 	unsigned side2_null = !(mask & 4);
 	unsigned side1_is_tree = (dirmask & 2);
 	unsigned side2_is_tree = (dirmask & 4);
-	unsigned side1_matches_mbase = (names[0].mode == names[1].mode &&
+	unsigned side1_matches_mbase = (!side1_null && !mbase_null &&
+					names[0].mode == names[1].mode &&
 					oideq(&names[0].oid, &names[1].oid));
-	unsigned side2_matches_mbase = (names[0].mode == names[2].mode &&
+	unsigned side2_matches_mbase = (!side2_null && !mbase_null &&
+					names[0].mode == names[2].mode &&
 					oideq(&names[0].oid, &names[2].oid));
-	unsigned sides_match = (names[1].mode == names[2].mode &&
+	unsigned sides_match = (!side1_null && !side2_null &&
+				names[1].mode == names[2].mode &&
 				oideq(&names[1].oid, &names[2].oid));
 	/*
 	 * Note: We only label files with df_conflict, not directories.
@@ -340,8 +357,8 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, info, names+0, opti->current_dir_name,
-				mbase_null, 0, filemask, 1);
+		setup_path_info(&pi, info,  opti->current_dir_name, names,
+				names+0, mbase_null, 0, filemask, 1);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -353,8 +370,8 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, info, names+1, opti->current_dir_name,
-				0, 0, filemask, 1);
+		setup_path_info(&pi, info, opti->current_dir_name, names,
+				names+1, 0, 0, filemask, 1);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -370,10 +387,10 @@ static int collect_merge_info_callback(int n,
 	 * to be merged with changes from elsewhere on side1's side of history.
 	 */
 	if (!opti->inside_possibly_renamed_dir &&
-	    !side1_null && side1_matches_mbase && !side2_is_tree) {
+	    side1_matches_mbase && !side2_is_tree) {
 		/* use side2 version as resolution */
-		setup_path_info(&pi, info, names+2, opti->current_dir_name,
-				side2_null, 0, filemask, 1);
+		setup_path_info(&pi, info, opti->current_dir_name, names,
+				names+2, side2_null, 0, filemask, 1);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -384,10 +401,10 @@ static int collect_merge_info_callback(int n,
 	 * swapped.
 	 */
 	if (!opti->inside_possibly_renamed_dir &&
-	    !side2_null && side2_matches_mbase && !side1_is_tree) {
+	    side2_matches_mbase && !side1_is_tree) {
 		/* use side1 version as resolution */
-		setup_path_info(&pi, info, names+1, opti->current_dir_name,
-				side1_null, 0, filemask, 1);
+		setup_path_info(&pi, info, opti->current_dir_name, names,
+				names+1, side1_null, 0, filemask, 1);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -398,8 +415,18 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, info, names, opti->current_dir_name,
-			0, df_conflict, filemask, 0);
+	setup_path_info(&pi, info, opti->current_dir_name, names,
+			NULL, 0, df_conflict, filemask, 0);
+	if (filemask) {
+		struct conflict_info *ci = pi.util;
+		if (side1_matches_mbase)
+			ci->match_mask = 3;
+		else if (side2_matches_mbase)
+			ci->match_mask = 5;
+		else if (sides_match)
+			ci->match_mask = 6;
+		/* else ci->match_mask is already 0; no need to set it */
+	}
 	strmap_put(&opti->paths, pi.string, pi.util);
 #if 0
 	if (filemask == 0)
@@ -914,12 +941,12 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			  const char *path, struct conflict_info *entry)
 			  */
 {
-	const char *path = e->string;
+	char *path = e->string;
 	struct conflict_info *ci = e->util;
 
 	/* int normalize = opt->renormalize; */
 
-	assert(!ci->processed);
+	assert(!ci->merged.clean && !ci->processed);
 	ci->processed = 1;
 	assert(ci->filemask >=0 && ci->filemask < 8);
 	if (ci->filemask == 0) {
@@ -929,24 +956,50 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		 */
 		return;
 	}
-	if (ci->df_conflict && ci->filemask != 1 &&
-	    ci->merged.result.mode != 0) {
+	if (ci->df_conflict && ci->merged.result.mode != 0) {
 		/*
 		 * This started out as a D/F conflict, and the entries in
 		 * the competing directory were not removed by the merge as
 		 * evidenced by write_completed_directories() writing a value
-		 * to ci->merged.result.mode.  If filemask were 1, we could
-		 * just ignore the file as having been deleted on both sides,
-		 * but it still exists on at least one side.  So, we need to
-		 * move this path to some new location to make room for the
-		 * directory.
+		 * to ci->merged.result.mode.
 		 */
 		struct conflict_info *new_ci;
 		const char *branch;
 
 		assert(ci->merged.result.mode == S_IFDIR);
-		assert(ci->filemask >= 2 && ci->filemask <= 5);
+		/*
+		 * ci->filemask == 6 is impossible; lengthy explanation:
+		 *
+		 * ci->filemask == 6 means that the base had a directory
+		 * while both sides had a file.  Further, it implies that
+		 * resolution of the directory results in files which still
+		 * remain after conflict resolution despite the fact that
+		 * they existed on neither side of history.  The only way
+		 * that can happen is if the filenames in the base were
+		 * part of a rename AND the conflict resolution opted to
+		 * unrename these files.  Un-renaming only occurs for
+		 * rename/rename(1to2) conflicts.  And, uh...dang it that
+		 * can happen even if this would be incredibly rare.
+		 * FIXME: Update this code to handle ci->filemask == 6.
+		 */
+		assert(ci->filemask >= 1 && ci->filemask <= 5);
 
+		/*
+		 * If filemask is 1, we can just ignore the file as having
+		 * been deleted on both sides.  We do not want to overwrite
+		 * ci->merged.result, since it stores the tree for all the
+		 * files under it.
+		 */
+		if (ci->filemask == 1) {
+			ci->filemask = 0;
+			return;
+		}
+
+		/*
+		 * This file still exists on at least one side, and we want
+		 * the directory to remain here, so we need to move this
+		 * path to some new location.
+		 */
 		new_ci = xcalloc(1, sizeof(*ci));
 		/* We don't really want new_ci->merged.result copied, but it'll
 		 * be overwritten below so it doesn't matter, and we do want
@@ -958,16 +1011,42 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		path = unique_path(opt, path, branch);
 		strmap_put(&opt->priv->paths, path, new_ci);
 
-		/* Point ci at the new entry so it can be worked on */
+		/*
+		 * Zero out the filemask for the old ci.  At this point, ci
+		 * was just an entry for a directory, so we don't need to
+		 * do anything more with it.
+		 */
 		ci->filemask = 0;
+
+		/* Point e and ci at the new entry so it can be worked on */
+		e->string = path;
+		e->util = new_ci;
 		ci = new_ci;
 	}
-	if (ci->filemask >= 6) {
+	if (ci->match_mask) {
+		ci->merged.clean = 1;
+		if (ci->match_mask == 6) {
+			/* stages[1] == stages[2] */
+			ci->merged.result.mode = ci->stages[1].mode;
+			oidcpy(&ci->merged.result.oid, &ci->stages[1].oid);
+		} else {
+			/* determine the mask of the side that didn't match */
+			unsigned int othermask = 7 & ~ci->match_mask;
+			int side = (othermask == 4) ? 2 : 1;
+
+			ci->merged.is_null = (ci->filemask == ci->match_mask);
+			ci->merged.result.mode = ci->stages[side].mode;
+			oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
+
+			assert(othermask == 2 || othermask == 4);
+			assert(ci->merged.is_null == !ci->merged.result.mode);
+		}
+	} else if (ci->filemask >= 6) {
 		struct version_info merged_file;
 		unsigned clean_merge;
-		struct version_info *o = &ci->stages[1];
-		struct version_info *a = &ci->stages[2];
-		struct version_info *b = &ci->stages[3];
+		struct version_info *o = &ci->stages[0];
+		struct version_info *a = &ci->stages[1];
+		struct version_info *b = &ci->stages[2];
 
 		assert(!ci->df_conflict);
 		clean_merge = handle_content_merge(opt, path, o, a, b,
@@ -991,22 +1070,21 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			       reason, path);
 		}
 		*/
-	}
-	if (ci->filemask == 3 || ci->filemask == 5) {
-		/* FIXME: Handle modify/delete */
-		int side = (ci->filemask == 5) ? 3 : 2;
+	} else if (ci->filemask == 3 || ci->filemask == 5) {
+		/* Modify/delete */
+		int side = (ci->filemask == 5) ? 2 : 1;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 		ci->merged.clean = 0;
 	} else if (ci->filemask == 2 || ci->filemask == 4) {
 		/* Added on one side */
-		int side = (ci->filemask == 4) ? 3 : 2;
+		int side = (ci->filemask == 4) ? 2 : 1;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 		ci->merged.clean = !ci->df_conflict;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
-		ci->merged.result_is_null = 1;
+		ci->merged.is_null = 1;
 		ci->merged.result.mode = 0;
 		oidcpy(&ci->merged.result.oid, &null_oid);
 		ci->merged.clean = 1;
@@ -1070,7 +1148,9 @@ static void write_completed_directories(struct merge_options *opt,
 					struct directory_versions *info)
 {
 	const char *prev_dir;
-	struct merged_info *dir_info;
+	struct merged_info *dir_info = NULL;
+	unsigned int offset;
+	int wrote_a_new_tree = 0;
 
 	if (new_directory_name == info->last_directory)
 		return;
@@ -1089,6 +1169,7 @@ static void write_completed_directories(struct merge_options *opt,
 		info->last_directory_len = strlen(info->last_directory);
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
+		return;
 	}
 
 	/*
@@ -1097,17 +1178,21 @@ static void write_completed_directories(struct merge_options *opt,
 	 * the entires in info->versions that are under info->last_directory.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
-	dir_info->result.mode = S_IFDIR;
-	write_tree(&dir_info->result.oid,
-		   &info->versions,
-		   (uintptr_t)info->offsets.items[info->offsets.nr-1].util);
+	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
+	if (offset == info->versions.nr) {
+		dir_info->is_null = 1;
+	} else {
+		dir_info->result.mode = S_IFDIR;
+		write_tree(&dir_info->result.oid, &info->versions, offset);
+		wrote_a_new_tree = 1;
+	}
 
 	/*
 	 * We've now used several entries from info->versions and one entry
 	 * from info->offsets, so we get rid of those values.
 	 */
 	info->offsets.nr--;
-	info->versions.nr = (uintptr_t)info->offsets.items[info->offsets.nr].util;
+	info->versions.nr = offset;
 
 	/*
 	 * Now we've got an OID for last_directory in dir_info.  We need to
@@ -1116,7 +1201,8 @@ static void write_completed_directories(struct merge_options *opt,
 	 * its' parent name was and whether that matches the previous
 	 * info->offsets or we need to set up a new one.
 	 */
-	prev_dir = info->offsets.items[info->offsets.nr-1].string;
+	prev_dir = info->offsets.nr == 0 ? NULL :
+		   info->offsets.items[info->offsets.nr-1].string;
 	if (new_directory_name != prev_dir) {
 		uintptr_t c = info->versions.nr;
 		string_list_append(&info->offsets,
@@ -1127,8 +1213,9 @@ static void write_completed_directories(struct merge_options *opt,
 	 * Okay, finally record OID for last_directory in info->versions,
 	 * and update last_directory.
 	 */
-	string_list_append(&info->versions,
-			   info->last_directory)->util = dir_info;
+	if (wrote_a_new_tree)
+		string_list_append(&info->versions,
+				   info->last_directory)->util = dir_info;
 	info->last_directory = new_directory_name;
 	info->last_directory_len = strlen(info->last_directory);
 }
@@ -1141,7 +1228,6 @@ static void process_entries(struct merge_options *opt,
 	struct string_list plist = STRING_LIST_INIT_NODUP;
 	struct string_list_item *entry;
 	struct directory_versions dir_metadata;
-	struct merged_info *merged;
 
 	/* Hack to pre-allocated both to the desired size */
 	ALLOC_GROW(plist.items, strmap_get_size(&opt->priv->paths), plist.alloc);
@@ -1150,7 +1236,7 @@ static void process_entries(struct merge_options *opt,
 	strmap_for_each_entry(&opt->priv->paths, &iter, e) {
 		string_list_append(&plist, e->item.string)->util = e->item.util;
 	}
-	/* both.cmp = string_list_df_name_compare; */
+	/* plist.cmp = string_list_df_name_compare; */
 	string_list_sort(&plist);
 
 	/*
@@ -1162,18 +1248,36 @@ static void process_entries(struct merge_options *opt,
 	dir_metadata.last_directory = NULL;
 	dir_metadata.last_directory_len = 0;
 	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
-		struct merged_info *mi = entry->util;
+		/*
+		 * WARNING: If ci->merged.clean is true, then ci does not
+		 * actually point to a conflict_info but a struct merge_info.
+		 */
+		struct conflict_info *ci = entry->util;
 		const char *basename;
 
-		write_completed_directories(opt, mi->directory_name,
+		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
-		process_entry(opt, entry);
-		basename = entry->string + mi->basename_offset;
-		string_list_append(&dir_metadata.versions, basename)->util = &mi->result;
+		if (!ci->merged.clean)
+			process_entry(opt, entry);
+
+		/* process_entry() might update entry, so reassign ci */
+		ci = entry->util;
+		if (!ci->merged.is_null && (ci->merged.clean || ci->filemask)) {
+			/*
+			 * Note: write_completed_directories() already added
+			 * entries for directories to dir_metadata.versions,
+			 * so no need to handle ci->filemask == 0 again.
+			 */
+			basename = entry->string + ci->merged.basename_offset;
+			string_list_append(&dir_metadata.versions,
+					   basename)->util = &ci->merged.result;
+		}
 	}
-	assert(dir_metadata.versions.nr == 1);
-	merged = dir_metadata.versions.items[0].util;
-	oidcpy(result_oid, &merged->result.oid);
+	if (dir_metadata.offsets.nr != 1 ||
+	    (uintptr_t)dir_metadata.offsets.items[0].util != 0) {
+		BUG("dir_metadata accounting completely off; shouldn't happen");
+	}
+	write_tree(result_oid, &dir_metadata.versions, 0);
 }
 
 static int checkout(struct merge_options *opt,
@@ -1190,8 +1294,9 @@ static int checkout(struct merge_options *opt,
 	unpack_opts.src_index = opt->repo->index;
 	unpack_opts.dst_index = opt->repo->index;
 
-	setup_unpack_trees_porcelain(&unpack_opts, "checkout");
+	setup_unpack_trees_porcelain(&unpack_opts, "merge");
 
+	/* FIXME: Do I need to refresh the index?? */
 	refresh_index(opt->repo->index, REFRESH_QUIET, NULL, NULL, NULL);
 
 	if (unmerged_index(opt->repo->index)) {
@@ -1429,9 +1534,9 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		return -1;
 	}
 
+	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	strmap_init(&opt->priv->paths, 0);
 	strmap_init(&opt->priv->unmerged, 0);
-	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	return 0;
 }
 
@@ -1456,14 +1561,17 @@ static void merge_finalize(struct merge_options *opt)
 	 * make_traverse_path from setup_path_info().  But, now that we've
 	 * used it and have no other references to these strings, it is time
 	 * to deallocate them, which we do by just setting strdup_string = 1
-	 * before the strmaps are cleared.  Note that all strings in
-	 * opt->priv->unmerged are a subset of those in opt->priv->paths, and
-	 * we don't want to deallocate strings twice, so we only deallocate
-	 * for opt->priv->paths.
+	 * before the strmaps are cleared.
 	 */
 	opt->priv->paths.strdup_strings = 1;
 	strmap_clear(&opt->priv->paths, 1);
-	strmap_clear(&opt->priv->unmerged, 1);
+	/*
+	 * All strings and util fields in opt->priv->unmerged are a subset
+	 * of those in opt->priv->paths.  We don't want to deallocate
+	 * anything twice, so we don't set strdup_strings and we pass 0 for
+	 * free_util.
+	 */
+	strmap_clear(&opt->priv->unmerged, 0);
 
 	FREE_AND_NULL(opt->priv);
 }
