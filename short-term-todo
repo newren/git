@@ -1,17 +1,123 @@
-* Today
-  * Computing trees completely wrong; fix it
-  * Resolution of files may result in an empty dir; if so, leave the directory
-    out rather than recording an empty tree for it.
+* Renames:
+  * Determine renames
+    * get normal renames
+    * get directory renames
+    * dir renames merely modify normal renames
+  * Rename related information:
+    * source path has at least one and at most two stages associated with it
+    * dest path has at least one and at most two stages associated with it
+    * dest path cannot have a base stage
+    * source path cannot have the stage corresponding to side of history renamed
+    * 1 stage each side: delete/rename (or rename/rename(1to2))
+    * 2 stages in source, 1 in dest: typical rename
+    * 1 stage in source, 2 in dest: delete/rename/add conflict (or r/r(1to2)/a)
+    * 2 stages each side: rename/add
+    * (Note that add can be replaced by rename(2to1), just as rename(1to2) can
+       replace a delete)
+  * Need supplemental information for marking things as conflicted even if not
+    due to contents (clean dir renames are conflicts by default...)
+  * Modify struct rename and get_renames():
+    * Do not use insert_stage_data()
+    * Note the sidemask for the renames
+    * Have the second call to get_renames() append to same rename string_list
+    * Call string_list_append(), NOT string_list_insert; sort at end
+  * process_renames:
+    * Combine two lists of renames into one and sort
+      * But make sure there is a sidemask recorded before doing so
+      * This puts rename/rename(1to2) cases as adjacent entries
+    * Loop over each rename pair
+      * If next entry has same source name, then it's rename/rename(1to2)
+        * FIXME: special handling...
+      * Mark source path as resolved/unused (is_null)
+      * If only 1 stage source side:
+        * Copy base stage from source to dest
+	* Add this rename to a *map* (by source name) for later post-processing
+      * If two stages source side, and one stage dest side:
+        * Copy stages from source side to dest side
+      * If two stages source side, and two stages dest side:
+        * Three-way content merge two source stages with appropriate dest stage
+	* Replace appropriate dest stage with three-way merged content
+
+* Overall plan
+  * Renames
+  * Directory renames
+  * Output
+  * Path conflict files
+  * Check the "Stuff to not forget"
+  * Make sure the API is clean/clear
+  * Cleanup of FIXMEs
+  * Double check data structures; is anything unnecessary or needing a rename?
+  * Correctness testing against lotsa repos
+  * Perf testing
+  * Write the talk
+  * Default to histogram diff
+  * Features like --remerge-diff
+  * Diff3 improvements
+
+Path_conflict files:
+  * Mode conflict (Directory/Non-Executable/Executable/Submodule/Symlink)
+  * Modify/delete (or rename/delete)
+  * Rename/rename(1to2)
+  * Binary-ish conflict
+    * ISREG, but binary
+    * symlink edit/edit
+    * submodule edit/edit in non-fast-forward ways
+
+  * Maybe also:
+    * add/add, rename/add, rename/rename(2to1)
+    * rename/add/delete
+    * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 
 * Stuff to not forget:
-  * Write code to update index too (remove_marked_cache_entries()?  apply.c?)
+  * Path conflict files; also, multiple auxiliary files to add (e.g. for
+    mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
+    D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
   * conflict messages need to be printed, usually
   * Normalization code from merge-recursive.c -- modify/delete might actually
-    be a not-modified/delete.
-  * FIXMEs in checkout()
+    be a not-modified/delete (but possibly move from merge_3way() to
+    collect_merge_info_callback())
+  * FIXMEs in checkout() (and elsewhere)
+  * Do an additional rename-like pass when ignore_case, searching for file
+    collisions (or can I just rely on unpack_trees reporting errors?)
+  * Avoid string_list_lookup() & string_list_insert() in merge-ort
+  * collect_merge_info: when directories match but I still have to recurse,
+    I could save off that info and then not have to compare sub-files and
+    sub-directories within that mask.  (e.g. if base:foo matches head:foo, but
+    merge:foo is different, there's no need to compare base:foo/bar and
+    head:foo/bar when I recurse into the foo directory)
+  * In collect_merge_info_callback, I cannot usually do trivial tree merge when
+    one tree matches base if the other side is a tree, but I CAN do that when
+    the tree in question is the toplevel tree, which happens when rebasing empty
+    commits and such.  That also avoids rename detection...
+  * diffcore-rename:
+    * Avoid MOVE_ARRAY in diffcore-rename.c; use strmap instead
+    * Just create necessary diff_queued_diff entries (diff_filepairs) from
+      collect_merge_info().  I only need deleted and added files and I already
+      have the data available at my fingertips...
+
+  * Perf note, avoid re-doing work:
+    * traverse_tree/read_tree_recursive count:
+      * merge-recursive:
+        * unpack_trees (1), diff-for-renames (2), get_files_dirs (2),
+	  get_tree_entry_if_blob (3 * 2 * unmerged entries)
+      * merge-ort:
+        * direct call (1), unpack_trees (1)
+    * computing of mode/oid null, and which sides match.  merge-recursive
+      duplicates unpack_trees logic, where merge-ort saves it off.
+  * Perf note, avoiding doing unnecessary work:
+    * Removal of unnecessary drop_cache and re-read of cache in
+      non-recursive case
 
 Old stuff, probably delete:
-* Do a bunch of clean up to get a nice clean history; store now-unnecessary
-  commits in a different branch
-* Do I need to record dirmask in conflict_info?
+  * Do a bunch of clean up to get a nice clean history; store now-unnecessary
+    commits in a different branch
+  * Do I need to record dirmask in conflict_info?
+
+* Important stuff to call out for reviewers to double-check:
+  * write_tree() -- yet another place trees are written (builtin/mktree,
+    fast-import, cache-tree); is that okay?
+  * checkout() (quiet? overwrite_ignore? refresh_index?)
+  * record_unmerged_index_entries() (cache-tree invalidation?
+    state flags correct?  should I avoid ADD_CACHE_JUST_APPEND if
+    strmap_size(unmerged) < O(log(opt->repo->index->cache_nr)/3) ?
