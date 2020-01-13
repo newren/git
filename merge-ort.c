@@ -1327,8 +1327,89 @@ static int checkout(struct merge_options *opt,
 
 static int record_unmerged_index_entries(struct merge_options *opt)
 {
-	BUG("Uh, oh, this wasn't implemented.");
-	return 1;
+	struct hashmap_iter iter;
+	struct str_entry *e;
+	struct checkout state = CHECKOUT_INIT;
+	int errs = 0;
+
+	if (strmap_empty(&opt->priv->unmerged))
+		return 0;
+
+	/* If any entries have skip_worktree set, we'll have to check 'em out */
+	state.force = 1;
+	state.quiet = 1;
+	state.refresh_cache = 1;
+	state.istate = opt->repo->index;
+
+	/* Put every entry from paths into plist, then sort */
+	strmap_for_each_entry(&opt->priv->unmerged, &iter, e) {
+		const char *path = e->item.string;
+		struct conflict_info *ci = e->item.util;
+		int pos;
+		struct cache_entry *ce;
+		int i;
+
+		/*
+		 * The index will already have a stage=0 entry for this path,
+		 * because we created an as-merged-as-possible version of the
+		 * file and checkout() moved the working copy and index over
+		 * to that version.  Get the cache entry.
+		 */
+		pos = index_name_pos(opt->repo->index, path, strlen(path));
+		if (pos < 0)
+			BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
+		ce = opt->repo->index->cache[pos];
+
+		/*
+		 * If this cache entry had the skip_worktree bit set, then it
+		 * isn't present in the working tree..but since it corresponds
+		 * to a merge conflict we need it to be.
+		 */
+		if (ce_skip_worktree(ce)) {
+			struct stat st;
+
+			if (lstat(path, &st)) {
+				char *new_name = unique_path(opt, path, "cruft");
+
+				output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
+				errs |= rename(path, new_name);
+				free(new_name);
+			}
+			errs |= checkout_entry(ce, &state, NULL, NULL);
+		}
+
+		/*
+		 * Mark this cache entry for removal and instead add new
+		 * stage > 0 entries corresponding to the conflicts.  We
+		 * just add the new cache entries to the end and re-sort
+		 * later to avoid O(NM) memmove'd entries (N=num cache
+		 * entries, M=num unmerged entries) if there are several
+		 * unmerged entries.
+		 */
+		ce->ce_flags |= CE_REMOVE;
+
+		for (i = 0; i < 3; i++) {
+			struct version_info *vi;
+			if (!(ci->filemask & (1ul << i)))
+				continue;
+			vi = &ci->stages[i];
+			ce = make_cache_entry(opt->repo->index, vi->mode,
+					      &vi->oid, path, i+1, 0);
+			add_index_entry(opt->repo->index, ce,
+					ADD_CACHE_JUST_APPEND);
+		}
+	}
+
+	/*
+	 * Remove the unused cache entries (and invalidate the relevant
+	 * cache-trees), then sort the index entries to get the unmerged
+	 * entries we added to the end into their right locations.
+	 */
+	remove_marked_cache_entries(opt->repo->index, 1);
+	QSORT(opt->repo->index->cache, opt->repo->index->cache_nr,
+	      cmp_cache_name_compare);
+
+	return errs;
 }
 
 /*
