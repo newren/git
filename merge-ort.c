@@ -332,6 +332,9 @@ static int collect_merge_info_callback(int n,
 	 */
 	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
+	printf("Called collect_merge_info_callback on %s, %s\n",
+	       info->traverse_path, names[0].path);
+
 	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
 		BUG("Called collect_merge_info_callback wrong");
@@ -359,6 +362,7 @@ static int collect_merge_info_callback(int n,
 		/* mbase, side1, & side2 all match; use mbase as resolution */
 		setup_path_info(&pi, info,  opti->current_dir_name, names,
 				names+0, mbase_null, 0, filemask, 1);
+		printf("Path -1 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -372,6 +376,7 @@ static int collect_merge_info_callback(int n,
 		/* use side1 (== side2) version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
 				names+1, 0, 0, filemask, 1);
+		printf("Path 0 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -391,6 +396,7 @@ static int collect_merge_info_callback(int n,
 		/* use side2 version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
 				names+2, side2_null, 0, filemask, 1);
+		printf("Path 1 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -405,6 +411,7 @@ static int collect_merge_info_callback(int n,
 		/* use side1 version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
 				names+1, side1_null, 0, filemask, 1);
+		printf("Path 2 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -417,6 +424,9 @@ static int collect_merge_info_callback(int n,
 	 */
 	setup_path_info(&pi, info, opti->current_dir_name, names,
 			NULL, 0, df_conflict, filemask, 0);
+	printf("Path 3 for %s, iprd = %d\n", pi.string,
+	       opti->inside_possibly_renamed_dir);
+	printf("Stats:\n");
 	if (filemask) {
 		struct conflict_info *ci = pi.util;
 		if (side1_matches_mbase)
@@ -426,7 +436,18 @@ static int collect_merge_info_callback(int n,
 		else if (sides_match)
 			ci->match_mask = 6;
 		/* else ci->match_mask is already 0; no need to set it */
+		printf("  matchmask: %u\n", ci->match_mask);
 	}
+	printf("  opti->inside_possibly_renamed_dir: %d\n",
+	       opti->inside_possibly_renamed_dir);
+	printf("  side1_null: %d\n", side1_null);
+	printf("  side2_null: %d\n", side2_null);
+	printf("  side1_is_tree: %d\n", side1_is_tree);
+	printf("  side2_is_tree: %d\n", side2_is_tree);
+	printf("  side1_matches_mbase: %d\n", side1_matches_mbase);
+	printf("  side2_matches_mbase: %d\n", side2_matches_mbase);
+	printf("  filemask: %u\n", filemask);
+	printf("  dirmask:  %lu\n", dirmask);
 	strmap_put(&opti->paths, pi.string, pi.util);
 #if 0
 	if (filemask == 0)
@@ -545,6 +566,10 @@ static int collect_merge_info(struct merge_options *opt,
 	parse_tree(merge_base);
 	parse_tree(side1);
 	parse_tree(side2);
+	printf("Traversing %s, %s, and %s\n",
+	       oid_to_hex(&merge_base->object.oid),
+	       oid_to_hex(&side1->object.oid),
+	       oid_to_hex(&side2->object.oid));
 	init_tree_desc(t+0, merge_base->buffer, merge_base->size);
 	init_tree_desc(t+1, side1->buffer, side1->size);
 	init_tree_desc(t+2, side2->buffer, side2->size);
@@ -1035,10 +1060,14 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			unsigned int othermask = 7 & ~ci->match_mask;
 			int side = (othermask == 4) ? 2 : 1;
 
+			printf("filemask: %d, matchmask: %d, othermask: %d, side: %d\n",
+			       ci->filemask, ci->match_mask, othermask, side);
 			ci->merged.is_null = (ci->filemask == ci->match_mask);
 			ci->merged.result.mode = ci->stages[side].mode;
 			oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 
+			printf("ci->merged.result.mode: %d, is_null: %d\n",
+			       ci->merged.result.mode, ci->merged.is_null);
 			assert(othermask == 2 || othermask == 4);
 			assert(ci->merged.is_null == !ci->merged.result.mode);
 		}
