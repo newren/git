@@ -1281,12 +1281,12 @@ static void process_entries(struct merge_options *opt,
 }
 
 static int checkout(struct merge_options *opt,
-		    struct tree *head,
-		    struct object_id *new_working_tree)
+		    struct tree *prev,
+		    struct tree *next)
 {
+	/* Switch the index/working copy from old to new */
 	int ret;
 	struct tree_desc trees[2];
-	struct tree *tree;
 	struct unpack_trees_options unpack_opts;
 
 	memset(&unpack_opts, 0, sizeof(unpack_opts));
@@ -1315,10 +1315,10 @@ static int checkout(struct merge_options *opt,
 		unpack_opts.dir->flags |= DIR_SHOW_IGNORED;
 		setup_standard_excludes(unpack_opts.dir);
 	}
-	parse_tree(head);
-	init_tree_desc(&trees[0], head->buffer, head->size);
-	tree = parse_tree_indirect(new_working_tree);
-	init_tree_desc(&trees[1], tree->buffer, tree->size);
+	parse_tree(prev);
+	init_tree_desc(&trees[0], prev->buffer, prev->size);
+	parse_tree(next);
+	init_tree_desc(&trees[1], next->buffer, next->size);
 
 	ret = unpack_trees(2, trees, &unpack_opts);
 	clear_unpack_trees_porcelain(&unpack_opts);
@@ -1454,16 +1454,8 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	}
 
 	process_entries(opt, &working_tree_oid);
-	if (checkout(opt, head, &working_tree_oid))
-		return -1; /* failure to function */
-
-	if (strmap_empty(&opt->priv->unmerged))
-		return 1; /* clean */
-
-	if (record_unmerged_index_entries(opt))
-		return -1; /* failure to function */
-
-	return 0; /* not clean */
+	*result = parse_tree_indirect(&working_tree_oid);
+	return strmap_empty(&opt->priv->unmerged); /* unmerged==0 => clean */
 }
 
 /*
@@ -1477,11 +1469,10 @@ static int merge_ort_internal(struct merge_options *opt,
 			      struct commit *h1,
 			      struct commit *h2,
 			      struct commit_list *merge_bases,
-			      struct commit **result)
+			      struct tree **result_tree)
 {
 	struct commit_list *iter;
 	struct commit *merged_merge_bases;
-	struct tree *result_tree;
 	int clean;
 	const char *ancestor_name;
 	struct strbuf merge_base_abbrev = STRBUF_INIT;
@@ -1542,14 +1533,17 @@ static int merge_ort_internal(struct merge_options *opt,
 		opt->branch1 = "Temporary merge branch 1";
 		opt->branch2 = "Temporary merge branch 2";
 		if (merge_ort_internal(opt, merged_merge_bases, iter->item,
-				       NULL, &merged_merge_bases) < 0)
+				       NULL, result_tree) < 0)
 			return -1;
 		opt->branch1 = saved_b1;
 		opt->branch2 = saved_b2;
 		opt->priv->call_depth--;
 
-		if (!merged_merge_bases)
-			return err(opt, _("merge returned no commit"));
+		merged_merge_bases = make_virtual_commit(opt->repo,
+							 *result_tree,
+							 "merged tree");
+		commit_list_insert(h1, &merged_merge_bases->parents);
+		commit_list_insert(h2, &merged_merge_bases->parents->next);
 	}
 
 	if (!opt->priv->call_depth && merge_bases != NULL) {
@@ -1563,7 +1557,7 @@ static int merge_ort_internal(struct merge_options *opt,
 				     repo_get_commit_tree(opt->repo, h2),
 				     repo_get_commit_tree(opt->repo,
 							  merged_merge_bases),
-				     &result_tree);
+				     result_tree);
 	strbuf_release(&merge_base_abbrev);
 	opt->ancestor = NULL;  /* avoid accidental re-use of opt->ancestor */
 	if (clean < 0) {
@@ -1571,12 +1565,6 @@ static int merge_ort_internal(struct merge_options *opt,
 		return clean;
 	}
 
-	if (opt->priv->call_depth) {
-		*result = make_virtual_commit(opt->repo, result_tree,
-					      "merged tree");
-		commit_list_insert(h1, &(*result)->parents);
-		commit_list_insert(h2, &(*result)->parents->next);
-	}
 	return clean;
 }
 
@@ -1618,6 +1606,17 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	strmap_init(&opt->priv->paths, 0);
 	strmap_init(&opt->priv->unmerged, 0);
+	return 0;
+}
+
+static int switch_to_merge_result(struct merge_options *opt,
+				  struct tree *head,
+				  struct tree *merge_result)
+{
+	if (checkout(opt, head, merge_result))
+		return -1; /* failure to function */
+	if (record_unmerged_index_entries(opt))
+		return -1; /* failure to function */
 	return 0;
 }
 
@@ -1663,14 +1662,16 @@ int merge_ort_nonrecursive(struct merge_options *opt,
 			   struct tree *merge_base)
 {
 	int clean;
-	struct tree *ignored;
+	struct tree *result;
 
 	assert(opt->ancestor != NULL);
 
 	if (merge_start(opt, head))
 		return -1;
 	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
-						&ignored);
+						&result);
+	if (switch_to_merge_result(opt, head, result))
+		clean = -1;
 	merge_finalize(opt);
 
 	return clean;
@@ -1680,9 +1681,10 @@ int merge_ort(struct merge_options *opt,
 	      struct commit *h1,
 	      struct commit *h2,
 	      struct commit_list *merge_bases,
-	      struct commit **result)
+	      struct tree **result)
 {
 	int clean;
+	struct tree *head = repo_get_commit_tree(opt->repo, h1);
 
 	assert(opt->ancestor == NULL ||
 	       !strcmp(opt->ancestor, "constructed merge base"));
@@ -1690,6 +1692,8 @@ int merge_ort(struct merge_options *opt,
 	if (merge_start(opt, repo_get_commit_tree(opt->repo, h1)))
 		return -1;
 	clean = merge_ort_internal(opt, h1, h2, merge_bases, result);
+	if (switch_to_merge_result(opt, head, *result))
+		clean = -1;
 	merge_finalize(opt);
 
 	return clean;

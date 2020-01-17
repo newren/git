@@ -20,6 +20,6 @@ int merge_ort(struct merge_options *opt,
 	      struct commit *h1,
 	      struct commit *h2,
 	      struct commit_list *ancestors,
-	      struct commit **result);
+	      struct tree **result);
 
 #endif
