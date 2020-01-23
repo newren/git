@@ -69,11 +69,25 @@ struct merged_info {
 	unsigned clean:1;
 };
 
+#if 0
+enum rename_conflict_type {
+	RENAME_NONE = 0,
+	RENAME_VIA_DIR,
+	RENAME_ADD,
+	RENAME_ADD_DELETE,
+	RENAME_DELETE,
+	// RENAME_ONE_FILE_TO_ONE,  // FIXME
+	RENAME_ONE_FILE_TO_TWO,
+	RENAME_TWO_FILES_TO_ONE
+};
+#endif
+
 struct conflict_info {
 	struct merged_info merged;
 	struct version_info stages[3];
 	const char *pathnames[3];
 	unsigned df_conflict:1;
+	unsigned path_conflict:1;
 	unsigned filemask:3;
 	unsigned match_mask:3;
 	unsigned processed:1;
@@ -219,12 +233,18 @@ static void print_commit(struct commit *commit)
 	strbuf_release(&sb);
 }
 
-#if 0
 static inline int merge_detect_rename(struct merge_options *opt)
 {
-	return (opt->detect_renames >= 0) ? opt->detect_renames : 1;
+	/*
+	 * We do not have logic to handle the detection of copies.  In
+	 * fact, it may not even make sense to add such logic: would we
+	 * really want a change to a base file to be propagated through
+	 * multiple other files by a merge?
+	 */
+
+	/* FIXME: More words here... */
+	return !!opt->detect_renames;
 }
-#endif
 
 static struct commit_list *reverse_commit_list(struct commit_list *list)
 {
@@ -960,6 +980,321 @@ static int handle_content_merge(struct merge_options *opt,
 	return clean;
 }
 
+/*** Rename stuff ***/
+
+/* Get the diff_filepairs changed between merge_base and side. */
+static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
+					       struct tree *merge_base,
+					       struct tree *side)
+{
+	struct diff_queue_struct *ret;
+	struct diff_options opts;
+
+	repo_diff_setup(opt->repo, &opts);
+	opts.flags.recursive = 1;
+	opts.flags.rename_empty = 0;
+	opts.detect_rename = merge_detect_rename(opt);
+	/*
+	 * We do not have logic to handle the detection of copies.  In
+	 * fact, it may not even make sense to add such logic: would we
+	 * really want a change to a base file to be propagated through
+	 * multiple other files by a merge?
+	 */
+	if (opts.detect_rename > DIFF_DETECT_RENAME)
+		opts.detect_rename = DIFF_DETECT_RENAME;
+	opts.rename_limit = (opt->rename_limit >= 0) ? opt->rename_limit : 1000;
+	opts.rename_score = opt->rename_score;
+	opts.show_rename_progress = opt->show_rename_progress;
+	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_setup_done(&opts);
+	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "", &opts);
+	diffcore_std(&opts);
+	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
+		opt->priv->needed_rename_limit = opts.needed_rename_limit;
+
+	ret = xmalloc(sizeof(*ret));
+	*ret = diff_queued_diff;
+
+	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_queued_diff.nr = 0;
+	diff_queued_diff.queue = NULL;
+	diff_flush(&opts);
+	return ret;
+}
+
+static void append_rename_pairs(struct diff_queue_struct *result,
+				struct diff_queue_struct *side,
+				int side_index)
+{
+	int i;
+
+	for (i = 0; i < side->nr; ++i) {
+		struct diff_filepair *pair = side->queue[i];
+
+		if (pair->status != 'R') {
+			diff_free_filepair(pair);
+			continue;
+		}
+		pair->score = side_index;
+		result->queue[result->nr++] = pair;
+	}
+}
+
+static int compare_pairs(const void *a_, const void *b_)
+{
+	const struct diff_filepair *a = *((const struct diff_filepair **)a_);
+	const struct diff_filepair *b = *((const struct diff_filepair **)b_);
+
+	int cmp = strcmp(a->one->path, b->one->path);
+	if (cmp)
+		return cmp;
+	return a->score - b->score;
+}
+
+/*
+ * Get information of all renames which occurred in 'pairs', making use of
+ * any implicit directory renames inferred from the other side of history.
+ * We need the three trees in the merge ('o_tree', 'a_tree' and 'b_tree')
+ * to be able to associate the correct cache entries with the rename
+ * information; tree is always equal to either a_tree or b_tree.
+ */
+static struct diff_queue_struct *get_renames(struct merge_options *opt,
+					     struct diff_queue_struct *side1,
+					     struct diff_queue_struct *side2)
+{
+	struct diff_queue_struct *combined;
+
+	combined = xcalloc(1, sizeof(*combined));
+
+	ALLOC_GROW(combined->queue, side1->nr + side2->nr, combined->alloc);
+	append_rename_pairs(combined, side1, 1);
+	append_rename_pairs(combined, side2, 2);
+	QSORT(combined->queue, combined->nr, compare_pairs);
+
+	free(side1->queue);
+	free(side2->queue);
+	free(side1);
+	free(side2);
+
+	return combined;
+}
+
+static int process_renames(struct merge_options *opt,
+			   struct diff_queue_struct *renames)
+{
+	int clean_merge = 1, i;
+
+	for (i = 0; i < renames->nr; ++i) {
+		const char *oldpath, *newpath;
+		struct diff_filepair *pair = renames->queue[i];
+		struct conflict_info *oldinfo, *newinfo;
+		unsigned int old_sidemask;
+		int target_index, other_source_index;
+		int source_deleted, collision;
+
+		oldpath = pair->one->path;
+		newpath = pair->two->path;
+		oldinfo = strmap_get(&opt->priv->paths, pair->one->path);
+		newinfo = strmap_get(&opt->priv->paths, pair->two->path);
+
+		/*
+		 * If oldpath isn't in opt->priv->paths, that means that a
+		 * parent directory of oldpath was resolved and we don't
+		 * even need the rename, so skip it.  If oldinfo->merged.clean,
+		 * then the other side of history had no changes to oldpath
+		 * and we don't need the rename and can skip it.
+		 */
+		if (!oldinfo || oldinfo->merged.clean)
+			continue;
+
+		if (i+1 < renames->nr &&
+		    !strcmp(oldpath, renames->queue[i+1]->one->path)) {
+			/* Handle rename/rename(1to2) or rename/rename(1to1) */
+			const char *pathnames[3];
+			struct version_info merged;
+			struct conflict_info *base, *side1, *side2;
+
+			pathnames[0] = oldpath;
+			pathnames[1] = newpath;
+			pathnames[2] = renames->queue[i+1]->two->path;
+			base = strmap_get(&opt->priv->paths, pathnames[0]);
+			side1 = strmap_get(&opt->priv->paths, pathnames[1]);
+			side2 = strmap_get(&opt->priv->paths, pathnames[2]);
+
+			if (!strcmp(pathnames[1], pathnames[2])) {
+				/* This is a rename/rename(1to1) */
+				assert(side1 == side2);
+				memcpy(&side1->stages[0], &base->stages[0],
+				       sizeof(merged));
+				side1->filemask |= (1 << 0);
+				/* Mark base as resolved by removal */
+				base->merged.is_null = 1;
+				base->merged.clean = 1;
+
+				/* This one is handled; move to next rename */
+				continue;
+			}
+
+			/* This is a rename/rename(1to2) */
+			/* FIXME: handle return value of handle_content_merge */
+			handle_content_merge(opt, pair->one->path,
+					     &base->stages[0],
+					     &side1->stages[1],
+					     &side2->stages[2],
+					     pathnames, 0, &merged);
+			memcpy(&side1->stages[1], &merged, sizeof(merged));
+			memcpy(&side2->stages[2], &merged, sizeof(merged));
+			/* FIXME: Mark side1 & side2 as conflicted */
+			side1->path_conflict = 1;
+			side2->path_conflict = 1;
+			/* FIXME: Need to report conflict to output somehow */
+			base->merged.is_null = 1;
+			base->merged.clean = 1;
+			/* FIXME: Do un-rename in recursive case */
+			i++; /* We handled both renames, so skip an extra */
+			continue;
+		}
+
+		assert(oldinfo);
+		assert(newinfo);
+		assert(!oldinfo->merged.clean);
+		assert(!newinfo->merged.clean);
+		target_index = pair->score; /* from append_rename_pairs() */
+		assert(target_index == 1 || target_index == 2);
+		other_source_index = 3-target_index;
+		old_sidemask = (other_source_index << 1); /* 2 or 4 */
+		source_deleted = (oldinfo->filemask == 1);
+		collision = ((newinfo->filemask & old_sidemask) != 0);
+
+		assert(source_deleted || oldinfo->filemask & old_sidemask);
+
+		/* In all cases, mark the original as resolved by removal */
+		oldinfo->merged.is_null = 1;
+		oldinfo->merged.clean = 1;
+
+		/* Need to check for special types of rename conflicts... */
+		if (collision && !source_deleted) {
+			/* collision: rename/add or rename/rename(2to1) */
+			const char *pathnames[3];
+			struct version_info merged;
+
+			struct conflict_info *base, *side1, *side2;
+
+			pathnames[0] = oldpath;
+			pathnames[other_source_index] = oldpath;
+			pathnames[target_index] = newpath;
+			base = strmap_get(&opt->priv->paths, pathnames[0]);
+			side1 = strmap_get(&opt->priv->paths, pathnames[1]);
+			side2 = strmap_get(&opt->priv->paths, pathnames[2]);
+			/* FIXME: handle return value of handle_content_merge */
+			handle_content_merge(opt, pair->one->path,
+					     &base->stages[0],
+					     &side1->stages[1],
+					     &side2->stages[2],
+					     pathnames, 0, &merged);
+
+			memcpy(&newinfo->stages[target_index], &merged,
+			       sizeof(merged));
+		} else if (collision && source_deleted) {
+			/*
+			 * rename/add/delete or rename/rename(2to1)/delete:
+			 * since oldpath was deleted on the side that didn't
+			 * do the rename, there's not much of a content merge
+			 * we can do for the rename.  oldinfo->merged.is_null
+			 * was already set, so we just leave things as-is so
+			 * they look like an add/add conflict.
+			 */
+
+			/* FIXME: Would be nicer to look like rename/add than
+			   add/add. */
+		} else {
+			/*
+			 * normal rename or rename/delete; copy the existing
+			 * stage(s) from oldinfo over the newinfo and update
+			 * the pathname(s).
+			 */
+			memcpy(&newinfo->stages[0], &oldinfo->stages[0],
+			       sizeof(newinfo->stages[0]));
+			newinfo->filemask |= (1 << 0);
+			newinfo->pathnames[0] = oldpath;
+			if (!source_deleted) {
+				memcpy(&newinfo->stages[other_source_index],
+				       &oldinfo->stages[other_source_index],
+				       sizeof(newinfo->stages[0]));
+				newinfo->filemask |= (1 << other_source_index);
+				newinfo->pathnames[other_source_index] = oldpath;
+			}
+		}
+	}
+
+	return clean_merge;
+}
+
+static int detect_and_process_renames(struct merge_options *opt,
+				      struct tree *merge_base,
+				      struct tree *side1,
+				      struct tree *side2)
+{
+	struct diff_queue_struct *side1_pairs, *side2_pairs, *combined_pairs;
+	int clean = 1;
+
+	/*
+	ri->head_renames = NULL;
+	ri->merge_renames = NULL;
+	*/
+
+	if (!merge_detect_rename(opt))
+		return 1;
+
+	side1_pairs = get_diffpairs(opt, merge_base, side1);
+	side2_pairs = get_diffpairs(opt, merge_base, side2);
+	combined_pairs = get_renames(opt, side1_pairs, side2_pairs);
+
+#if 0
+	if ((opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE) ||
+	    (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT &&
+	     !opt->priv->call_depth)) {
+		dir_re_head = get_directory_renames(head_pairs);
+		dir_re_merge = get_directory_renames(merge_pairs);
+
+		handle_directory_level_conflicts(opt,
+						 dir_re_head, head,
+						 dir_re_merge, merge);
+	} else {
+		dir_re_head  = xmalloc(sizeof(*dir_re_head));
+		dir_re_merge = xmalloc(sizeof(*dir_re_merge));
+		dir_rename_init(dir_re_head);
+		dir_rename_init(dir_re_merge);
+	}
+
+	ri->head_renames  = get_renames(opt, opt->branch1, head_pairs,
+					dir_re_merge, dir_re_head, head,
+					common, head, merge, entries,
+					&clean);
+	if (clean < 0)
+		goto cleanup;
+	ri->merge_renames = get_renames(opt, opt->branch2, merge_pairs,
+					dir_re_head, dir_re_merge, merge,
+					common, head, merge, entries,
+					&clean);
+	if (clean < 0)
+		goto cleanup;
+#endif
+	clean &= process_renames(opt, combined_pairs);
+
+#if 0
+	/*
+	 * Some cleanup is deferred until cleanup_renames() because the
+	 * data structures are still needed and referenced in
+	 * process_entry().  But there are a few things we can free now.
+	 */
+	initial_cleanup_rename(head_pairs, dir_re_head);
+	initial_cleanup_rename(merge_pairs, dir_re_merge);
+#endif
+
+	return clean;
+}
+
 /* Per entry merge function */
 static void process_entry(struct merge_options *opt, struct string_list_item *e)
 			  /*
@@ -1109,18 +1444,23 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 		ci->merged.clean = 0;
-	} else if (ci->filemask == 2 || ci->filemask == 4) {
+	} else if ((ci->filemask == 2 || ci->filemask == 4)) {
 		/* Added on one side */
 		int side = (ci->filemask == 4) ? 2 : 1;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
-		ci->merged.clean = !ci->df_conflict;
+		ci->merged.clean = !ci->df_conflict && !ci->path_conflict;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
-		ci->merged.is_null = 1;
-		ci->merged.result.mode = 0;
-		oidcpy(&ci->merged.result.oid, &null_oid);
-		ci->merged.clean = 1;
+		if (ci->path_conflict) {
+			ci->merged.result.mode = ci->stages[0].mode;
+			oidcpy(&ci->merged.result.oid, &ci->stages[0].oid);
+		} else {
+			ci->merged.is_null = 1;
+			ci->merged.result.mode = 0;
+			oidcpy(&ci->merged.result.oid, &null_oid);
+			ci->merged.clean = 1;
+		}
 	}
 	if (!ci->merged.clean)
 		strmap_put(&opt->priv->unmerged, path, ci);
@@ -1499,7 +1839,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 
 	opt->priv->current_dir_name = root_dir;
 	code = collect_merge_info(opt, merge_base, head, merge);
-
 	if (code != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
 			err(opt, _("collecting merge info for trees %s and %s failed"),
@@ -1507,6 +1846,8 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 			    oid_to_hex(&merge->object.oid));
 		return -1;
 	}
+
+	code = detect_and_process_renames(opt, merge_base, head, merge);
 
 	process_entries(opt, &working_tree_oid);
 	*result = parse_tree_indirect(&working_tree_oid);
