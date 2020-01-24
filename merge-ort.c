@@ -1137,6 +1137,24 @@ static int process_renames(struct merge_options *opt,
 
 			/* This is a rename/rename(1to2) */
 			/* FIXME: handle return value of handle_content_merge */
+			printf("--> Rename/rename(1to2):\n");
+			printf("      Paths: %s, %s, %s\n",
+			       pathnames[0], pathnames[1], pathnames[2]);
+			printf("      Copied merge into both sides stages\n");
+			printf("      base: %s, %s, %s\n",
+			       oid_to_hex(&base->stages[0].oid),
+			       oid_to_hex(&base->stages[1].oid),
+			       oid_to_hex(&base->stages[2].oid));
+			printf("      side1: %s, %s, %s\n",
+			       oid_to_hex(&side1->stages[0].oid),
+			       oid_to_hex(&side1->stages[1].oid),
+			       oid_to_hex(&side1->stages[2].oid));
+			printf("      side2: %s, %s, %s\n",
+			       oid_to_hex(&side2->stages[0].oid),
+			       oid_to_hex(&side2->stages[1].oid),
+			       oid_to_hex(&side2->stages[2].oid));
+			printf("    pair->score: %d\n", pair->score);
+			printf("    other->score: %d\n", renames->queue[i+1]->score);
 			handle_content_merge(opt, pair->one->path,
 					     &base->stages[0],
 					     &side1->stages[1],
@@ -1193,6 +1211,13 @@ static int process_renames(struct merge_options *opt,
 					     &side2->stages[2],
 					     pathnames, 0, &merged);
 
+			printf("--> Rename/add:\n");
+			printf("      Paths: %s, %s, %s\n",
+			       pathnames[0], pathnames[1], pathnames[2]);
+			printf("      other_source_index: %d, target_index: %d\n",
+			       other_source_index, target_index);
+			printf("      Copied merge result into %s's stage %d\n",
+			       newpath, target_index);
 			memcpy(&newinfo->stages[target_index], &merged,
 			       sizeof(merged));
 		} else if (collision && source_deleted) {
@@ -1205,6 +1230,7 @@ static int process_renames(struct merge_options *opt,
 			 * they look like an add/add conflict.
 			 */
 
+			printf("--> Rename/add/delete; not touching.\n");
 			/* FIXME: Would be nicer to look like rename/add than
 			   add/add. */
 		} else {
@@ -1213,11 +1239,16 @@ static int process_renames(struct merge_options *opt,
 			 * stage(s) from oldinfo over the newinfo and update
 			 * the pathname(s).
 			 */
+			printf("--> Normal rename (or rename/delete):\n");
+			printf("      Involving %s -> %s\n", oldpath, newpath);
+			printf("      Copied stage 0 from old to new\n");
 			memcpy(&newinfo->stages[0], &oldinfo->stages[0],
 			       sizeof(newinfo->stages[0]));
 			newinfo->filemask |= (1 << 0);
 			newinfo->pathnames[0] = oldpath;
 			if (!source_deleted) {
+				printf("      Copied stage %d from old to new\n",
+				       other_source_index);
 				memcpy(&newinfo->stages[other_source_index],
 				       &oldinfo->stages[other_source_index],
 				       sizeof(newinfo->stages[0]));
