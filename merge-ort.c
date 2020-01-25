@@ -1166,8 +1166,9 @@ static int process_renames(struct merge_options *opt,
 			side1->path_conflict = 1;
 			side2->path_conflict = 1;
 			/* FIXME: Need to report conflict to output somehow */
-			base->merged.is_null = 1;
-			base->merged.clean = 1;
+			//base->merged.is_null = 1;
+			//base->merged.clean = 1;
+			base->path_conflict = 1;
 			/* FIXME: Do un-rename in recursive case */
 			i++; /* We handled both renames, so skip an extra */
 			continue;
