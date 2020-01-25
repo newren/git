@@ -1349,7 +1349,17 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		 */
 		return;
 	}
-	if (ci->df_conflict && ci->merged.result.mode != 0) {
+	if (ci->df_conflict && ci->merged.result.mode == 0) {
+		/*
+		 * directory no longer in the way, but we do have a file we
+		 * need to place here so we need to clean away the "directory
+		 * merges to nothing" result.
+		 */
+		ci->df_conflict = 0;
+		assert(ci->filemask != 0);
+		ci->merged.clean = 0;
+		ci->merged.is_null = 0;
+	} else if (ci->df_conflict && ci->merged.result.mode != 0) {
 		/*
 		 * This started out as a D/F conflict, and the entries in
 		 * the competing directory were not removed by the merge as
@@ -1360,22 +1370,6 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		const char *branch;
 
 		assert(ci->merged.result.mode == S_IFDIR);
-		/*
-		 * ci->filemask == 6 is impossible; lengthy explanation:
-		 *
-		 * ci->filemask == 6 means that the base had a directory
-		 * while both sides had a file.  Further, it implies that
-		 * resolution of the directory results in files which still
-		 * remain after conflict resolution despite the fact that
-		 * they existed on neither side of history.  The only way
-		 * that can happen is if the filenames in the base were
-		 * part of a rename AND the conflict resolution opted to
-		 * unrename these files.  Un-renaming only occurs for
-		 * rename/rename(1to2) conflicts.  And, uh...dang it that
-		 * can happen even if this would be incredibly rare.
-		 * FIXME: Update this code to handle ci->filemask == 6.
-		 */
-		assert(ci->filemask >= 1 && ci->filemask <= 5);
 
 		/*
 		 * If filemask is 1, we can just ignore the file as having
@@ -1445,7 +1439,6 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 		struct version_info *a = &ci->stages[1];
 		struct version_info *b = &ci->stages[2];
 
-		assert(!ci->df_conflict);
 		clean_merge = handle_content_merge(opt, path, o, a, b,
 						   ci->pathnames,
 						   opt->priv->call_depth * 2,
@@ -1656,7 +1649,11 @@ static void process_entries(struct merge_options *opt,
 	strmap_for_each_entry(&opt->priv->paths, &iter, e) {
 		string_list_append(&plist, e->item.string)->util = e->item.util;
 	}
-	/* plist.cmp = string_list_df_name_compare; */
+	/*
+	 * Note: although standard strcmp-ordered sort does not put D/F
+	 * entries near each other, that doesn't matter for our needs.
+	 * If it did, we could: plist.cmp = string_list_df_name_compare;
+	 */
 	string_list_sort(&plist);
 
 	/*
@@ -2034,6 +2031,7 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
 	strmap_init(&opt->priv->paths, 0);
 	strmap_init(&opt->priv->unmerged, 0);
+	strmap_init(&opt->priv->possible_dir_rename_bases, 0);
 	return 0;
 }
 
