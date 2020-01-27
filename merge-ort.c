@@ -1764,6 +1764,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	struct str_entry *e;
 	struct checkout state = CHECKOUT_INIT;
 	int errs = 0;
+	int original_cache_nr;
 
 	if (strmap_empty(&opt->priv->unmerged))
 		return 0;
@@ -1773,6 +1774,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	state.quiet = 1;
 	state.refresh_cache = 1;
 	state.istate = opt->repo->index;
+	original_cache_nr = opt->repo->index->cache_nr;
 
 	/* Put every entry from paths into plist, then sort */
 	strmap_for_each_entry(&opt->priv->unmerged, &iter, e) {
@@ -1786,9 +1788,19 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		 * The index will already have a stage=0 entry for this path,
 		 * because we created an as-merged-as-possible version of the
 		 * file and checkout() moved the working copy and index over
-		 * to that version.  Get the cache entry.
+		 * to that version.
+		 *
+		 * However, previous iterations through this loop will have
+		 * added unstaged entries to the end of the cache which
+		 * ignore the standard alphabetical ordering of cache
+		 * entries and break invariants needed for index_name_pos()
+		 * to work.  However, we know the entry we want is before
+		 * those appended cache entries, so do a temporary swap on
+		 * cache_nr to only look through entries of interest.
 		 */
+		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		pos = index_name_pos(opt->repo->index, path, strlen(path));
+		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		if (pos < 0)
 			BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
 		ce = opt->repo->index->cache[pos];
