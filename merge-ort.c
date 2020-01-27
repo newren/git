@@ -1327,11 +1327,177 @@ static int detect_and_process_renames(struct merge_options *opt,
 	return clean;
 }
 
+struct directory_versions {
+	struct string_list versions;
+	struct string_list offsets;
+	const char *last_directory;
+	unsigned last_directory_len;
+};
+
+static void write_tree(struct object_id *result_oid,
+		       struct string_list *versions,
+		       unsigned int offset)
+{
+	size_t maxlen = 0;
+	unsigned int nr = versions->nr - offset;
+	struct strbuf buf = STRBUF_INIT;
+	struct string_list relevant_entries = STRING_LIST_INIT_NODUP;
+	int i;
+
+	/*
+	 * We want to sort the last (versions->nr-offset) entries in versions.
+	 * Do so by abusing the string_list API a bit: make another string_list
+	 * that contains just those entries and then sort them.
+	 *
+	 * We won't use relevant_entries again and will let it just pop off the
+	 * stack, so there won't be allocation worries or anything.
+	 */
+	printf("Called write_tree with offset = %d\n", offset);
+	printf("  versions->nr = %d\n", versions->nr);
+	relevant_entries.items = versions->items + offset;
+	relevant_entries.nr = versions->nr - offset;
+	string_list_sort(&relevant_entries);
+
+	/* Pre-allocate some space in buf */
+	for (i = 0; i < nr; i++) {
+		maxlen += strlen(versions->items[offset+i].string) + 34;
+	}
+	strbuf_reset(&buf);
+	strbuf_grow(&buf, maxlen);
+
+	/* Write each entry out to buf */
+	printf("  Writing a tree using:\n");
+	for (i = 0; i < nr; i++) {
+		struct merged_info *mi = versions->items[offset+i].util;
+		struct version_info *ri = &mi->result;
+		printf("%06o %s %s\n", ri->mode, versions->items[offset+i].string,
+		       oid_to_hex(&ri->oid));
+		strbuf_addf(&buf, "%o %s%c",
+			    ri->mode,
+			    versions->items[offset+i].string, '\0');
+		strbuf_add(&buf, ri->oid.hash, the_hash_algo->rawsz);
+	}
+
+	/* Write this object file out, and record in result_oid */
+	write_object_file(buf.buf, buf.len, tree_type, result_oid);
+}
+
+static void record_entry_for_tree(struct directory_versions *dir_metadata,
+				  const char *path,
+				  struct conflict_info *ci)
+{
+	const char *basename;
+
+	if (ci->merged.is_null)
+		/* nothing to record */
+		return;
+
+	/*
+	 * Note: write_completed_directories() already added
+	 * entries for directories to dir_metadata->versions,
+	 * so no need to handle ci->filemask == 0 again.
+	 */
+	if (!ci->merged.clean && !ci->filemask)
+		return;
+
+	basename = path + ci->merged.basename_offset;
+	string_list_append(&dir_metadata->versions,
+			   basename)->util = &ci->merged.result;
+	printf("Added %s (%s) to dir_metadata->versions (now length %d)\n",
+	       basename, path, dir_metadata->versions.nr);
+}
+
+static void write_completed_directories(struct merge_options *opt,
+					const char *new_directory_name,
+					struct directory_versions *info)
+{
+	const char *prev_dir;
+	struct merged_info *dir_info = NULL;
+	unsigned int offset;
+	int wrote_a_new_tree = 0;
+
+	if (new_directory_name == info->last_directory)
+		return;
+
+	/*
+	 * If we are just starting (last_directory is NULL), or last_directory
+	 * is a prefix of the current directory, then we can just update
+	 * last_directory and record the offset where we started this directory.
+	 */
+	if (info->last_directory == NULL ||
+	    !strncmp(new_directory_name, info->last_directory,
+		     info->last_directory_len)) {
+		uintptr_t offset = info->versions.nr;
+
+		info->last_directory = new_directory_name;
+		info->last_directory_len = strlen(info->last_directory);
+		string_list_append(&info->offsets,
+				   info->last_directory)->util = (void*)offset;
+		printf("Due to new_directory_name of %s, added (%s, %lu) to offsets\n",
+		       new_directory_name, info->last_directory, offset);
+		return;
+	}
+
+	/*
+	 * At this point, ne (next entry) is within a different directory
+	 * than the last entry, so we need to create a tree object for all
+	 * the entires in info->versions that are under info->last_directory.
+	 */
+	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
+	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
+	if (offset == info->versions.nr) {
+		dir_info->is_null = 1;
+	} else {
+		dir_info->result.mode = S_IFDIR;
+		write_tree(&dir_info->result.oid, &info->versions, offset);
+		wrote_a_new_tree = 1;
+		printf("New tree:\n");
+	}
+
+	/*
+	 * We've now used several entries from info->versions and one entry
+	 * from info->offsets, so we get rid of those values.
+	 */
+	info->offsets.nr--;
+	info->versions.nr = offset;
+	printf("  Decremented info->offsets.nr to %d\n", info->offsets.nr);
+	printf("  Decreased info->versions.nr to %d\n", info->versions.nr);
+
+	/*
+	 * Now we've got an OID for last_directory in dir_info.  We need to
+	 * add it to info->versions for it to be part of the computation of
+	 * its parent directories' OID.  But first, we have to find out what
+	 * its' parent name was and whether that matches the previous
+	 * info->offsets or we need to set up a new one.
+	 */
+	prev_dir = info->offsets.nr == 0 ? NULL :
+		   info->offsets.items[info->offsets.nr-1].string;
+	if (new_directory_name != prev_dir) {
+		uintptr_t c = info->versions.nr;
+		string_list_append(&info->offsets,
+				   new_directory_name)->util = (void*)c;
+		printf("  Appended (%s, %lu) to info->offsets\n",
+		       new_directory_name, c);
+	}
+
+	/*
+	 * Okay, finally record OID for last_directory in info->versions,
+	 * and update last_directory.
+	 */
+	if (wrote_a_new_tree) {
+		string_list_append(&info->versions,
+				   info->last_directory)->util = dir_info;
+		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
+		       info->last_directory, oid_to_hex(&dir_info->result.oid));
+	}
+	info->last_directory = new_directory_name;
+	info->last_directory_len = strlen(info->last_directory);
+}
+
 /* Per entry merge function */
-static void process_entry(struct merge_options *opt, struct string_list_item *e)
-			  /*
-			  const char *path, struct conflict_info *entry)
-			  */
+static void process_entry(struct merge_options *opt,
+			  struct string_list_item *e,
+			  struct directory_versions *dir_metadata)
 {
 	char *path = e->string;
 	struct conflict_info *ci = e->util;
@@ -1489,148 +1655,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 	}
 	if (!ci->merged.clean)
 		strmap_put(&opt->priv->unmerged, path, ci);
-}
-
-static void write_tree(struct object_id *result_oid,
-		       struct string_list *versions,
-		       unsigned int offset)
-{
-	size_t maxlen = 0;
-	unsigned int nr = versions->nr - offset;
-	struct strbuf buf = STRBUF_INIT;
-	struct string_list relevant_entries = STRING_LIST_INIT_NODUP;
-	int i;
-
-	/*
-	 * We want to sort the last (versions->nr-offset) entries in versions.
-	 * Do so by abusing the string_list API a bit: make another string_list
-	 * that contains just those entries and then sort them.
-	 *
-	 * We won't use relevant_entries again and will let it just pop off the
-	 * stack, so there won't be allocation worries or anything.
-	 */
-	printf("Called write_tree with offset = %d\n", offset);
-	printf("  versions->nr = %d\n", versions->nr);
-	relevant_entries.items = versions->items + offset;
-	relevant_entries.nr = versions->nr - offset;
-	string_list_sort(&relevant_entries);
-
-	/* Pre-allocate some space in buf */
-	for (i = 0; i < nr; i++) {
-		maxlen += strlen(versions->items[offset+i].string) + 34;
-	}
-	strbuf_reset(&buf);
-	strbuf_grow(&buf, maxlen);
-
-	/* Write each entry out to buf */
-	printf("  Writing a tree using:\n");
-	for (i = 0; i < nr; i++) {
-		struct merged_info *mi = versions->items[offset+i].util;
-		struct version_info *ri = &mi->result;
-		printf("%06o %s %s\n", ri->mode, versions->items[offset+i].string,
-		       oid_to_hex(&ri->oid));
-		strbuf_addf(&buf, "%o %s%c",
-			    ri->mode,
-			    versions->items[offset+i].string, '\0');
-		strbuf_add(&buf, ri->oid.hash, the_hash_algo->rawsz);
-	}
-
-	/* Write this object file out, and record in result_oid */
-	write_object_file(buf.buf, buf.len, tree_type, result_oid);
-}
-
-struct directory_versions {
-	struct string_list versions;
-	struct string_list offsets;
-	const char *last_directory;
-	unsigned last_directory_len;
-};
-
-static void write_completed_directories(struct merge_options *opt,
-					const char *new_directory_name,
-					struct directory_versions *info)
-{
-	const char *prev_dir;
-	struct merged_info *dir_info = NULL;
-	unsigned int offset;
-	int wrote_a_new_tree = 0;
-
-	if (new_directory_name == info->last_directory)
-		return;
-
-	/*
-	 * If we are just starting (last_directory is NULL), or last_directory
-	 * is a prefix of the current directory, then we can just update
-	 * last_directory and record the offset where we started this directory.
-	 */
-	if (info->last_directory == NULL ||
-	    !strncmp(new_directory_name, info->last_directory,
-		     info->last_directory_len)) {
-		uintptr_t offset = info->versions.nr;
-
-		info->last_directory = new_directory_name;
-		info->last_directory_len = strlen(info->last_directory);
-		string_list_append(&info->offsets,
-				   info->last_directory)->util = (void*)offset;
-		printf("Due to new_directory_name of %s, added (%s, %lu) to offsets\n",
-		       new_directory_name, info->last_directory, offset);
-		return;
-	}
-
-	/*
-	 * At this point, ne (next entry) is within a different directory
-	 * than the last entry, so we need to create a tree object for all
-	 * the entires in info->versions that are under info->last_directory.
-	 */
-	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
-	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
-	if (offset == info->versions.nr) {
-		dir_info->is_null = 1;
-	} else {
-		dir_info->result.mode = S_IFDIR;
-		write_tree(&dir_info->result.oid, &info->versions, offset);
-		wrote_a_new_tree = 1;
-		printf("New tree:\n");
-	}
-
-	/*
-	 * We've now used several entries from info->versions and one entry
-	 * from info->offsets, so we get rid of those values.
-	 */
-	info->offsets.nr--;
-	info->versions.nr = offset;
-	printf("  Decremented info->offsets.nr to %d\n", info->offsets.nr);
-	printf("  Decreased info->versions.nr to %d\n", info->versions.nr);
-
-	/*
-	 * Now we've got an OID for last_directory in dir_info.  We need to
-	 * add it to info->versions for it to be part of the computation of
-	 * its parent directories' OID.  But first, we have to find out what
-	 * its' parent name was and whether that matches the previous
-	 * info->offsets or we need to set up a new one.
-	 */
-	prev_dir = info->offsets.nr == 0 ? NULL :
-		   info->offsets.items[info->offsets.nr-1].string;
-	if (new_directory_name != prev_dir) {
-		uintptr_t c = info->versions.nr;
-		string_list_append(&info->offsets,
-				   new_directory_name)->util = (void*)c;
-		printf("  Appended (%s, %lu) to info->offsets\n",
-		       new_directory_name, c);
-	}
-
-	/*
-	 * Okay, finally record OID for last_directory in info->versions,
-	 * and update last_directory.
-	 */
-	if (wrote_a_new_tree) {
-		string_list_append(&info->versions,
-				   info->last_directory)->util = dir_info;
-		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
-		       info->last_directory, oid_to_hex(&dir_info->result.oid));
-	}
-	info->last_directory = new_directory_name;
-	info->last_directory_len = strlen(info->last_directory);
+	record_entry_for_tree(dir_metadata, path, ci);
 }
 
 static void process_entries(struct merge_options *opt,
@@ -1670,29 +1695,13 @@ static void process_entries(struct merge_options *opt,
 		 * actually point to a conflict_info but a struct merge_info.
 		 */
 		struct conflict_info *ci = entry->util;
-		const char *basename;
 
 		printf("==>Handling %s\n", entry->string);
 
 		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
 		if (!ci->merged.clean)
-			process_entry(opt, entry);
-
-		/* process_entry() might update entry, so reassign ci */
-		ci = entry->util;
-		if (!ci->merged.is_null && (ci->merged.clean || ci->filemask)) {
-			/*
-			 * Note: write_completed_directories() already added
-			 * entries for directories to dir_metadata.versions,
-			 * so no need to handle ci->filemask == 0 again.
-			 */
-			basename = entry->string + ci->merged.basename_offset;
-			string_list_append(&dir_metadata.versions,
-					   basename)->util = &ci->merged.result;
-			printf("Added %s (%s) to dir_metadata.versions (now length %d)\n",
-			       basename, entry->string, dir_metadata.versions.nr);
-		}
+			process_entry(opt, entry, &dir_metadata);
 	}
 	if (dir_metadata.offsets.nr != 1 ||
 	    (uintptr_t)dir_metadata.offsets.items[0].util != 0) {
