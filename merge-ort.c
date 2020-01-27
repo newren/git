@@ -1443,7 +1443,7 @@ static void process_entry(struct merge_options *opt, struct string_list_item *e)
 						   ci->pathnames,
 						   opt->priv->call_depth * 2,
 						   &merged_file);
-		ci->merged.clean = clean_merge;
+		ci->merged.clean = clean_merge && !ci->df_conflict;
 		ci->merged.result.mode = merged_file.mode;
 		oidcpy(&ci->merged.result.oid, &merged_file.oid);
 		printf("Content merging %s (%s); mode: %06o, hash: %s\n",
