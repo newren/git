@@ -917,7 +917,12 @@ static int handle_content_merge(struct merge_options *opt,
 		}
 	} else {
 		/* Both files OR both submodules OR both symlinks */
-		assert(!oideq(&a->oid, &o->oid) || !oideq(&b->oid, &o->oid));
+		/*
+		 * FIXME:
+		 * If we ensure to set up match_mask in handle rename,
+		 * then we can assert the following:
+		    assert(!oideq(&a->oid, &o->oid) || !oideq(&b->oid, &o->oid));
+		 */
 
 		/*
 		 * Merge modes
@@ -930,13 +935,12 @@ static int handle_content_merge(struct merge_options *opt,
 			clean = (b->mode == o->mode);
 		}
 
-		/*
+		/* FIXME: can remove next four lines based on match_mask too */
 		if (oideq(&a->oid, &b->oid) || oideq(&a->oid, &o->oid))
 			oidcpy(&result->oid, &b->oid);
 		else if (oideq(&b->oid, &o->oid))
 			oidcpy(&result->oid, &a->oid);
-		else */
-		if (S_ISREG(a->mode)) {
+		else if (S_ISREG(a->mode)) {
 			mmbuffer_t result_buf;
 			int ret = 0, merge_status;
 
