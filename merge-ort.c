@@ -89,6 +89,7 @@ struct conflict_info {
 	unsigned df_conflict:1;
 	unsigned path_conflict:1;
 	unsigned filemask:3;
+	unsigned dirmask:3;
 	unsigned match_mask:3;
 	unsigned processed:1;
 };
@@ -267,6 +268,7 @@ static void setup_path_info(struct string_list_item *result,
 			    unsigned is_null,     /* boolean */
 			    unsigned df_conflict, /* boolean */
 			    unsigned filemask,
+			    unsigned dirmask,
 			    int resolved          /* boolean */)
 {
 	struct conflict_info *path_info;
@@ -307,6 +309,7 @@ static void setup_path_info(struct string_list_item *result,
 			oidcpy(&path_info->stages[i].oid, &names[i].oid);
 		}
 		path_info->filemask = filemask;
+		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
 	}
 	result->string = fullpath;
@@ -381,7 +384,7 @@ static int collect_merge_info_callback(int n,
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
 		setup_path_info(&pi, info,  opti->current_dir_name, names,
-				names+0, mbase_null, 0, filemask, 1);
+				names+0, mbase_null, 0, filemask, dirmask, 1);
 		printf("Path -1 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
@@ -395,7 +398,7 @@ static int collect_merge_info_callback(int n,
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
-				names+1, 0, 0, filemask, 1);
+				names+1, 0, 0, filemask, dirmask, 1);
 		printf("Path 0 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
@@ -415,7 +418,7 @@ static int collect_merge_info_callback(int n,
 	    side1_matches_mbase && !side2_is_tree) {
 		/* use side2 version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
-				names+2, side2_null, 0, filemask, 1);
+				names+2, side2_null, 0, filemask, dirmask, 1);
 		printf("Path 1 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
@@ -430,7 +433,7 @@ static int collect_merge_info_callback(int n,
 	    side2_matches_mbase && !side1_is_tree) {
 		/* use side1 version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
-				names+1, side1_null, 0, filemask, 1);
+				names+1, side1_null, 0, filemask, dirmask, 1);
 		printf("Path 2 for %s\n", pi.string);
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
@@ -443,7 +446,7 @@ static int collect_merge_info_callback(int n,
 	 * do now is record the different non-null file hashes.)
 	 */
 	setup_path_info(&pi, info, opti->current_dir_name, names,
-			NULL, 0, df_conflict, filemask, 0);
+			NULL, 0, df_conflict, filemask, dirmask, 0);
 	printf("Path 3 for %s, iprd = %d\n", pi.string,
 	       opti->inside_possibly_renamed_dir);
 	printf("Stats:\n");
@@ -1501,6 +1504,7 @@ static void process_entry(struct merge_options *opt,
 {
 	char *path = e->string;
 	struct conflict_info *ci = e->util;
+	int df_file_index = 0;
 
 	/* int normalize = opt->renormalize; */
 
@@ -1560,7 +1564,14 @@ static void process_entry(struct merge_options *opt,
 		 */
 		memcpy(new_ci, ci, sizeof(*ci));
 
-		branch = (ci->filemask & 2) ? opt->branch1 : opt->branch2;
+		/*
+		 * Find out which side this file came from; note that we
+		 * cannot just use ci->filemask, because renames could cause
+		 * the filemask to go back to 7.  So we use dirmask, then
+		 * pick the opposite side's index.
+		 */
+		df_file_index = (ci->dirmask & (1 << 1)) ? 2 : 1;
+		branch = (df_file_index == 1) ? opt->branch1 : opt->branch2;
 		path = unique_path(opt, path, branch);
 		strmap_put(&opt->priv->paths, path, new_ci);
 
@@ -1615,6 +1626,12 @@ static void process_entry(struct merge_options *opt,
 		printf("Content merging %s (%s); mode: %06o, hash: %s\n",
 		       path, ci->merged.clean ? "clean" : "unclean",
 		       ci->merged.result.mode, oid_to_hex(&ci->merged.result.oid));
+		if (clean_merge && ci->df_conflict) {
+			assert(df_file_index == 1 || df_file_index == 2);
+			ci->filemask = 1 << df_file_index;
+			ci->stages[df_file_index].mode = merged_file.mode;
+			oidcpy(&ci->stages[df_file_index].oid, &merged_file.oid);
+		}
 		/* Handle output stuff...
 		if (!clean_merge) {
 			if (S_ISREG(a->mode) && S_ISREG(b->mode)) {
