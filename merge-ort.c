@@ -1660,15 +1660,10 @@ static void process_entry(struct merge_options *opt,
 		ci->merged.clean = !ci->df_conflict && !ci->path_conflict;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
-		if (ci->path_conflict) {
-			ci->merged.result.mode = ci->stages[0].mode;
-			oidcpy(&ci->merged.result.oid, &ci->stages[0].oid);
-		} else {
-			ci->merged.is_null = 1;
-			ci->merged.result.mode = 0;
-			oidcpy(&ci->merged.result.oid, &null_oid);
-			ci->merged.clean = 1;
-		}
+		ci->merged.is_null = 1;
+		ci->merged.result.mode = 0;
+		oidcpy(&ci->merged.result.oid, &null_oid);
+		ci->merged.clean = !ci->path_conflict;
 	}
 	if (!ci->merged.clean)
 		strmap_put(&opt->priv->unmerged, path, ci);
@@ -1818,37 +1813,40 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		pos = index_name_pos(opt->repo->index, path, strlen(path));
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
-		if (pos < 0)
-			BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
-		ce = opt->repo->index->cache[pos];
+		if (pos < 0) {
+			if (ci->filemask != 1)
+				BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
+		} else {
+			ce = opt->repo->index->cache[pos];
 
-		/*
-		 * If this cache entry had the skip_worktree bit set, then it
-		 * isn't present in the working tree..but since it corresponds
-		 * to a merge conflict we need it to be.
-		 */
-		if (ce_skip_worktree(ce)) {
-			struct stat st;
+			/*
+			 * If this cache entry had the skip_worktree bit set,
+			 * then it isn't present in the working tree..but since
+			 * it corresponds to a merge conflict we need it to be.
+			 */
+			if (ce_skip_worktree(ce)) {
+				struct stat st;
 
-			if (lstat(path, &st)) {
-				char *new_name = unique_path(opt, path, "cruft");
+				if (lstat(path, &st)) {
+					char *new_name = unique_path(opt, path, "cruft");
 
-				output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
-				errs |= rename(path, new_name);
-				free(new_name);
+					output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
+					errs |= rename(path, new_name);
+					free(new_name);
+				}
+				errs |= checkout_entry(ce, &state, NULL, NULL);
 			}
-			errs |= checkout_entry(ce, &state, NULL, NULL);
-		}
 
-		/*
-		 * Mark this cache entry for removal and instead add new
-		 * stage > 0 entries corresponding to the conflicts.  We
-		 * just add the new cache entries to the end and re-sort
-		 * later to avoid O(NM) memmove'd entries (N=num cache
-		 * entries, M=num unmerged entries) if there are several
-		 * unmerged entries.
-		 */
-		ce->ce_flags |= CE_REMOVE;
+			/*
+			 * Mark this cache entry for removal and instead add
+			 * new stage > 0 entries corresponding to the
+			 * conflicts.  We just add the new cache entries to
+			 * the end and re-sort later to avoid O(NM) memmove'd
+			 * entries (N=num cache entries, M=num unmerged
+			 * entries) if there are several unmerged entries.
+			 */
+			ce->ce_flags |= CE_REMOVE;
+		}
 
 		for (i = 0; i < 3; i++) {
 			struct version_info *vi;
