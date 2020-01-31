@@ -397,7 +397,7 @@ test_expect_success 'Rename+D/F conflict; renamed file cannot merge and dir in t
 	test_must_fail git merge --strategy=recursive dir-in-way &&
 
 	test 5 -eq "$(git ls-files -u | wc -l)" &&
-	test 3 -eq "$(git ls-files -u dir | grep -v file-in-the-way | wc -l)" &&
+	test 3 -eq "$(git ls-files -u dir~HEAD | wc -l)" &&
 	test 2 -eq "$(git ls-files -u dir/file-in-the-way | wc -l)" &&
 
 	test_must_fail git diff --quiet &&
@@ -415,7 +415,7 @@ test_expect_success 'Same as previous, but merged other way' '
 	test_must_fail git merge --strategy=recursive renamed-file-has-conflicts &&
 
 	test 5 -eq "$(git ls-files -u | wc -l)" &&
-	test 3 -eq "$(git ls-files -u dir | grep -v file-in-the-way | wc -l)" &&
+	test 3 -eq "$(git ls-files -u dir~renamed-file-has-conflicts | wc -l)" &&
 	test 2 -eq "$(git ls-files -u dir/file-in-the-way | wc -l)" &&
 
 	test_must_fail git diff --quiet &&
@@ -471,7 +471,7 @@ test_expect_success 'both rename source and destination involved in D/F conflict
 	git checkout -q rename-dest^0 &&
 	test_must_fail git merge --strategy=recursive source-conflict &&
 
-	test 1 -eq "$(git ls-files -u | wc -l)" &&
+	test 2 -eq "$(git ls-files -u | wc -l)" &&
 
 	test_must_fail git diff --quiet &&
 
@@ -510,18 +510,17 @@ test_expect_success 'pair rename to parent of other (D/F conflicts) w/ untracked
 	mkdir one &&
 	test_must_fail git merge --strategy=recursive rename-two &&
 
-	test 2 -eq "$(git ls-files -u | wc -l)" &&
-	test 1 -eq "$(git ls-files -u one | wc -l)" &&
-	test 1 -eq "$(git ls-files -u two | wc -l)" &&
+	test 4 -eq "$(git ls-files -u | wc -l)" &&
+	test 2 -eq "$(git ls-files -u one | wc -l)" &&
+	test 2 -eq "$(git ls-files -u two | wc -l)" &&
 
 	test_must_fail git diff --quiet &&
 
-	test 4 -eq $(find . | grep -v .git | wc -l) &&
+	test 3 -eq $(find . | grep -v .git | wc -l) &&
 
-	test_path_is_dir one &&
-	test_path_is_file one~rename-two &&
+	test_path_is_file one &&
 	test_path_is_file two &&
-	test "other" = $(cat one~rename-two) &&
+	test "other" = $(cat one) &&
 	test "stuff" = $(cat two)
 '
 
@@ -530,9 +529,9 @@ test_expect_success 'pair rename to parent of other (D/F conflicts) w/ clean sta
 	git clean -fdqx &&
 	test_must_fail git merge --strategy=recursive rename-two &&
 
-	test 2 -eq "$(git ls-files -u | wc -l)" &&
-	test 1 -eq "$(git ls-files -u one | wc -l)" &&
-	test 1 -eq "$(git ls-files -u two | wc -l)" &&
+	test 4 -eq "$(git ls-files -u | wc -l)" &&
+	test 2 -eq "$(git ls-files -u one | wc -l)" &&
+	test 2 -eq "$(git ls-files -u two | wc -l)" &&
 
 	test_must_fail git diff --quiet &&
 
@@ -574,10 +573,10 @@ test_expect_success 'check handling of differently renamed file with D/F conflic
 
 	test 5 -eq "$(git ls-files -s | wc -l)" &&
 	test 3 -eq "$(git ls-files -u | wc -l)" &&
-	test 1 -eq "$(git ls-files -u one | wc -l)" &&
-	test 1 -eq "$(git ls-files -u two | wc -l)" &&
+	test 1 -eq "$(git ls-files -u one~HEAD | wc -l)" &&
+	test 1 -eq "$(git ls-files -u two~second-rename | wc -l)" &&
 	test 1 -eq "$(git ls-files -u original | wc -l)" &&
-	test 2 -eq "$(git ls-files -o | wc -l)" &&
+	test 0 -eq "$(git ls-files -o | wc -l)" &&
 
 	test_path_is_file one/file &&
 	test_path_is_file two/file &&
