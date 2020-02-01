@@ -405,36 +405,57 @@ static int collect_merge_info_callback(int n,
 	}
 
 	/*
-	 * If side1 matches mbase, and side2 is not a tree, we can resolve
-	 * early because side1 matching mbase implies:
+	 * If side1 matches mbase, and side2 is not a tree, then not only do we
+	 * not need to recurse into side2, but we can ignore side1 for contents
+	 * or renames because side1 matching mbase implies:
 	 *   - side1 has no interesting contents or changes; use side2 versions
 	 *   - side1 has no content changes to include in renames on side2 side
 	 *   - side1 contains no new files to move with side2's directory renames
-	 * We can't resolve early if side2 is a tree though, because there
-	 * may be new files on side2's side that are rename targets that need
-	 * to be merged with changes from elsewhere on side1's side of history.
+	 * Note that if side2 is a tree, there may be new files on side2's side
+	 * that are rename targets that need to be merged with changes from
+	 * elsewhere on side1's side of history.  Also, if side2 is a file (
+	 * and side1 is a tree), the path on side2 is an add that may
+	 * correspond to a rename target so we have to mark that as conflicted.
 	 */
 	if (!opti->inside_possibly_renamed_dir &&
 	    side1_matches_mbase && !side2_is_tree) {
-		/* use side2 version as resolution */
-		setup_path_info(&pi, info, opti->current_dir_name, names,
-				names+2, side2_null, 0, filemask, dirmask, 1);
-		printf("Path 1 for %s\n", pi.string);
+		if (side1_is_tree && !side2_null) {
+			/* ignore side1 but mark side2 as conflicted add */
+			setup_path_info(&pi, info, opti->current_dir_name, names,
+					NULL, side2_null, 0, filemask,
+					dirmask, 0);
+			printf("Path 1.A for %s\n", pi.string);
+		} else {
+			/* use side2 version as resolution */
+			setup_path_info(&pi, info, opti->current_dir_name, names,
+					names+2, side2_null, 0, filemask,
+					dirmask, 1);
+			printf("Path 1.B for %s\n", pi.string);
+		}
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
 	/*
-	 * If side2 matches mbase, and side1 is not a tree, we can resolve
-	 * early.  Same reasoning as for above but with side1 and side2
-	 * swapped.
+	 * If side2 matches mbase, and side1 is not a tree, we can ignore side2
+	 * for renames and maybe resolve in favor of side1 early.  Same
+	 * reasoning as for above but with side1 and side2 swapped.
 	 */
 	if (!opti->inside_possibly_renamed_dir &&
 	    side2_matches_mbase && !side1_is_tree) {
-		/* use side1 version as resolution */
-		setup_path_info(&pi, info, opti->current_dir_name, names,
-				names+1, side1_null, 0, filemask, dirmask, 1);
-		printf("Path 2 for %s\n", pi.string);
+		if (side2_is_tree && !side1_null) {
+			/* ignore side2 but mark side1 as conflicted add */
+			setup_path_info(&pi, info, opti->current_dir_name, names,
+					NULL, side1_null, 0, filemask,
+					dirmask, 0);
+			printf("Path 2.A for %s\n", pi.string);
+		} else {
+			/* use side1 version as resolution */
+			setup_path_info(&pi, info, opti->current_dir_name, names,
+					names+1, side1_null, 0, filemask,
+					dirmask, 1);
+			printf("Path 2.B for %s\n", pi.string);
+		}
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
