@@ -937,12 +937,13 @@ static int handle_content_merge(struct merge_options *opt,
 			oidcpy(&result->oid, &b->oid);
 		}
 	} else {
-		/* Both files OR both submodules OR both symlinks */
 		/*
 		 * FIXME:
 		 * If we ensure to set up match_mask in handle rename,
 		 * then we can assert the following:
 		    assert(!oideq(&a->oid, &o->oid) || !oideq(&b->oid, &o->oid));
+		 * Getting here means a & b are both (files OR submodules OR
+		 * symlinks); they do not differ in type.
 		 */
 
 		/*
@@ -951,6 +952,7 @@ static int handle_content_merge(struct merge_options *opt,
 		if (a->mode == b->mode || a->mode == o->mode)
 			result->mode = b->mode;
 		else {
+			/* must be the 100644/100755 case */
 			assert(S_ISREG(a->mode));
 			result->mode = a->mode;
 			clean = (b->mode == o->mode);
@@ -961,6 +963,8 @@ static int handle_content_merge(struct merge_options *opt,
 			oidcpy(&result->oid, &b->oid);
 		else if (oideq(&b->oid, &o->oid))
 			oidcpy(&result->oid, &a->oid);
+		/* Remaining merge rules depends on file vs. submodule vs. symlink. */
+		/* FIXME: What if o is different type than a & b? */
 		else if (S_ISREG(a->mode)) {
 			mmbuffer_t result_buf;
 			int ret = 0, merge_status;
