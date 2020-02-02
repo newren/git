@@ -2020,6 +2020,8 @@ static int merge_ort_internal(struct merge_options *opt,
 
 	for (iter = merge_bases; iter; iter = iter->next) {
 		const char *saved_b1, *saved_b2;
+		struct commit *prev = merged_merge_bases;
+
 		opt->priv->call_depth++;
 		/*
 		 * When the merge fails, the result contains files
@@ -2033,8 +2035,8 @@ static int merge_ort_internal(struct merge_options *opt,
 		saved_b2 = opt->branch2;
 		opt->branch1 = "Temporary merge branch 1";
 		opt->branch2 = "Temporary merge branch 2";
-		if (merge_ort_internal(opt, merged_merge_bases, iter->item,
-				       NULL, result_tree) < 0)
+		if (merge_ort_internal(opt, prev, iter->item, NULL,
+				       result_tree) < 0)
 			return -1;
 		opt->branch1 = saved_b1;
 		opt->branch2 = saved_b2;
@@ -2043,8 +2045,9 @@ static int merge_ort_internal(struct merge_options *opt,
 		merged_merge_bases = make_virtual_commit(opt->repo,
 							 *result_tree,
 							 "merged tree");
-		commit_list_insert(h1, &merged_merge_bases->parents);
-		commit_list_insert(h2, &merged_merge_bases->parents->next);
+		commit_list_insert(prev, &merged_merge_bases->parents);
+		commit_list_insert(iter->item,
+				   &merged_merge_bases->parents->next);
 	}
 
 	if (!opt->priv->call_depth && merge_bases != NULL) {
