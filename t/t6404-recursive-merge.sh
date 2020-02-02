@@ -118,12 +118,12 @@ test_expect_success 'mark rename/delete as unmerged' '
 	test_tick &&
 	git commit -m rename &&
 	test_must_fail git merge delete &&
-	test 1 = $(git ls-files --unmerged | wc -l) &&
+	test 2 = $(git ls-files --unmerged | wc -l) &&
 	git rev-parse --verify :2:a2 &&
 	test_must_fail git rev-parse --verify :3:a2 &&
 	git checkout -f delete &&
 	test_must_fail git merge rename &&
-	test 1 = $(git ls-files --unmerged | wc -l) &&
+	test 2 = $(git ls-files --unmerged | wc -l) &&
 	test_must_fail git rev-parse --verify :2:a2 &&
 	git rev-parse --verify :3:a2
 '
