@@ -1752,7 +1752,9 @@ static void process_entries(struct merge_options *opt,
 
 		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
-		if (!ci->merged.clean)
+		if (ci->merged.clean)
+			record_entry_for_tree(&dir_metadata, entry->string, ci);
+		else
 			process_entry(opt, entry, &dir_metadata);
 	}
 	if (dir_metadata.offsets.nr != 1 ||
