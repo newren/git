@@ -1444,6 +1444,7 @@ static void record_entry_for_tree(struct directory_versions *dir_metadata,
 		return;
 
 	basename = path + ci->merged.basename_offset;
+	assert(strchr(basename, '/') == NULL);
 	string_list_append(&dir_metadata->versions,
 			   basename)->util = &ci->merged.result;
 	printf("Added %s (%s) to dir_metadata->versions (now length %d)\n",
@@ -1517,8 +1518,9 @@ static void write_completed_directories(struct merge_options *opt,
 		   info->offsets.items[info->offsets.nr-1].string;
 	if (new_directory_name != prev_dir) {
 		uintptr_t c = info->versions.nr;
-		string_list_append(&info->offsets,
-				   new_directory_name)->util = (void*)c;
+		const char *dir_name = strrchr(new_directory_name, '/');
+		dir_name = dir_name ? dir_name+1 : new_directory_name;
+		string_list_append(&info->offsets, dir_name)->util = (void*)c;
 		printf("  Appended (%s, %lu) to info->offsets\n",
 		       new_directory_name, c);
 	}
@@ -1528,8 +1530,9 @@ static void write_completed_directories(struct merge_options *opt,
 	 * and update last_directory.
 	 */
 	if (wrote_a_new_tree) {
-		string_list_append(&info->versions,
-				   info->last_directory)->util = dir_info;
+		const char *dir_name = strrchr(info->last_directory, '/');
+		dir_name = dir_name ? dir_name+1 : info->last_directory;
+		string_list_append(&info->versions, dir_name)->util = dir_info;
 		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
 		       info->last_directory, oid_to_hex(&dir_info->result.oid));
 	}
