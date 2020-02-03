@@ -295,6 +295,10 @@ static void setup_path_info(struct string_list_item *result,
 	path_info->merged.basename_offset = info->pathlen;
 	path_info->merged.clean = !!resolved;
 	if (resolved) {
+		printf("For %s, mode=%o, sha=%s, is_null=%d, clean=%d\n",
+		       fullpath, merged_version->mode,
+		       oid_to_hex(&merged_version->oid), !!is_null,
+		       path_info->merged.clean);
 		path_info->merged.result.mode = merged_version->mode;
 		oidcpy(&path_info->merged.result.oid, &merged_version->oid);
 		path_info->merged.is_null = !!is_null;
@@ -1051,6 +1055,7 @@ static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
 	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "", &opts);
+	printf("opts.detect_rename: %d, opts.rename_limit: %d, opts.rename_score: %d\n", opts.detect_rename, opts.rename_limit, opts.rename_score);
 	diffcore_std(&opts);
 	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
 		opt->priv->needed_rename_limit = opts.needed_rename_limit;
@@ -1074,6 +1079,7 @@ static void append_rename_pairs(struct diff_queue_struct *result,
 	for (i = 0; i < side->nr; ++i) {
 		struct diff_filepair *pair = side->queue[i];
 
+		printf("  diffpair: %c %s\n", pair->status, pair->one->path);
 		if (pair->status != 'R') {
 			diff_free_filepair(pair);
 			continue;
@@ -1109,10 +1115,16 @@ static struct diff_queue_struct *get_renames(struct merge_options *opt,
 
 	combined = xcalloc(1, sizeof(*combined));
 
+	printf("side1->nr: %d\n", side1->nr);
+	printf("side2->nr: %d\n", side2->nr);
 	ALLOC_GROW(combined->queue, side1->nr + side2->nr, combined->alloc);
+	printf("combined->nr: %d\n", combined->nr);
 	append_rename_pairs(combined, side1, 1);
+	printf("combined->nr: %d\n", combined->nr);
 	append_rename_pairs(combined, side2, 2);
+	printf("combined->nr: %d\n", combined->nr);
 	QSORT(combined->queue, combined->nr, compare_pairs);
+	printf("combined->nr: %d\n", combined->nr);
 
 	free(side1->queue);
 	free(side2->queue);
@@ -1227,6 +1239,8 @@ static int process_renames(struct merge_options *opt,
 		old_sidemask = (other_source_index << 1); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
+		printf("collision: %d, source_deleted: %d\n",
+		       collision, source_deleted);
 
 		assert(source_deleted || oldinfo->filemask & old_sidemask);
 
@@ -1355,6 +1369,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	if (clean < 0)
 		goto cleanup;
 #endif
+	printf("=== Processing %d renames ===\n", combined_pairs->nr);
 	clean &= process_renames(opt, combined_pairs);
 
 #if 0

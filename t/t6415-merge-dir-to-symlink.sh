@@ -150,6 +150,7 @@ test_expect_success SYMLINKS 'a/b-2 was resolved as symlink' '
 test_expect_success 'merge should not have D/F conflicts (recursive)' '
 	git reset --hard &&
 	git checkout baseline^0 &&
+	#GIT_DEBUGGER=nemiver git merge -s recursive test2 &&
 	git merge -s recursive test2 &&
 	test_path_is_file a/b/c/d
 '
