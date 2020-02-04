@@ -1737,6 +1737,11 @@ static void process_entries(struct merge_options *opt,
 	struct string_list_item *entry;
 	struct directory_versions dir_metadata;
 
+	if (strmap_empty(&opt->priv->paths)) {
+		oidcpy(result_oid, opt->repo->hash_algo->empty_tree);
+		return;
+	}
+
 	/* Hack to pre-allocated both to the desired size */
 	ALLOC_GROW(plist.items, strmap_get_size(&opt->priv->paths), plist.alloc);
 
