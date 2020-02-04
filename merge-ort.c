@@ -1979,6 +1979,8 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	return strmap_empty(&opt->priv->unmerged); /* unmerged==0 => clean */
 }
 
+static void reset_maps(struct merge_options *opt, int reinitialize);
+
 /*
  * Drop-in replacement for merge_recursive_internal().
  * Currently, a near wholesale copy-paste of merge_recursive_internal(); only
@@ -2068,6 +2070,8 @@ static int merge_ort_internal(struct merge_options *opt,
 		commit_list_insert(prev, &merged_merge_bases->parents);
 		commit_list_insert(iter->item,
 				   &merged_merge_bases->parents->next);
+
+		reset_maps(opt, 1);
 	}
 
 	if (!opt->priv->call_depth && merge_bases != NULL) {
@@ -2154,11 +2158,19 @@ static void merge_finalize(struct merge_options *opt)
 		diff_warn_rename_limit("merge.renamelimit",
 				       opt->priv->needed_rename_limit, 0);
 
+	reset_maps(opt, 0);
+	FREE_AND_NULL(opt->priv);
+}
+
+static void reset_maps(struct merge_options *opt, int reinitialize)
+{
+	void (*strmap_func)(struct strmap *, int) =
+		reinitialize ? strmap_clear : strmap_free;
 	/*
 	 * possible_dir_rename_bases reuse the same strings found in
 	 * opt->priv->unmerged, so they'll be freed below.
 	 */
-	strmap_clear(&opt->priv->possible_dir_rename_bases, 1);
+	strmap_func(&opt->priv->possible_dir_rename_bases, 1);
 
 	/*
 	 * We marked opt->priv->paths with strdup_strings = 0, so that we
@@ -2169,16 +2181,14 @@ static void merge_finalize(struct merge_options *opt)
 	 * before the strmaps are cleared.
 	 */
 	opt->priv->paths.strdup_strings = 1;
-	strmap_clear(&opt->priv->paths, 1);
+	strmap_func(&opt->priv->paths, 1);
 	/*
 	 * All strings and util fields in opt->priv->unmerged are a subset
 	 * of those in opt->priv->paths.  We don't want to deallocate
 	 * anything twice, so we don't set strdup_strings and we pass 0 for
 	 * free_util.
 	 */
-	strmap_clear(&opt->priv->unmerged, 0);
-
-	FREE_AND_NULL(opt->priv);
+	strmap_func(&opt->priv->unmerged, 0);
 }
 
 int merge_ort_nonrecursive(struct merge_options *opt,
