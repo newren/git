@@ -537,9 +537,8 @@ test_expect_success 'setup differently handled merges of directory/file conflict
 
 		git checkout B^0 &&
 		test_must_fail git merge C^0 &&
-		git clean -fd &&
 		git rm -rf a/ &&
-		git rm a &&
+		git rm a~HEAD &&
 		git cat-file -p B:a >a2 &&
 		git add a2 &&
 		git commit -m D2 &&
@@ -558,7 +557,7 @@ test_expect_success 'setup differently handled merges of directory/file conflict
 
 		git checkout C^0 &&
 		test_must_fail git merge B^0 &&
-		git clean -fd &&
+		git rm a~B^0 &&
 		git rm -rf a/ &&
 		test_write_lines 1 2 3 4 5 6 7 8 >a &&
 		git add a &&
@@ -567,9 +566,8 @@ test_expect_success 'setup differently handled merges of directory/file conflict
 
 		git checkout C^0 &&
 		test_must_fail git merge B^0 &&
-		git clean -fd &&
 		git rm -rf a/ &&
-		git rm a &&
+		git rm a~B^0 &&
 		test_write_lines 1 2 3 4 5 6 7 8 >a2 &&
 		git add a2 &&
 		git commit -m E4 &&
@@ -588,16 +586,16 @@ test_expect_success 'merge of D1 & E1 fails but has appropriate contents' '
 		test_must_fail git merge -s recursive E1^0 &&
 
 		git ls-files -s >out &&
-		test_line_count = 2 out &&
+		test_line_count = 3 out &&
 		git ls-files -u >out &&
-		test_line_count = 1 out &&
+		test_line_count = 2 out &&
 		git ls-files -o >out &&
 		test_line_count = 1 out &&
 
 		git rev-parse >expect    \
-			A:ignore-me  B:a &&
+			A:ignore-me  B:a  D1:a &&
 		git rev-parse   >actual   \
-			:0:ignore-me :2:a &&
+			:0:ignore-me :1:a :2:a &&
 		test_cmp expect actual
 	)
 '
@@ -613,16 +611,16 @@ test_expect_success 'merge of E1 & D1 fails but has appropriate contents' '
 		test_must_fail git merge -s recursive D1^0 &&
 
 		git ls-files -s >out &&
-		test_line_count = 2 out &&
+		test_line_count = 3 out &&
 		git ls-files -u >out &&
-		test_line_count = 1 out &&
+		test_line_count = 2 out &&
 		git ls-files -o >out &&
 		test_line_count = 1 out &&
 
-		git rev-parse >expect    \
-			A:ignore-me  B:a &&
-		git rev-parse   >actual   \
-			:0:ignore-me :3:a &&
+		git rev-parse >expect          \
+			A:ignore-me  B:a  D1:a &&
+		git rev-parse   >actual        \
+			:0:ignore-me :1:a :3:a &&
 		test_cmp expect actual
 	)
 '
@@ -638,16 +636,16 @@ test_expect_success 'merge of D1 & E2 fails but has appropriate contents' '
 		test_must_fail git merge -s recursive E2^0 &&
 
 		git ls-files -s >out &&
-		test_line_count = 4 out &&
+		test_line_count = 5 out &&
 		git ls-files -u >out &&
-		test_line_count = 3 out &&
+		test_line_count = 4 out &&
 		git ls-files -o >out &&
-		test_line_count = 2 out &&
+		test_line_count = 1 out &&
 
 		git rev-parse >expect    \
-			B:a   E2:a/file  C:a/file   A:ignore-me &&
+			B:a       D1:a      E2:a/file  C:a/file   A:ignore-me &&
 		git rev-parse   >actual   \
-			:2:a  :3:a/file  :1:a/file  :0:ignore-me &&
+			:1:a~HEAD :2:a~HEAD :3:a/file  :1:a/file  :0:ignore-me &&
 		test_cmp expect actual &&
 
 		test_path_is_file a~HEAD
@@ -665,16 +663,16 @@ test_expect_success 'merge of E2 & D1 fails but has appropriate contents' '
 		test_must_fail git merge -s recursive D1^0 &&
 
 		git ls-files -s >out &&
-		test_line_count = 4 out &&
+		test_line_count = 5 out &&
 		git ls-files -u >out &&
-		test_line_count = 3 out &&
+		test_line_count = 4 out &&
 		git ls-files -o >out &&
-		test_line_count = 2 out &&
+		test_line_count = 1 out &&
 
 		git rev-parse >expect    \
-			B:a   E2:a/file  C:a/file   A:ignore-me &&
+			B:a       D1:a      E2:a/file  C:a/file   A:ignore-me &&
 		git rev-parse   >actual   \
-			:3:a  :2:a/file  :1:a/file  :0:ignore-me &&
+			:1:a~D1^0 :3:a~D1^0 :2:a/file  :1:a/file  :0:ignore-me &&
 		test_cmp expect actual &&
 
 		test_path_is_file a~D1^0
@@ -706,7 +704,7 @@ test_expect_success 'merge of D1 & E3 succeeds' '
 	)
 '
 
-test_expect_success 'merge of D1 & E4 notifies user a and a2 are related' '
+test_expect_success 'merge of D1 & E4 puts merge of a and a2 in both a and a2' '
 	test_when_finished "git -C directory-file reset --hard" &&
 	test_when_finished "git -C directory-file clean -fdqx" &&
 	(
@@ -724,7 +722,7 @@ test_expect_success 'merge of D1 & E4 notifies user a and a2 are related' '
 		test_line_count = 1 out &&
 
 		git rev-parse >expect                  \
-			A:ignore-me  B:a   D1:a  E4:a2 &&
+			A:ignore-me  B:a   E4:a2  E4:a2 &&
 		git rev-parse   >actual                \
 			:0:ignore-me :1:a~Temporary\ merge\ branch\ 2  :2:a  :3:a2 &&
 		test_cmp expect actual
