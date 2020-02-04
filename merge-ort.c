@@ -1707,8 +1707,9 @@ static void process_entry(struct merge_options *opt,
 	} else if (ci->filemask == 3 || ci->filemask == 5) {
 		/* Modify/delete */
 		int side = (ci->filemask == 5) ? 2 : 1;
-		ci->merged.result.mode = ci->stages[side].mode;
-		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
+		int index = opt->priv->call_depth ? 0 : side;
+		ci->merged.result.mode = ci->stages[index].mode;
+		oidcpy(&ci->merged.result.oid, &ci->stages[index].oid);
 		ci->merged.clean = 0;
 	} else if ((ci->filemask == 2 || ci->filemask == 4)) {
 		/* Added on one side */
