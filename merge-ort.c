@@ -1214,7 +1214,8 @@ static int process_renames(struct merge_options *opt,
 					     &base->stages[0],
 					     &side1->stages[1],
 					     &side2->stages[2],
-					     pathnames, 0, &merged);
+					     pathnames, 1 + 2 * opt->priv->call_depth,
+					     &merged);
 			memcpy(&side1->stages[1], &merged, sizeof(merged));
 			memcpy(&side2->stages[2], &merged, sizeof(merged));
 			/* FIXME: Mark side1 & side2 as conflicted */
@@ -1267,7 +1268,8 @@ static int process_renames(struct merge_options *opt,
 					     &base->stages[0],
 					     &side1->stages[1],
 					     &side2->stages[2],
-					     pathnames, 0, &merged);
+					     pathnames, 1 + 2 * opt->priv->call_depth,
+					     &merged);
 
 			printf("--> Rename/add:\n");
 			printf("      Paths: %s, %s, %s\n",
