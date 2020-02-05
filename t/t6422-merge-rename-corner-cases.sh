@@ -312,14 +312,12 @@ test_expect_success 'rename/directory conflict + clean content merge' '
 		git ls-files -u >out &&
 		test_line_count = 1 out &&
 		git ls-files -o >out &&
-		test_line_count = 2 out &&
+		test_line_count = 1 out &&
 
 		echo 0 >expect &&
 		git cat-file -p base:file >>expect &&
 		echo 7 >>expect &&
 		test_cmp expect newfile~HEAD &&
-
-		test $(git rev-parse :2:newfile) = $(git hash-object expect) &&
 
 		test_path_is_file newfile/realfile &&
 		test_path_is_file newfile~HEAD
@@ -343,7 +341,7 @@ test_expect_success 'rename/directory conflict + content merge conflict' '
 		git ls-files -u >out &&
 		test_line_count = 3 out &&
 		git ls-files -o >out &&
-		test_line_count = 2 out &&
+		test_line_count = 1 out &&
 
 		git cat-file -p left-conflict:newfile >left &&
 		git cat-file -p base:file    >base &&
@@ -356,9 +354,9 @@ test_expect_success 'rename/directory conflict + content merge conflict' '
 		test_cmp left newfile~HEAD &&
 
 		git rev-parse >expect                                 \
-			base:file   left-conflict:newfile  right:file &&
+			base:file       left-conflict:newfile right:file &&
 		git rev-parse >actual                                 \
-			:1:newfile  :2:newfile             :3:newfile &&
+			:1:newfile~HEAD :2:newfile~HEAD       :3:newfile~HEAD &&
 		test_cmp expect actual &&
 
 		test_path_is_file newfile/realfile &&
