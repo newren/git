@@ -1640,14 +1640,13 @@ static int compare_pairs(const void *a_, const void *b_)
  * to be able to associate the correct cache entries with the rename
  * information; tree is always equal to either a_tree or b_tree.
  */
-static struct diff_queue_struct *get_renames(struct merge_options *opt,
-					     struct diff_queue_struct *side1,
-					     struct diff_queue_struct *side2)
+static int get_renames(struct merge_options *opt,
+		       struct diff_queue_struct *combined,
+		       struct diff_queue_struct *side1,
+		       struct diff_queue_struct *side2,
+		       struct strmap *side1_dir_renames,
+		       struct strmap *side2_dir_renames)
 {
-	struct diff_queue_struct *combined;
-
-	combined = xcalloc(1, sizeof(*combined));
-
 	printf("side1->nr: %d\n", side1->nr);
 	printf("side2->nr: %d\n", side2->nr);
 	ALLOC_GROW(combined->queue, side1->nr + side2->nr, combined->alloc);
@@ -1664,7 +1663,7 @@ static struct diff_queue_struct *get_renames(struct merge_options *opt,
 	free(side1);
 	free(side2);
 
-	return combined;
+	return 1; /* clean */
 }
 
 static int process_renames(struct merge_options *opt,
@@ -1859,62 +1858,43 @@ static int detect_and_process_renames(struct merge_options *opt,
 				      struct tree *side1,
 				      struct tree *side2)
 {
-	struct diff_queue_struct *side1_pairs, *side2_pairs, *combined_pairs;
+	struct diff_queue_struct combined_pairs, *side1_pairs, *side2_pairs;
+	struct strmap *side1_dir_renames, *side2_dir_renames;
 	int clean = 1;
-
-	/*
-	ri->head_renames = NULL;
-	ri->merge_renames = NULL;
-	*/
 
 	if (!merge_detect_rename(opt))
 		return 1;
 
 	side1_pairs = get_diffpairs(opt, merge_base, side1);
 	side2_pairs = get_diffpairs(opt, merge_base, side2);
-	combined_pairs = get_renames(opt, side1_pairs, side2_pairs);
 
-#if 0
 	if ((opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE) ||
 	    (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT &&
 	     !opt->priv->call_depth)) {
-		dir_re_head = get_directory_renames(head_pairs);
-		dir_re_merge = get_directory_renames(merge_pairs);
-
-		handle_directory_level_conflicts(opt,
-						 dir_re_head, head,
-						 dir_re_merge, merge);
+		side1_dir_renames = get_directory_renames(side1_pairs);
+		side2_dir_renames = get_directory_renames(side2_pairs);
 	} else {
-		dir_re_head  = xmalloc(sizeof(*dir_re_head));
-		dir_re_merge = xmalloc(sizeof(*dir_re_merge));
-		dir_rename_init(dir_re_head);
-		dir_rename_init(dir_re_merge);
+		side1_dir_renames  = xmalloc(sizeof(*side1_dir_renames));
+		side2_dir_renames = xmalloc(sizeof(*side2_dir_renames));
 	}
 
-	ri->head_renames  = get_renames(opt, opt->branch1, head_pairs,
-					dir_re_merge, dir_re_head, head,
-					common, head, merge, entries,
-					&clean);
+	clean = get_renames(opt, &combined_pairs, side1_pairs, side2_pairs,
+			    side1_dir_renames, side2_dir_renames);
 	if (clean < 0)
 		goto cleanup;
-	ri->merge_renames = get_renames(opt, opt->branch2, merge_pairs,
-					dir_re_head, dir_re_merge, merge,
-					common, head, merge, entries,
-					&clean);
-	if (clean < 0)
-		goto cleanup;
-#endif
-	printf("=== Processing %d renames ===\n", combined_pairs->nr);
-	clean &= process_renames(opt, combined_pairs);
 
+	printf("=== Processing %d renames ===\n", combined_pairs.nr);
+	clean &= process_renames(opt, &combined_pairs);
+
+ cleanup:
 #if 0
 	/*
 	 * Some cleanup is deferred until cleanup_renames() because the
 	 * data structures are still needed and referenced in
 	 * process_entry().  But there are a few things we can free now.
 	 */
-	initial_cleanup_rename(head_pairs, dir_re_head);
-	initial_cleanup_rename(merge_pairs, dir_re_merge);
+	initial_cleanup_rename(side1_pairs, side1_dir_renames);
+	initial_cleanup_rename(side2_pairs, side2_dir_renames);
 #endif
 
 	return clean;
