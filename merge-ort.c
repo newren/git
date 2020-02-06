@@ -1017,6 +1017,549 @@ static int handle_content_merge(struct merge_options *opt,
 	return clean;
 }
 
+/*** Directory rename stuff ***/
+
+/*
+ * For dir_rename_info, directory names are stored as a full path from the
+ * toplevel of the repository and do not include a trailing '/'.  Also:
+ *
+ *   non_unique_new_dir: if true, could not determine new_dir
+ *   new_dir:            final name of directory being renamed
+ *   possible_new_dirs:  temporary used to help determine new_dir; see comments
+ *                       in get_directory_renames() for details
+ */
+struct dir_rename_info {
+	unsigned non_unique_new_dir:1;
+	struct strbuf new_dir;
+	struct strmap possible_new_dirs;
+};
+
+struct collision_info {
+	struct string_list source_files;
+	unsigned reported_already:1;
+};
+
+/*
+ * Return a new string that replaces the beginning portion (which matches
+ * rename_info->item.string), with rename_info->util.new_dir.  In perl-speak:
+ *   new_path_name = (old_path =~ s/rename_info->item.string/rename_info->util.new_dir/);
+ * NOTE:
+ *   Caller must ensure that old_path starts with rename_info->string + '/'.
+ */
+static char *apply_dir_rename(struct string_list_item *rename_info,
+			      const char *old_path)
+{
+	struct strbuf new_path = STRBUF_INIT;
+	struct dir_rename_info *info = rename_info->util;
+	int oldlen, newlen;
+
+	if (info->non_unique_new_dir)
+		return NULL;
+
+	oldlen = strlen(rename_info->string);
+	if (info->new_dir.len == 0)
+		/*
+		 * If someone renamed/merged a subdirectory into the root
+		 * directory (e.g. 'some/subdir' -> ''), then we want to
+		 * avoid returning
+		 *     '' + '/filename'
+		 * as the rename; we need to make old_path + oldlen advance
+		 * past the '/' character.
+		 */
+		oldlen++;
+	newlen = info->new_dir.len + (strlen(old_path) - oldlen) + 1;
+	strbuf_grow(&new_path, newlen);
+	strbuf_addbuf(&new_path, &info->new_dir);
+	strbuf_addstr(&new_path, &old_path[oldlen]);
+
+	return strbuf_detach(&new_path, NULL);
+}
+
+static void get_renamed_dir_portion(const char *old_path, const char *new_path,
+				    char **old_dir, char **new_dir)
+{
+	char *end_of_old, *end_of_new;
+
+	/* Default return values: NULL, meaning no rename */
+	*old_dir = NULL;
+	*new_dir = NULL;
+
+	/*
+	 * For
+	 *    "a/b/c/d/e/foo.c" -> "a/b/some/thing/else/e/foo.c"
+	 * the "e/foo.c" part is the same, we just want to know that
+	 *    "a/b/c/d" was renamed to "a/b/some/thing/else"
+	 * so, for this example, this function returns "a/b/c/d" in
+	 * *old_dir and "a/b/some/thing/else" in *new_dir.
+	 */
+
+	/*
+	 * If the basename of the file changed, we don't care.  We want
+	 * to know which portion of the directory, if any, changed.
+	 */
+	end_of_old = strrchr(old_path, '/');
+	end_of_new = strrchr(new_path, '/');
+
+	/*
+	 * If end_of_old is NULL, old_path wasn't in a directory, so there
+	 * could not be a directory rename (our rule elsewhere that a
+	 * directory which still exists is not considered to have been
+	 * renamed means the root directory can never be renamed -- because
+	 * the root directory always exists).
+	 */
+	if (end_of_old == NULL)
+		return; /* Note: *old_dir and *new_dir are still NULL */
+
+	/*
+	 * If new_path contains no directory (end_of_new is NULL), then we
+	 * have a rename of old_path's directory to the root directory.
+	 */
+	if (end_of_new == NULL) {
+		*old_dir = xstrndup(old_path, end_of_old - old_path);
+		*new_dir = xstrdup("");
+		return;
+	}
+
+	/* Find the first non-matching character traversing backwards */
+	while (*--end_of_new == *--end_of_old &&
+	       end_of_old != old_path &&
+	       end_of_new != new_path)
+		; /* Do nothing; all in the while loop */
+
+	/*
+	 * If both got back to the beginning of their strings, then the
+	 * directory didn't change at all, only the basename did.
+	 */
+	if (end_of_old == old_path && end_of_new == new_path &&
+	    *end_of_old == *end_of_new)
+		return; /* Note: *old_dir and *new_dir are still NULL */
+
+	/*
+	 * If end_of_new got back to the beginning of its string, and
+	 * end_of_old got back to the beginning of some subdirectory, then
+	 * we have a rename/merge of a subdirectory into the root, which
+	 * needs slightly special handling.
+	 *
+	 * Note: There is no need to consider the opposite case, with a
+	 * rename/merge of the root directory into some subdirectory
+	 * because as noted above the root directory always exists so it
+	 * cannot be considered to be renamed.
+	 */
+	if (end_of_new == new_path &&
+	    end_of_old != old_path && end_of_old[-1] == '/') {
+		*old_dir = xstrndup(old_path, --end_of_old - old_path);
+		*new_dir = xstrdup("");
+		return;
+	}
+
+	/*
+	 * We've found the first non-matching character in the directory
+	 * paths.  That means the current characters we were looking at
+	 * were part of the first non-matching subdir name going back from
+	 * the end of the strings.  Get the whole name by advancing both
+	 * end_of_old and end_of_new to the NEXT '/' character.  That will
+	 * represent the entire directory rename.
+	 *
+	 * The reason for the increment is cases like
+	 *    a/b/star/foo/whatever.c -> a/b/tar/foo/random.c
+	 * After dropping the basename and going back to the first
+	 * non-matching character, we're now comparing:
+	 *    a/b/s          and         a/b/
+	 * and we want to be comparing:
+	 *    a/b/star/      and         a/b/tar/
+	 * but without the pre-increment, the one on the right would stay
+	 * a/b/.
+	 */
+	end_of_old = strchr(++end_of_old, '/');
+	end_of_new = strchr(++end_of_new, '/');
+
+	/* Copy the old and new directories into *old_dir and *new_dir. */
+	*old_dir = xstrndup(old_path, end_of_old - old_path);
+	*new_dir = xstrndup(new_path, end_of_new - new_path);
+}
+
+#if 0
+static void remove_rename_entries(struct strmap *dir_renames,
+				  struct string_list *items_to_remove)
+{
+	int i;
+
+	for (i = 0; i < items_to_remove->nr; i++)
+		strmap_remove(dir_renames, items_to_remove->items[i].string, 1);
+	string_list_clear(items_to_remove, 0);
+}
+#endif
+
+static int path_in_way(struct strmap *paths, const char *path, unsigned side_mask)
+{
+	struct conflict_info *ci = strmap_get(paths, path);
+	return ci->merged.clean || (side_mask & (ci->filemask | ci->dirmask));
+}
+
+/*
+ * See if there is a directory rename for path, and if there are any file
+ * level conflicts on the given side for the renamed location.  If there is
+ * a rename and there are no conflicts, return the new name.  Otherwise,
+ * return NULL.
+ */
+static char *handle_path_level_conflicts(struct merge_options *opt,
+					 const char *path,
+					 unsigned side_index,
+					 struct string_list_item *rename_info,
+					 struct strmap *collisions)
+{
+	char *new_path = NULL;
+	struct dir_rename_info *dr_info = rename_info->util;
+	struct collision_info *c_info;
+	int clean = 1;
+	struct strbuf collision_paths = STRBUF_INIT;
+
+	/*
+	 * entry has the mapping of old directory name to new directory name
+	 * that we want to apply to path.
+	 */
+	new_path = apply_dir_rename(rename_info, path);
+
+	if (!new_path) {
+		/* This should only happen when entry->non_unique_new_dir set */
+		if (!dr_info->non_unique_new_dir)
+			BUG("dr_info->non_unqiue_dir not set and !new_path");
+		output(opt, 1, _("CONFLICT (directory rename split): "
+			       "Unclear where to place %s because directory "
+			       "%s was renamed to multiple other directories, "
+			       "with no destination getting a majority of the "
+			       "files."),
+		       path, rename_info->string);
+		clean = 0;
+		return NULL;
+	}
+
+	/*
+	 * The caller needs to have ensured that it has pre-populated
+	 * collisions with all paths that map to new_path.  Do a quick check
+	 * to ensure that's the case.
+	 */
+	c_info = strmap_get(collisions, new_path);
+	if (c_info == NULL)
+		BUG("c_info is NULL");
+
+	/*
+	 * Check for one-sided add/add/.../add conflicts, i.e.
+	 * where implicit renames from the other side doing
+	 * directory rename(s) can affect this side of history
+	 * to put multiple paths into the same location.  Warn
+	 * and bail on directory renames for such paths.
+	 */
+	if (c_info->reported_already) {
+		clean = 0;
+	} else if (path_in_way(&opt->priv->paths, new_path, 1 << side_index)) {
+		c_info->reported_already = 1;
+		strbuf_add_separated_string_list(&collision_paths, ", ",
+						 &c_info->source_files);
+		output(opt, 1, _("CONFLICT (implicit dir rename): Existing "
+			       "file/dir at %s in the way of implicit "
+			       "directory rename(s) putting the following "
+			       "path(s) there: %s."),
+		       new_path, collision_paths.buf);
+		clean = 0;
+	} else if (c_info->source_files.nr > 1) {
+		c_info->reported_already = 1;
+		strbuf_add_separated_string_list(&collision_paths, ", ",
+						 &c_info->source_files);
+		output(opt, 1, _("CONFLICT (implicit dir rename): Cannot map "
+			       "more than one path to %s; implicit directory "
+			       "renames tried to put these paths there: %s"),
+		       new_path, collision_paths.buf);
+		clean = 0;
+	}
+
+	/* Free memory we no longer need */
+	strbuf_release(&collision_paths);
+	if (!clean && new_path) {
+		free(new_path);
+		return NULL;
+	}
+
+	return new_path;
+}
+
+static struct strmap *get_directory_renames(struct diff_queue_struct *pairs)
+{
+	struct strmap *dir_renames;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	int i;
+
+	/*
+	 * Typically, we think of a directory rename as all files from a
+	 * certain directory being moved to a target directory.  However,
+	 * what if someone first moved two files from the original
+	 * directory in one commit, and then renamed the directory
+	 * somewhere else in a later commit?  At merge time, we just know
+	 * that files from the original directory went to two different
+	 * places, and that the bulk of them ended up in the same place.
+	 * We want each directory rename to represent where the bulk of the
+	 * files from that directory end up; this function exists to find
+	 * where the bulk of the files went.
+	 *
+	 * The first loop below simply iterates through the list of file
+	 * renames, finding out how often each directory rename pair
+	 * possibility occurs.
+	 */
+	dir_renames = xmalloc(sizeof(*dir_renames));
+	strmap_init(dir_renames, 0);
+	for (i = 0; i < pairs->nr; ++i) {
+		struct diff_filepair *pair = pairs->queue[i];
+		struct dir_rename_info *info;
+		int count;
+		char *old_dir, *new_dir;
+
+		/* File not part of directory rename if it wasn't renamed */
+		if (pair->status != 'R')
+			continue;
+
+		get_renamed_dir_portion(pair->one->path, pair->two->path,
+					&old_dir,        &new_dir);
+		if (!old_dir)
+			/* Directory didn't change at all; ignore this one. */
+			continue;
+
+		info = strmap_get(dir_renames, old_dir);
+		if (info) {
+			free(old_dir);
+		} else {
+			info = xcalloc(1, sizeof(*info));
+			strbuf_init(&info->new_dir, 0);
+			strmap_init(&info->possible_new_dirs, 0);
+			strmap_put(dir_renames, old_dir, info);
+		}
+
+		count = strintmap_get(&info->possible_new_dirs, new_dir);
+		strintmap_set(&info->possible_new_dirs, new_dir, count+1);
+		if (count)
+			free(new_dir);
+	}
+
+	/*
+	 * For each directory with files moved out of it, we find out which
+	 * target directory received the most files so we can declare it to
+	 * be the "winning" target location for the directory rename.  This
+	 * winner gets recorded in new_dir.  If there is no winner
+	 * (multiple target directories received the same number of files),
+	 * we set non_unique_new_dir.  Once we've determined the winner (or
+	 * that there is no winner), we no longer need possible_new_dirs.
+	 */
+	strmap_for_each_entry(dir_renames, &iter, entry) {
+		int max = 0;
+		int bad_max = 0;
+		char *best = NULL;
+		struct dir_rename_info *info = entry->item.util;
+		struct hashmap_iter pnd_iter;
+		struct str_entry *pnd_entry;
+
+		strmap_for_each_entry(&info->possible_new_dirs, &pnd_iter, pnd_entry) {
+			intptr_t count = (intptr_t)pnd_entry->item.util;
+
+			if (count == max)
+				bad_max = max;
+			else if (count > max) {
+				max = count;
+				best = pnd_entry->item.string;
+			}
+		}
+		if (bad_max == max)
+			info->non_unique_new_dir = 1;
+		else {
+			assert(info->new_dir.len == 0);
+			strbuf_addstr(&info->new_dir, best);
+		}
+		/*
+		 * The relevant directory sub-portion of the original full
+		 * filepaths were xstrndup'ed before inserting into
+		 * possible_new_dirs, and instead of manually iterating the
+		 * list and free'ing each, just lie and tell
+		 * possible_new_dirs that it did the strdup'ing so that it
+		 * will free them for us.
+		 */
+		info->possible_new_dirs.strdup_strings = 1;
+		strmap_clear(&info->possible_new_dirs, 1);
+	}
+
+	return dir_renames;
+}
+
+static struct string_list_item *check_dir_renamed(const char *path,
+						  struct strmap *dir_renames)
+{
+	char *temp = xstrdup(path);
+	char *end;
+	struct string_list_item *item = NULL;
+
+	while ((end = strrchr(temp, '/'))) {
+		*end = '\0';
+		item = strmap_get(dir_renames, temp);
+		if (item)
+			break;
+	}
+	free(temp);
+	return item;
+}
+
+static void compute_collisions(struct strmap *collisions,
+			       struct strmap *dir_renames,
+			       struct diff_queue_struct *pairs)
+{
+	int i;
+
+	/*
+	 * Multiple files can be mapped to the same path due to directory
+	 * renames done by the other side of history.  Since that other
+	 * side of history could have merged multiple directories into one,
+	 * if our side of history added the same file basename to each of
+	 * those directories, then all N of them would get implicitly
+	 * renamed by the directory rename detection into the same path,
+	 * and we'd get an add/add/.../add conflict, and all those adds
+	 * from *this* side of history.  This is not representable in the
+	 * index, and users aren't going to easily be able to make sense of
+	 * it.  So we need to provide a good warning about what's
+	 * happening, and fall back to no-directory-rename detection
+	 * behavior for those paths.
+	 *
+	 * See testcases 9e and all of section 5 from t6043 for examples.
+	 */
+	strmap_init(collisions, 0);
+
+	for (i = 0; i < pairs->nr; ++i) {
+		struct string_list_item *rename_info;
+		struct collision_info *collision_info;
+		char *new_path;
+		struct diff_filepair *pair = pairs->queue[i];
+
+		if (pair->status != 'A' && pair->status != 'R')
+			continue;
+		rename_info = check_dir_renamed(pair->two->path, dir_renames);
+		if (!rename_info)
+			continue;
+
+		new_path = apply_dir_rename(rename_info, pair->two->path);
+		if (!new_path)
+			/*
+			 * dir_rename_ent->non_unique_new_path is true, which
+			 * means there is no directory rename for us to use,
+			 * which means it won't cause us any additional
+			 * collisions.
+			 */
+			continue;
+		collision_info = strmap_get(collisions, new_path);
+		if (collision_info) {
+			free(new_path);
+		} else {
+			collision_info = xcalloc(1,
+						 sizeof(struct collision_info));
+			string_list_init(&collision_info->source_files, 0);
+			strmap_put(collisions, new_path, collision_info);
+		}
+		string_list_insert(&collision_info->source_files,
+				   pair->two->path);
+	}
+}
+
+static char *check_for_directory_rename(struct merge_options *opt,
+					const char *path,
+					unsigned side_index,
+					struct strmap *dir_renames,
+					struct strmap *dir_rename_exclusions,
+					struct strmap *collisions,
+					int *clean_merge)
+{
+	char *new_path = NULL;
+	struct string_list_item *rename_info;
+	struct string_list_item *otherinfo = NULL;
+
+	rename_info = check_dir_renamed(path, dir_renames);
+	if (!rename_info)
+		return new_path;
+
+	/*
+	 * This next part is a little weird.  We do not want to do an
+	 * implicit rename into a directory we renamed on our side, because
+	 * that will result in a spurious rename/rename(1to2) conflict.  An
+	 * example:
+	 *   Base commit: dumbdir/afile, otherdir/bfile
+	 *   Side 1:      smrtdir/afile, otherdir/bfile
+	 *   Side 2:      dumbdir/afile, dumbdir/bfile
+	 * Here, while working on Side 1, we could notice that otherdir was
+	 * renamed/merged to dumbdir, and change the diff_filepair for
+	 * otherdir/bfile into a rename into dumbdir/bfile.  However, Side
+	 * 2 will notice the rename from dumbdir to smrtdir, and do the
+	 * transitive rename to move it from dumbdir/bfile to
+	 * smrtdir/bfile.  That gives us bfile in dumbdir vs being in
+	 * smrtdir, a rename/rename(1to2) conflict.  We really just want
+	 * the file to end up in smrtdir.  And the way to achieve that is
+	 * to not let Side1 do the rename to dumbdir, since we know that is
+	 * the source of one of our directory renames.
+	 *
+	 * That's why otherinfo and dir_rename_exclusions is here.
+	 *
+	 * As it turns out, this also prevents N-way transient rename
+	 * confusion; See testcases 9c and 9d of t6043.
+	 */
+	otherinfo = strmap_get_item(dir_rename_exclusions, rename_info->string);
+	if (otherinfo) {
+		struct dir_rename_info *info = rename_info->util;
+
+		output(opt, 1, _("WARNING: Avoiding applying %s -> %s rename "
+			       "to %s, because %s itself was renamed."),
+		       rename_info->string, info->new_dir.buf,
+		       path, info->new_dir.buf);
+	} else {
+		new_path = handle_path_level_conflicts(opt, path, side_index,
+						       rename_info, collisions);
+		*clean_merge &= (new_path != NULL);
+	}
+
+	return new_path;
+}
+
+static void apply_directory_rename_modifications(struct merge_options *opt,
+						 struct diff_filepair *pair,
+						 char *new_path)
+{
+	struct conflict_info *ci;
+
+	ci = strmap_get(&opt->priv->paths, pair->two->path);
+	strmap_put(&opt->priv->paths, new_path, ci);
+
+	opt->priv->paths.strdup_strings = 1;
+	strmap_remove(&opt->priv->paths, pair->two->path, 0);
+	opt->priv->paths.strdup_strings = 0;
+
+#if 0
+	/*
+	 * Record the original change status (or 'type' of change).  If it
+	 * was originally an add ('A'), this lets us differentiate later
+	 * between a RENAME_DELETE conflict and RENAME_VIA_DIR (they
+	 * otherwise look the same).  If it was originally a rename ('R'),
+	 * this lets us remember and report accurately about the transitive
+	 * renaming that occurred via the directory rename detection.  Also,
+	 * record the original destination name.
+	 */
+	re->dir_rename_original_type = pair->status;
+	re->dir_rename_original_dest = pair->two->path;
+
+	/*
+	 * We don't actually look at pair->status again, but it seems
+	 * pedagogically correct to adjust it.
+	 */
+	pair->status = 'R';
+#endif
+
+	/*
+	 * Finally, record the new location.
+	 */
+	pair->two->path = new_path;
+}
+
 /*** Rename stuff ***/
 
 /* Get the diff_filepairs changed between merge_base and side. */
