@@ -37,13 +37,7 @@ struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct strmap possible_dir_rename_bases; /* set of paths */
-#if 0
-	struct strmap submodule_directory_conflicts; /* set of paths */
-#endif
 	const char *current_dir_name;
-#if 0
-	unsigned nr_dir_only_entries; /* unmerged also tracks directory names */
-#endif
 	int call_depth;
 	int needed_rename_limit;
 	unsigned inside_possibly_renamed_dir:1;
@@ -508,10 +502,6 @@ static int collect_merge_info_callback(int n,
 	printf("  filemask: %u\n", filemask);
 	printf("  dirmask:  %lu\n", dirmask);
 	strmap_put(&opti->paths, pi.string, pi.util);
-#if 0
-	if (filemask == 0)
-		opti->nr_dir_only_entries += 1;
-#endif
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
