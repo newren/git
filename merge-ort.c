@@ -1380,6 +1380,8 @@ static void remove_rename_entries(struct strmap *dir_renames,
 static int path_in_way(struct strmap *paths, const char *path, unsigned side_mask)
 {
 	struct conflict_info *ci = strmap_get(paths, path);
+	if (!ci)
+		return 0;
 	return ci->merged.clean || (side_mask & (ci->filemask | ci->dirmask));
 }
 
@@ -1584,7 +1586,7 @@ static struct string_list_item *check_dir_renamed(const char *path,
 
 	while ((end = strrchr(temp, '/'))) {
 		*end = '\0';
-		item = strmap_get(dir_renames, temp);
+		item = strmap_get_item(dir_renames, temp);
 		if (item)
 			break;
 	}
@@ -1815,13 +1817,13 @@ static int collect_renames(struct merge_options *opt,
 			   struct diff_queue_struct *result,
 			   unsigned side_index,
 			   struct diff_queue_struct *side_pairs,
-			   struct strmap *side_dir_renames,
+			   struct strmap *dir_renames_for_side,
 			   struct strmap *rename_exclusions)
 {
 	int i, clean = 1;
 	struct strmap collisions;
 
-	compute_collisions(&collisions, side_dir_renames, side_pairs);
+	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
 	for (i = 0; i < side_pairs->nr; ++i) {
 		struct diff_filepair *p = side_pairs->queue[i];
@@ -1833,7 +1835,7 @@ static int collect_renames(struct merge_options *opt,
 		}
 		new_path = check_for_directory_rename(opt, p->two->path,
 						      side_index,
-						      side_dir_renames,
+						      dir_renames_for_side,
 						      rename_exclusions,
 						      &collisions,
 						      &clean);
@@ -1897,9 +1899,9 @@ static int detect_and_process_renames(struct merge_options *opt,
 	ALLOC_GROW(combined->queue,
 		   side1_pairs->nr + side2_pairs->nr, combined->alloc);
 	clean &= collect_renames(opt, combined, 1, side1_pairs,
-				 side1_dir_renames, side2_dir_renames);
-	clean &= collect_renames(opt, combined, 2, side2_pairs,
 				 side2_dir_renames, side1_dir_renames);
+	clean &= collect_renames(opt, combined, 2, side2_pairs,
+				 side1_dir_renames, side2_dir_renames);
 	QSORT(combined->queue, combined->nr, compare_pairs);
 
 	printf("=== Processing %d renames ===\n", combined->nr);
