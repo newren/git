@@ -70,6 +70,15 @@ Path_conflict files:
 
 
 * Stuff to not forget:
+  * Perf idea: make sure partial capitulation (source match) does not defeat
+    either exact renames or dimensionality reduction, since those two can
+    reduce the number of both potenial rename sources AND destinations.
+  * Perf idea: can trivial tree merge (O matches A implies take B when all
+    three are trees) if no parent trees differed outside of directory leading
+    to this directory and sibling trees do not differ.  However, it means that
+    we can't recurse into entries as we go, we have to first check all the
+    tree entries for the toplevel directory, verify that only one differs,
+    then can use the trick.
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
     D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
