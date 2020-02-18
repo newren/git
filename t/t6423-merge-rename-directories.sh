@@ -302,9 +302,9 @@ test_expect_success '1d: Directory renames cause a rename/rename(2to1) conflict'
 		git cat-file -p :3:x/wham >other &&
 		>empty &&
 		test_must_fail git merge-file \
-			-L "HEAD" \
+			-L "HEAD:y/wham" \
 			-L "" \
-			-L "B^0" \
+			-L "B^0:z/wham" \
 			expect empty other &&
 		test_cmp expect x/wham
 	)
@@ -1176,10 +1176,10 @@ test_expect_success '5d: Directory/file/file conflict due to directory rename' '
 		git ls-files -u >out &&
 		test_line_count = 1 out &&
 		git ls-files -o >out &&
-		test_line_count = 2 out &&
+		test_line_count = 1 out &&
 
 		git rev-parse >actual \
-			:0:y/b :0:y/c :0:z/d :0:y/f :2:y/d :0:y/d/e &&
+			:0:y/b :0:y/c :0:z/d :0:y/f :2:y/d~HEAD :0:y/d/e &&
 		git rev-parse >expect \
 			 O:z/b  O:z/c  B:z/d  B:z/f  A:y/d  B:y/d/e &&
 		test_cmp expect actual &&
@@ -1263,16 +1263,16 @@ test_expect_success '6a: Tricky rename/delete' '
 		test_i18ngrep "CONFLICT (rename/delete).*z/c.*y/c" out &&
 
 		git ls-files -s >out &&
-		test_line_count = 2 out &&
+		test_line_count = 3 out &&
 		git ls-files -u >out &&
-		test_line_count = 1 out &&
+		test_line_count = 2 out &&
 		git ls-files -o >out &&
 		test_line_count = 1 out &&
 
 		git rev-parse >actual \
-			:0:y/b :3:y/c &&
+			:0:y/b :1:y/c :3:y/c &&
 		git rev-parse >expect \
-			 O:z/b  O:z/c &&
+			 O:z/b  O:z/c  O:z/c &&
 		test_cmp expect actual
 	)
 '
@@ -1800,9 +1800,9 @@ test_expect_success '7b: rename/rename(2to1), but only due to transitive rename'
 		git cat-file -p :3:y/d >other &&
 		>empty &&
 		test_must_fail git merge-file \
-			-L "HEAD" \
+			-L "HEAD:y/d" \
 			-L "" \
-			-L "B^0" \
+			-L "B^0:z/d" \
 			expect empty other &&
 		test_cmp expect y/d
 	)
@@ -1926,16 +1926,16 @@ test_expect_success '7d: transitive rename involved in rename/delete; how is it 
 		test_i18ngrep "CONFLICT (rename/delete).*x/d.*y/d" out &&
 
 		git ls-files -s >out &&
-		test_line_count = 3 out &&
+		test_line_count = 4 out &&
 		git ls-files -u >out &&
-		test_line_count = 1 out &&
+		test_line_count = 2 out &&
 		git ls-files -o >out &&
 		test_line_count = 1 out &&
 
 		git rev-parse >actual \
-			:0:y/b :0:y/c :3:y/d &&
+			:0:y/b :0:y/c :1:y/d :3:y/d &&
 		git rev-parse >expect \
-			 O:z/b  O:z/c  O:x/d &&
+			 O:z/b  O:z/c  O:x/d  O:x/d &&
 		test_cmp expect actual
 	)
 '
@@ -2017,16 +2017,16 @@ test_expect_success '7e: transitive rename in rename/delete AND dirs in the way'
 		test_i18ngrep "CONFLICT (rename/delete).*x/d.*y/d" out &&
 
 		git ls-files -s >out &&
-		test_line_count = 5 out &&
+		test_line_count = 6 out &&
 		git ls-files -u >out &&
-		test_line_count = 1 out &&
-		git ls-files -o >out &&
 		test_line_count = 2 out &&
+		git ls-files -o >out &&
+		test_line_count = 1 out &&
 
 		git rev-parse >actual \
-			:0:x/d/f :0:y/d/g :0:y/b :0:y/c :3:y/d &&
+			:0:x/d/f :0:y/d/g :0:y/b :0:y/c :1:y/d~B^0 :3:y/d~B^0 &&
 		git rev-parse >expect \
-			 A:x/d/f  A:y/d/g  O:z/b  O:z/c  O:x/d &&
+			 A:x/d/f  A:y/d/g  O:z/b  O:z/c  O:x/d      O:x/d &&
 		test_cmp expect actual &&
 
 		git hash-object y/d~B^0 >actual &&
