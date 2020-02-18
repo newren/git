@@ -37,6 +37,7 @@ struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct strmap possible_dir_rename_bases; /* set of paths */
+	struct string_list paths_to_free; /* list of strings to free */
 	const char *current_dir_name;
 	int call_depth;
 	int needed_rename_limit;
@@ -1718,14 +1719,114 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 						 struct diff_filepair *pair,
 						 char *new_path)
 {
-	struct conflict_info *ci;
+	/*
+	 * The basic idea is to get the conflict_info from opt->priv->paths
+	 * at old path, and insert it into new_path; basically just this:
+	 *     ci = strmap_get(&opt->priv->paths, old_path);
+	 *     strmap_remove(&opt->priv->paths, old_path, 0);
+	 *     strmap_put(&opt->priv->paths, new_path, ci);
+	 * However, there are some factors complicating this:
+	 *     - opt->priv->paths may already have an entry at new_path
+	 *     - Each ci tracks its containing directory, so we need to
+	 *       update that
+	 *     - If another ci has the same containing directory, then
+	 *       the two char*'s MUST point to the same location.  See the
+	 *       comment in struct merged_info.  strcmp equality is not
+	 *       enough; we need pointer equality.
+	 *     - opt->priv->paths must hold the parent directories of any
+	 *       entries that are added.  So, if this directory rename
+	 *       causes entirely new directories, we must recursively add
+	 *       parent directories.
+	 *     - For each parent directory added to opt->priv->paths, we
+	 *       also need to get its parent directory stored in its
+	 *       conflict_info->merged.directory_name with all the same
+	 *       requirements about pointer equality.
+	 */
+	struct string_list dirs_to_insert = STRING_LIST_INIT_NODUP;
+	struct conflict_info *ci, *new_ci;
+	struct string_list_item *item;
+	char *old_path = pair->two->path;
+	char *parent_name;
+	char *cur_path;
+	int i, len;
 
-	ci = strmap_get(&opt->priv->paths, pair->two->path);
-	strmap_put(&opt->priv->paths, new_path, ci);
+	item = strmap_get_item(&opt->priv->paths, old_path);
+	old_path = item->string;
+	ci = item->util;
 
-	opt->priv->paths.strdup_strings = 1;
-	strmap_remove(&opt->priv->paths, pair->two->path, 0);
-	opt->priv->paths.strdup_strings = 0;
+	/* Find parent directories missing from opt->priv->paths */
+	cur_path = new_path;
+	while (1) {
+		/* Find the parent directory of cur_path */
+		char *last_slash = strrchr(cur_path, '/');
+		if (last_slash)
+			parent_name = xstrndup(cur_path, last_slash - cur_path);
+		else
+			parent_name = xstrdup("");
+
+		/* Look it up in opt->priv->paths */
+		item = strmap_get_item(&opt->priv->paths, parent_name);
+		if (item) {
+			free(parent_name);
+			parent_name = item->string; /* reuse known pointer */
+			break;
+		}
+
+		/* Record this is one of the directories we need to insert */
+		string_list_append(&dirs_to_insert, parent_name);
+		cur_path = parent_name;
+	}
+
+	/* Traverse dirs_to_insert and insert them into opt->priv->paths */
+	for (i = dirs_to_insert.nr-1; i >= 0; --i) {
+		struct conflict_info *dir_ci;
+		char *cur_dir = dirs_to_insert.items[i].string;
+
+		dir_ci = xcalloc(1, sizeof(*dir_ci));
+
+		dir_ci->merged.directory_name = parent_name;
+		len = strlen(parent_name);
+		/* len+1 because of trailing '/' character */
+		dir_ci->merged.basename_offset = (len > 0 ? len+1 : len);
+		dir_ci->dirmask = ci->filemask;
+		strmap_put(&opt->priv->paths, cur_dir, dir_ci);
+
+		parent_name = cur_dir;
+	}
+
+	/*
+	 * Remove old_path from opt->priv->paths.  old_path also will eventually need
+	 * to be freed, but it may still be used by e.g. ci->pathnames.  So, store it
+	 * in another string-list for now.
+	 */
+	string_list_append(&opt->priv->paths_to_free, old_path);
+	strmap_remove(&opt->priv->paths, old_path, 0);
+
+	/* Now, finally update ci and stick it into opt->priv->paths */
+	ci->merged.directory_name = parent_name;
+	len = strlen(parent_name);
+	ci->merged.basename_offset = (len > 0 ? len+1 : len);
+	new_ci = strmap_get(&opt->priv->paths, new_path);
+	if (!new_ci) {
+		/* Place ci back into opt->priv->paths, but at new_path */
+		strmap_put(&opt->priv->paths, new_path, ci);
+	} else {
+		int index;
+
+		/* A few sanity checks */
+		assert(ci->filemask == 2 || ci->filemask == 4);
+		assert((new_ci->filemask & ci->filemask) == 0);
+		assert(!new_ci->merged.clean);
+
+		/* Copy stuff from ci into new_ci */
+		new_ci->filemask |= ci->filemask;
+		index = (ci->filemask >> 1);
+		new_ci->pathnames[index] = ci->pathnames[index];
+		new_ci->stages[index].mode = ci->stages[index].mode;
+		oidcpy(&new_ci->stages[index].oid, &ci->stages[index].oid);
+
+		free(ci);
+	}
 
 #if 0
 	/*
@@ -1738,7 +1839,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	 * record the original destination name.
 	 */
 	re->dir_rename_original_type = pair->status;
-	re->dir_rename_original_dest = pair->two->path;
+	re->dir_rename_original_dest = old_path;
 
 	/*
 	 * We don't actually look at pair->status again, but it seems
@@ -2496,7 +2597,7 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree *merge_base,
 					   struct tree **result)
 {
-	int code;
+	int code, clean;
 	char root_dir[1] = "\0";
 	struct diff_queue_struct pairs;
 	struct object_id working_tree_oid;
@@ -2524,9 +2625,11 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return -1;
 	}
 
-	code = detect_and_process_renames(opt, &pairs, merge_base, head, merge);
+	clean = detect_and_process_renames(opt, &pairs, merge_base, head, merge);
 
 	process_entries(opt, &working_tree_oid);
+	clean &= strmap_empty(&opt->priv->unmerged); /* unmerged entries => unclean */
+
 	/*
 	 * FIXME: Also need to free each diff_filepair in pairs.queue, and may
 	 * also need to free each pair's one->path and/or two->path.
@@ -2534,7 +2637,7 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	if (pairs.nr)
 		free(pairs.queue);
 	*result = parse_tree_indirect(&working_tree_oid);
-	return strmap_empty(&opt->priv->unmerged); /* unmerged==0 => clean */
+	return clean;
 }
 
 static void reset_maps(struct merge_options *opt, int reinitialize);
@@ -2690,6 +2793,13 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	}
 
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
+	/*
+	 * Although we initialize opt->priv->paths_to_free and opt->priv->paths with
+	 * strdup_strings = 0, that's just to avoid making an extra copy of an
+	 * allocated string.  Both of these store strings that we will later need to
+	 * free.
+	 */
+	string_list_init(&opt->priv->paths_to_free, 0);
 	strmap_init(&opt->priv->paths, 0);
 	strmap_init(&opt->priv->unmerged, 0);
 	strmap_init(&opt->priv->possible_dir_rename_bases, 0);
@@ -2740,6 +2850,13 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 	 */
 	opt->priv->paths.strdup_strings = 1;
 	strmap_func(&opt->priv->paths, 1);
+	opt->priv->paths.strdup_strings = 0;
+
+	/* opt->priv->paths_to_free is similar to opt->priv->paths. */
+	opt->priv->paths_to_free.strdup_strings = 1;
+	string_list_clear(&opt->priv->paths_to_free, 0);
+	opt->priv->paths_to_free.strdup_strings = 0;
+
 	/*
 	 * All strings and util fields in opt->priv->unmerged are a subset
 	 * of those in opt->priv->paths.  We don't want to deallocate
