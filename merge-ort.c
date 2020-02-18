@@ -1715,6 +1715,32 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	return new_path;
 }
 
+static void dump_conflict_info(struct conflict_info *ci, char *name)
+{
+	printf("conflict_info for %s (at %p):\n", name, ci);
+	printf("  ci->merged.directory_name: %s\n",
+	       ci->merged.directory_name);
+	printf("  ci->merged.basename_offset: %lu\n",
+	       ci->merged.basename_offset);
+	printf("  ci->merged.is_null: %d\n",
+	       ci->merged.is_null);
+	printf("  ci->merged.clean: %d\n",
+	       ci->merged.clean);
+	if (ci->merged.clean)
+		return;
+	for (int i=0; i<3; i++) {
+		printf("  ci->pathnames[%d]:   %s\n", i, ci->pathnames[i]);
+		printf("  ci->stages[%d].mode: %o\n", i, ci->stages[i].mode);
+		printf("  ci->stages[%d].oid:  %s\n", i, oid_to_hex(&ci->stages[i].oid));
+	}
+	printf("  ci->df_conflict:   %d\n", ci->df_conflict);
+	printf("  ci->path_conflict: %d\n", ci->path_conflict);
+	printf("  ci->filemask:      %d\n", ci->filemask);
+	printf("  ci->dirmask:       %d\n", ci->dirmask);
+	printf("  ci->match_mask:    %d\n", ci->match_mask);
+	printf("  ci->processed:     %d\n", ci->processed);
+}
+
 static void apply_directory_rename_modifications(struct merge_options *opt,
 						 struct diff_filepair *pair,
 						 char *new_path)
@@ -1753,6 +1779,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	item = strmap_get_item(&opt->priv->paths, old_path);
 	old_path = item->string;
 	ci = item->util;
+	dump_conflict_info(ci, old_path);
 
 	/* Find parent directories missing from opt->priv->paths */
 	cur_path = new_path;
@@ -1807,6 +1834,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	len = strlen(parent_name);
 	ci->merged.basename_offset = (len > 0 ? len+1 : len);
 	new_ci = strmap_get(&opt->priv->paths, new_path);
+	printf("Renaming %s to %s; new_ci = %p\n", old_path, new_path, new_ci);
 	if (!new_ci) {
 		/* Place ci back into opt->priv->paths, but at new_path */
 		strmap_put(&opt->priv->paths, new_path, ci);
@@ -1817,6 +1845,11 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		assert(ci->filemask == 2 || ci->filemask == 4);
 		assert((new_ci->filemask & ci->filemask) == 0);
 		assert(!new_ci->merged.clean);
+
+		/* Massive debuggery */
+		printf("Copying stuff from ci to new_ci:\n");
+		dump_conflict_info(ci, "ci");
+		dump_conflict_info(new_ci, "new_ci");
 
 		/* Copy stuff from ci into new_ci */
 		new_ci->filemask |= ci->filemask;
