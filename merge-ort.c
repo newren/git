@@ -1498,6 +1498,10 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		if (!old_dir)
 			/* Directory didn't change at all; ignore this one. */
 			continue;
+		if (!strmap_contains(&opt->priv->possible_dir_rename_bases,
+				     old_dir))
+			/* Ignore directory-level rename/rename(1to2) cases */
+			continue;
 
 		info = strmap_get(dir_renames, old_dir);
 		if (info) {
