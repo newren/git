@@ -1211,13 +1211,11 @@ static int process_renames(struct merge_options *opt,
  * For dir_rename_info, directory names are stored as a full path from the
  * toplevel of the repository and do not include a trailing '/'.  Also:
  *
- *   non_unique_new_dir: if true, could not determine new_dir
  *   new_dir:            final name of directory being renamed
  *   possible_new_dirs:  temporary used to help determine new_dir; see comments
  *                       in get_directory_renames() for details
  */
 struct dir_rename_info {
-	unsigned non_unique_new_dir:1;
 	struct strbuf new_dir;
 	struct strmap possible_new_dirs;
 };
@@ -1240,9 +1238,6 @@ static char *apply_dir_rename(struct string_list_item *rename_info,
 	struct strbuf new_path = STRBUF_INIT;
 	struct dir_rename_info *info = rename_info->util;
 	int oldlen, newlen;
-
-	if (info->non_unique_new_dir)
-		return NULL;
 
 	oldlen = strlen(rename_info->string);
 	if (info->new_dir.len == 0)
@@ -1399,7 +1394,6 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 					 struct strmap *collisions)
 {
 	char *new_path = NULL;
-	struct dir_rename_info *dr_info = rename_info->util;
 	struct collision_info *c_info;
 	int clean = 1;
 	struct strbuf collision_paths = STRBUF_INIT;
@@ -1409,20 +1403,8 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 	 * that we want to apply to path.
 	 */
 	new_path = apply_dir_rename(rename_info, path);
-
-	if (!new_path) {
-		/* This should only happen when entry->non_unique_new_dir set */
-		if (!dr_info->non_unique_new_dir)
-			BUG("dr_info->non_unqiue_dir not set and !new_path");
-		output(opt, 1, _("CONFLICT (directory rename split): "
-			       "Unclear where to place %s because directory "
-			       "%s was renamed to multiple other directories, "
-			       "with no destination getting a majority of the "
-			       "files."),
-		       path, rename_info->string);
-		clean = 0;
-		return NULL;
-	}
+	if (!new_path)
+		BUG("Failed to apply directory rename!");
 
 	/*
 	 * The caller needs to have ensured that it has pre-populated
@@ -1473,11 +1455,14 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 	return new_path;
 }
 
-static struct strmap *get_directory_renames(struct diff_queue_struct *pairs)
+static struct strmap *get_directory_renames(struct merge_options *opt,
+					    struct diff_queue_struct *pairs,
+					    int *clean)
 {
 	struct strmap *dir_renames;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
+	struct string_list to_remove = STRING_LIST_INIT_NODUP;
 	int i;
 
 	/*
@@ -1557,9 +1542,16 @@ static struct strmap *get_directory_renames(struct diff_queue_struct *pairs)
 				best = pnd_entry->item.string;
 			}
 		}
-		if (bad_max == max)
-			info->non_unique_new_dir = 1;
-		else {
+		if (bad_max == max) {
+			string_list_append(&to_remove, entry->item.string);
+			output(opt, 1,
+			       _("CONFLICT (directory rename split): "
+			       "Unclear where to rename %s to; it was renamed "
+			       "to multiple other directories, with no "
+			       "destination getting a majority of the files."),
+			       entry->item.string);
+			*clean &= 0;
+		} else {
 			assert(info->new_dir.len == 0);
 			strbuf_addstr(&info->new_dir, best);
 			fprintf(stderr, "Dir rename %s -> %s\n",
@@ -1576,6 +1568,9 @@ static struct strmap *get_directory_renames(struct diff_queue_struct *pairs)
 		info->possible_new_dirs.strdup_strings = 1;
 		strmap_clear(&info->possible_new_dirs, 0);
 	}
+
+	for (i=0; i<to_remove.nr; ++i)
+		strmap_remove(dir_renames, to_remove.items[i].string, 1);
 
 	return dir_renames;
 }
@@ -1636,14 +1631,7 @@ static void compute_collisions(struct strmap *collisions,
 			continue;
 
 		new_path = apply_dir_rename(rename_info, pair->two->path);
-		if (!new_path)
-			/*
-			 * dir_rename_ent->non_unique_new_dir is true, which
-			 * means there is no directory rename for us to use,
-			 * which means it won't cause us any additional
-			 * collisions.
-			 */
-			continue;
+		assert(new_path);
 		collision_info = strmap_get(collisions, new_path);
 		if (collision_info) {
 			free(new_path);
@@ -1703,17 +1691,13 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	otherinfo = strmap_get_item(dir_rename_exclusions, rename_info->string);
 	if (otherinfo) {
 		struct dir_rename_info *rename_dir_info = rename_info->util;
-		struct dir_rename_info *other_dir_info = otherinfo->util;
 
-		if (!other_dir_info->non_unique_new_dir) {
-			output(opt, 1,
-			       _("WARNING: Avoiding applying %s -> %s rename "
-				 "to %s, because %s itself was renamed."),
-			       rename_info->string,
-			       rename_dir_info->new_dir.buf,
-			       path, rename_dir_info->new_dir.buf);
-			return NULL;
-		}
+		output(opt, 1,
+		       _("WARNING: Avoiding applying %s -> %s rename "
+			 "to %s, because %s itself was renamed."),
+		       rename_info->string, rename_dir_info->new_dir.buf,
+		       path, rename_dir_info->new_dir.buf);
+		return NULL;
 	}
 
 	new_path = handle_path_level_conflicts(opt, path, side_index,
@@ -2035,8 +2019,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 		struct hashmap_iter iter;
 		struct str_entry *entry;
 
-		side1_dir_renames = get_directory_renames(side1_pairs);
-		side2_dir_renames = get_directory_renames(side2_pairs);
+		side1_dir_renames = get_directory_renames(opt, side1_pairs,
+							  &clean);
+		side2_dir_renames = get_directory_renames(opt, side2_pairs,
+							  &clean);
 		fprintf(stderr, "Side1 dir renames:\n");
 		strmap_for_each_entry(side1_dir_renames, &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
@@ -2046,8 +2032,6 @@ static int detect_and_process_renames(struct merge_options *opt,
 		fprintf(stderr, "Side2 dir renames:\n");
 		strmap_for_each_entry(side2_dir_renames, &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
-			if (info->non_unique_new_dir)
-				continue;
 			fprintf(stderr, "    %s -> %s:\n",
 				entry->item.string, info->new_dir.buf);
 		}
