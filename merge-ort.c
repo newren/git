@@ -1679,12 +1679,14 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	char *new_path = NULL;
 	struct string_list_item *rename_info;
 	struct string_list_item *otherinfo = NULL;
+	struct dir_rename_info *rename_dir_info;
 
 	if (strmap_empty(dir_renames))
 		return new_path;
 	rename_info = check_dir_renamed(path, dir_renames);
 	if (!rename_info)
 		return new_path;
+	rename_dir_info = rename_info->util;
 
 	/*
 	 * This next part is a little weird.  We do not want to do an
@@ -1710,10 +1712,9 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	 * As it turns out, this also prevents N-way transient rename
 	 * confusion; See testcases 9c and 9d of t6043.
 	 */
-	otherinfo = strmap_get_item(dir_rename_exclusions, rename_info->string);
+	otherinfo = strmap_get_item(dir_rename_exclusions,
+				    rename_dir_info->new_dir.buf);
 	if (otherinfo) {
-		struct dir_rename_info *rename_dir_info = rename_info->util;
-
 		output(opt, 1,
 		       _("WARNING: Avoiding applying %s -> %s rename "
 			 "to %s, because %s itself was renamed."),
