@@ -1702,17 +1702,23 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	 */
 	otherinfo = strmap_get_item(dir_rename_exclusions, rename_info->string);
 	if (otherinfo) {
-		struct dir_rename_info *info = rename_info->util;
+		struct dir_rename_info *rename_dir_info = rename_info->util;
+		struct dir_rename_info *other_dir_info = otherinfo->util;
 
-		output(opt, 1, _("WARNING: Avoiding applying %s -> %s rename "
-			       "to %s, because %s itself was renamed."),
-		       rename_info->string, info->new_dir.buf,
-		       path, info->new_dir.buf);
-	} else {
-		new_path = handle_path_level_conflicts(opt, path, side_index,
-						       rename_info, collisions);
-		*clean_merge &= (new_path != NULL);
+		if (!other_dir_info->non_unique_new_dir) {
+			output(opt, 1,
+			       _("WARNING: Avoiding applying %s -> %s rename "
+				 "to %s, because %s itself was renamed."),
+			       rename_info->string,
+			       rename_dir_info->new_dir.buf,
+			       path, rename_dir_info->new_dir.buf);
+			return NULL;
+		}
 	}
+
+	new_path = handle_path_level_conflicts(opt, path, side_index,
+					       rename_info, collisions);
+	*clean_merge &= (new_path != NULL);
 
 	return new_path;
 }
