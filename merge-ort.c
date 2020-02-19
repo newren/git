@@ -2559,7 +2559,9 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		pos = index_name_pos(opt->repo->index, path, strlen(path));
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		if (pos < 0) {
-			if (ci->filemask != 1)
+			if (ci->filemask == 1)
+				cache_tree_invalidate_path(opt->repo->index, path);
+			else
 				BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
 		} else {
 			ce = opt->repo->index->cache[pos];
