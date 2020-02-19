@@ -1842,6 +1842,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	 * in another string-list for now.
 	 */
 	string_list_append(&opt->priv->paths_to_free, old_path);
+	printf("Removing %s from opt->priv->paths!\n", old_path);
+	assert(ci->filemask == 2 || ci->filemask == 4);
+	assert(ci->dirmask == 0);
 	strmap_remove(&opt->priv->paths, old_path, 0);
 
 	/* Now, finally update ci and stick it into opt->priv->paths */
@@ -2221,6 +2224,8 @@ static void write_completed_directories(struct merge_options *opt,
 	 * the entires in info->versions that are under info->last_directory.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
+	fprintf(stderr, "*** Looking up '%s'\n", info->last_directory);
+	assert(dir_info);
 	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
 	if (offset == info->versions.nr) {
 		dir_info->is_null = 1;
