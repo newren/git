@@ -1579,6 +1579,24 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	return dir_renames;
 }
 
+void handle_directory_level_conflicts(struct strmap *side1_dir_renames,
+				      struct strmap *side2_dir_renames)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	struct string_list duplicated = STRING_LIST_INIT_NODUP;
+
+	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
+		if (strmap_contains(side2_dir_renames, entry->item.string))
+			string_list_append(&duplicated, entry->item.string);
+	}
+
+	for (int i=0; i<duplicated.nr; ++i) {
+		strmap_remove(side1_dir_renames, duplicated.items[i].string, 1);
+		strmap_remove(side2_dir_renames, duplicated.items[i].string, 1);
+	}
+}
+
 static struct string_list_item *check_dir_renamed(const char *path,
 						  struct strmap *dir_renames)
 {
@@ -2040,6 +2058,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 				entry->item.string, info->new_dir.buf);
 		}
 		fprintf(stderr, "Done.\n");
+		handle_directory_level_conflicts(side1_dir_renames,
+						 side2_dir_renames);
 
 	} else {
 		side1_dir_renames  = xmalloc(sizeof(*side1_dir_renames));
