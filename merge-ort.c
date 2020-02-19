@@ -1636,7 +1636,7 @@ static void compute_collisions(struct strmap *collisions,
 		new_path = apply_dir_rename(rename_info, pair->two->path);
 		if (!new_path)
 			/*
-			 * dir_rename_ent->non_unique_new_path is true, which
+			 * dir_rename_ent->non_unique_new_dir is true, which
 			 * means there is no directory rename for us to use,
 			 * which means it won't cause us any additional
 			 * collisions.
