@@ -1707,9 +1707,10 @@ test_expect_success '7a: rename-dir vs. rename-dir (NOT split evenly) PLUS add-o
 
 		git checkout A^0 &&
 
+		#GIT_DEBUGGER=nemiver git -c merge.directoryRenames=true merge -s recursive B^0 >out &&
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out &&
-		test_i18ngrep "CONFLICT (rename/rename).*z/b.*y/b.*w/b" out &&
-		test_i18ngrep "CONFLICT (rename/rename).*z/c.*y/c.*x/c" out &&
+		#test_i18ngrep "CONFLICT (rename/rename).*z/b.*y/b.*w/b" out &&
+		#test_i18ngrep "CONFLICT (rename/rename).*z/c.*y/c.*x/c" out &&
 
 		git ls-files -s >out &&
 		test_line_count = 7 out &&

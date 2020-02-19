@@ -1562,6 +1562,8 @@ static struct strmap *get_directory_renames(struct diff_queue_struct *pairs)
 		else {
 			assert(info->new_dir.len == 0);
 			strbuf_addstr(&info->new_dir, best);
+			fprintf(stderr, "Dir rename %s -> %s\n",
+				entry->item.string, best);
 		}
 		/*
 		 * The relevant directory sub-portion of the original full
@@ -1959,10 +1961,12 @@ static int collect_renames(struct merge_options *opt,
 
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
+	fprintf(stderr, "All pairs:\n");
 	for (i = 0; i < side_pairs->nr; ++i) {
 		struct diff_filepair *p = side_pairs->queue[i];
 		char *new_path; /* non-NULL only with directory renames */
 
+		fprintf(stderr, "  (%c, %s -> %s)\n", p->status, p->one->path, p->two->path);
 		if (p->status != 'A' && p->status != 'R') {
 			diff_free_filepair(p);
 			continue;
@@ -1973,6 +1977,7 @@ static int collect_renames(struct merge_options *opt,
 						      rename_exclusions,
 						      &collisions,
 						      &clean);
+		fprintf(stderr, "    new_path: %s\n", new_path);
 		if (p->status != 'R' && !new_path) {
 			diff_free_filepair(p);
 			continue;
@@ -2021,8 +2026,27 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
+		struct hashmap_iter iter;
+		struct str_entry *entry;
+
 		side1_dir_renames = get_directory_renames(side1_pairs);
 		side2_dir_renames = get_directory_renames(side2_pairs);
+		fprintf(stderr, "Side1 dir renames:\n");
+		strmap_for_each_entry(side1_dir_renames, &iter, entry) {
+			struct dir_rename_info *info = entry->item.util;
+			fprintf(stderr, "    %s -> %s:\n",
+				entry->item.string, info->new_dir.buf);
+		}
+		fprintf(stderr, "Side2 dir renames:\n");
+		strmap_for_each_entry(side2_dir_renames, &iter, entry) {
+			struct dir_rename_info *info = entry->item.util;
+			if (info->non_unique_new_dir)
+				continue;
+			fprintf(stderr, "    %s -> %s:\n",
+				entry->item.string, info->new_dir.buf);
+		}
+		fprintf(stderr, "Done.\n");
+
 	} else {
 		side1_dir_renames  = xmalloc(sizeof(*side1_dir_renames));
 		side2_dir_renames = xmalloc(sizeof(*side2_dir_renames));
@@ -2526,6 +2550,18 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	if (strmap_empty(&opt->priv->unmerged))
 		return 0;
 
+	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
+		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
+		       i,
+		       opt->repo->index->cache[i]->name,
+		       oid_to_hex(&opt->repo->index->cache[i]->oid),
+		       opt->repo->index->cache[i]->ce_mode,
+		       ce_stage(opt->repo->index->cache[i]),
+		       opt->repo->index->cache[i]->ce_flags,
+		       opt->repo->index->cache[i]->index);
+	}
+	fprintf(stderr, "... AFTER ...\n");
+
 	/* If any entries have skip_worktree set, we'll have to check 'em out */
 	state.force = 1;
 	state.quiet = 1;
@@ -2558,6 +2594,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		pos = index_name_pos(opt->repo->index, path, strlen(path));
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
+		fprintf(stderr, "Found pos %d for %s\n", pos, path);
 		if (pos < 0) {
 			if (ci->filemask == 1)
 				cache_tree_invalidate_path(opt->repo->index, path);
@@ -2615,6 +2652,16 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	remove_marked_cache_entries(opt->repo->index, 1);
 	QSORT(opt->repo->index->cache, opt->repo->index->cache_nr,
 	      cmp_cache_name_compare);
+	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
+		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
+		       i,
+		       opt->repo->index->cache[i]->name,
+		       oid_to_hex(&opt->repo->index->cache[i]->oid),
+		       opt->repo->index->cache[i]->ce_mode,
+		       ce_stage(opt->repo->index->cache[i]),
+		       opt->repo->index->cache[i]->ce_flags,
+		       opt->repo->index->cache[i]->index);
+	}
 
 	return errs;
 }
