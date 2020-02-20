@@ -2580,7 +2580,7 @@ static int checkout(struct merge_options *opt,
 	/* 2-way merge to the new branch */
 	unpack_opts.update = 1;
 	unpack_opts.merge = 1;
-	unpack_opts.quiet = 1; /* FIXME: was opts->merge && old_branch_info->commit; */
+	unpack_opts.quiet = 0; /* FIXME: sequencer might want quiet? */
 	unpack_opts.verbose_update = (opt->verbosity > 2);
 	unpack_opts.fn = twoway_merge;
 	if (1/* FIXME: opts->overwrite_ignore*/) {
