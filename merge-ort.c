@@ -36,11 +36,11 @@
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
-	struct strmap possible_dir_rename_bases; /* set of paths */
 	struct string_list paths_to_free; /* list of strings to free */
 	const char *current_dir_name;
 	int call_depth;
 	int needed_rename_limit;
+	unsigned possible_dir_renames:1;
 	unsigned inside_possibly_renamed_dir:1;
 };
 
@@ -531,13 +531,16 @@ static int collect_merge_info_callback(int n,
 	 *     again no dir rename detection is needed.)
 	 */
 	if (dirmask == 3 || dirmask == 5) {
+#if 0
 		/*
 		 * For directory rename detection, we can ignore any rename
 		 * whose source path doesn't start with one of the directory
 		 * paths in possible_dir_rename_bases.
 		 */
 		strmap_put(&opti->possible_dir_rename_bases, pi.string, NULL);
+#endif
 		opti->inside_possibly_renamed_dir = 1;
+		opti->possible_dir_renames = 1;
 	}
 
 	/* If dirmask, recurse into subdirectories */
@@ -1498,10 +1501,6 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		if (!old_dir)
 			/* Directory didn't change at all; ignore this one. */
 			continue;
-		if (!strmap_contains(&opt->priv->possible_dir_rename_bases,
-				     old_dir))
-			/* Ignore directory-level rename/rename(1to2) cases */
-			continue;
 
 		info = strmap_get(dir_renames, old_dir);
 		if (info) {
@@ -2079,7 +2078,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 
 	need_dir_renames =
 	  !opt->priv->call_depth &&
-	  !strmap_empty(&opt->priv->possible_dir_rename_bases) &&
+	  opt->priv->possible_dir_renames &&
 	  (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE ||
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
@@ -2946,7 +2945,6 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	string_list_init(&opt->priv->paths_to_free, 0);
 	strmap_init(&opt->priv->paths, 0);
 	strmap_init(&opt->priv->unmerged, 0);
-	strmap_init(&opt->priv->possible_dir_rename_bases, 0);
 	return 0;
 }
 
@@ -2978,11 +2976,6 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 {
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_clear : strmap_free;
-	/*
-	 * possible_dir_rename_bases reuse the same strings found in
-	 * opt->priv->unmerged, so they'll be freed below.
-	 */
-	strmap_func(&opt->priv->possible_dir_rename_bases, 1);
 
 	/*
 	 * We marked opt->priv->paths with strdup_strings = 0, so that we
