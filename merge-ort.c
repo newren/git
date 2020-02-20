@@ -1579,7 +1579,43 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	return dir_renames;
 }
 
-static void handle_directory_level_conflicts(struct strmap *side1_dir_renames,
+static void remove_invalid_dir_renames(struct merge_options *opt,
+				       struct strmap *side_dir_renames,
+				       unsigned side_mask)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	struct conflict_info *ci;
+	struct string_list removable = STRING_LIST_INIT_NODUP;
+
+	strmap_for_each_entry(side_dir_renames, &iter, entry) {
+		ci = strmap_get(&opt->priv->paths, entry->item.string);
+		if (!ci) {
+			/*
+			 * This rename came from a directory that was unchanged
+			 * on the other side of history, and NULL on our side.
+			 * We don't need to detect a directory rename for it.
+			 */
+			string_list_append(&removable, entry->item.string);
+			continue;
+		}
+		assert(!ci->merged.clean);
+		if (ci->dirmask & side_mask)
+			/*
+			 * This directory "rename" isn't valid because the
+			 * source directory name still exists on the destination
+			 * side.
+			 */
+			string_list_append(&removable, entry->item.string);
+	}
+
+	for (int i=0; i<removable.nr; ++i)
+		strmap_remove(side_dir_renames, removable.items[i].string, 1);
+	string_list_clear(&removable, 0);
+}
+
+static void handle_directory_level_conflicts(struct merge_options *opt,
+					     struct strmap *side1_dir_renames,
 					     struct strmap *side2_dir_renames)
 {
 	struct hashmap_iter iter;
@@ -1595,6 +1631,10 @@ static void handle_directory_level_conflicts(struct strmap *side1_dir_renames,
 		strmap_remove(side1_dir_renames, duplicated.items[i].string, 1);
 		strmap_remove(side2_dir_renames, duplicated.items[i].string, 1);
 	}
+	string_list_clear(&duplicated, 0);
+
+	remove_invalid_dir_renames(opt, side1_dir_renames, 2);
+	remove_invalid_dir_renames(opt, side2_dir_renames, 4);
 }
 
 static struct string_list_item *check_dir_renamed(const char *path,
@@ -2064,7 +2104,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 				entry->item.string, info->new_dir.buf);
 		}
 		fprintf(stderr, "Done.\n");
-		handle_directory_level_conflicts(side1_dir_renames,
+		handle_directory_level_conflicts(opt, side1_dir_renames,
 						 side2_dir_renames);
 
 	} else {
