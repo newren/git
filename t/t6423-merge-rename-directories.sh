@@ -2432,7 +2432,7 @@ test_expect_success '8e: Both sides rename, one side adds to original directory'
 		test_line_count = 2 out &&
 
 		git rev-parse >actual \
-			:1:z/b :2:y/b :3:w/b :1:z/c :2:y/c :3:w/c :0:y/d &&
+			:1:z/b :2:y/b :3:w/b :1:z/c :2:y/c :3:w/c :0:z/d &&
 		git rev-parse >expect \
 			 O:z/b  O:z/b  O:z/b  O:z/c  O:z/c  O:z/c  B:z/d &&
 		test_cmp expect actual &&
