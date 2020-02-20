@@ -1579,8 +1579,8 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	return dir_renames;
 }
 
-void handle_directory_level_conflicts(struct strmap *side1_dir_renames,
-				      struct strmap *side2_dir_renames)
+static void handle_directory_level_conflicts(struct strmap *side1_dir_renames,
+					     struct strmap *side2_dir_renames)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -1837,9 +1837,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	}
 
 	/*
-	 * Remove old_path from opt->priv->paths.  old_path also will eventually need
-	 * to be freed, but it may still be used by e.g. ci->pathnames.  So, store it
-	 * in another string-list for now.
+	 * Remove old_path from opt->priv->paths.  old_path also will
+	 * eventually need to be freed, but it may still be used by e.g.
+	 * ci->pathnames.  So, store it in another string-list for now.
 	 */
 	string_list_append(&opt->priv->paths_to_free, old_path);
 	printf("Removing %s from opt->priv->paths!\n", old_path);
