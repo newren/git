@@ -1871,6 +1871,8 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 		/* Copy stuff from ci into new_ci */
 		new_ci->filemask |= ci->filemask;
+		if (new_ci->dirmask)
+			new_ci->df_conflict = 1;
 		index = (ci->filemask >> 1);
 		new_ci->pathnames[index] = ci->pathnames[index];
 		new_ci->stages[index].mode = ci->stages[index].mode;
