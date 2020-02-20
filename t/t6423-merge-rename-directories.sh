@@ -3213,21 +3213,16 @@ test_expect_success '10b: Overwrite untracked with dir rename + delete' '
 		echo contents >y/e &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/delete).*Version B\^0 of y/d left in tree at y/d~B\^0" out &&
-		test_i18ngrep "Error: Refusing to lose untracked file at y/e; writing to y/e~B\^0 instead" out &&
+		test_i18ngrep "error: The following untracked working tree files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		git ls-files -s >out &&
-		test_line_count = 3 out &&
+		test_line_count = 1 out &&
 		git ls-files -u >out &&
-		test_line_count = 2 out &&
+		test_line_count = 0 out &&
 		git ls-files -o >out &&
 		test_line_count = 5 out &&
-
-		git rev-parse >actual \
-			:0:y/b :3:y/d :3:y/e &&
-		git rev-parse >expect \
-			O:z/b  O:z/c  B:z/e &&
-		test_cmp expect actual &&
 
 		echo very >expect &&
 		test_cmp expect y/c &&
@@ -3290,25 +3285,16 @@ test_expect_success '10c1: Overwrite untracked with dir rename/rename(1to2)' '
 		echo important >y/c &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/rename)" out &&
-		test_i18ngrep "Refusing to lose untracked file at y/c; adding as y/c~B\^0 instead" out &&
+		test_i18ngrep "error: The following untracked working tree files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		git ls-files -s >out &&
-		test_line_count = 6 out &&
+		test_line_count = 4 out &&
 		git ls-files -u >out &&
-		test_line_count = 3 out &&
+		test_line_count = 0 out &&
 		git ls-files -o >out &&
 		test_line_count = 3 out &&
-
-		git rev-parse >actual \
-			:0:y/a :0:y/b :0:x/d :1:x/c :2:w/c :3:y/c &&
-		git rev-parse >expect \
-			 O:z/a  O:z/b  O:x/d  O:x/c  O:x/c  O:x/c &&
-		test_cmp expect actual &&
-
-		git hash-object y/c~B^0 >actual &&
-		git rev-parse O:x/c >expect &&
-		test_cmp expect actual &&
 
 		echo important >expect &&
 		test_cmp expect y/c
@@ -3328,25 +3314,16 @@ test_expect_success '10c2: Overwrite untracked with dir rename/rename(1to2), oth
 		echo important >y/c &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive A^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/rename)" out &&
-		test_i18ngrep "Refusing to lose untracked file at y/c; adding as y/c~HEAD instead" out &&
+		test_i18ngrep "error: The following untracked working tree files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		git ls-files -s >out &&
-		test_line_count = 6 out &&
+		test_line_count = 4 out &&
 		git ls-files -u >out &&
-		test_line_count = 3 out &&
+		test_line_count = 0 out &&
 		git ls-files -o >out &&
 		test_line_count = 3 out &&
-
-		git rev-parse >actual \
-			:0:y/a :0:y/b :0:x/d :1:x/c :3:w/c :2:y/c &&
-		git rev-parse >expect \
-			 O:z/a  O:z/b  O:x/d  O:x/c  O:x/c  O:x/c &&
-		test_cmp expect actual &&
-
-		git hash-object y/c~HEAD >actual &&
-		git rev-parse O:x/c >expect &&
-		test_cmp expect actual &&
 
 		echo important >expect &&
 		test_cmp expect y/c
@@ -3404,37 +3381,19 @@ test_expect_success '10d: Delete untracked with dir rename/rename(2to1)' '
 		echo important >y/wham &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/rename)" out &&
-		test_i18ngrep "Refusing to lose untracked file at y/wham" out &&
+		test_i18ngrep "error: The following untracked working tree files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		git ls-files -s >out &&
 		test_line_count = 6 out &&
 		git ls-files -u >out &&
-		test_line_count = 2 out &&
+		test_line_count = 0 out &&
 		git ls-files -o >out &&
 		test_line_count = 3 out &&
 
-		git rev-parse >actual \
-			:0:y/a :0:y/b :0:y/d :0:y/e :2:y/wham :3:y/wham &&
-		git rev-parse >expect \
-			 O:z/a  O:z/b  O:x/d  O:x/e  O:z/c     O:x/f &&
-		test_cmp expect actual &&
-
-		test_must_fail git rev-parse :1:y/wham &&
-
 		echo important >expect &&
-		test_cmp expect y/wham &&
-
-		# Test that the two-way merge in y/wham~merged is as expected
-		git cat-file -p :2:y/wham >expect &&
-		git cat-file -p :3:y/wham >other &&
-		>empty &&
-		test_must_fail git merge-file \
-			-L "HEAD" \
-			-L "" \
-			-L "B^0" \
-			expect empty other &&
-		test_cmp expect y/wham~merged
+		test_cmp expect y/wham
 	)
 '
 
@@ -3564,28 +3523,14 @@ test_expect_success '11a: Avoid losing dirty contents with simple rename' '
 		echo stuff >>z/c &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "Refusing to lose dirty file at z/c" out &&
+		test_i18ngrep "error: Your local changes to the following files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		test_seq 1 10 >expected &&
 		echo stuff >>expected &&
-		test_cmp expected z/c &&
+		test_cmp expected z/c
 
-		git ls-files -s >out &&
-		test_line_count = 2 out &&
-		git ls-files -u >out &&
-		test_line_count = 1 out &&
-		git ls-files -o >out &&
-		test_line_count = 4 out &&
-
-		git rev-parse >actual \
-			:0:z/a :2:z/c &&
-		git rev-parse >expect \
-			 O:z/a  B:z/b &&
-		test_cmp expect actual &&
-
-		git hash-object z/c~HEAD >actual &&
-		git rev-parse B:z/b >expect &&
-		test_cmp expect actual
 	)
 '
 
@@ -3636,32 +3581,15 @@ test_expect_success '11b: Avoid losing dirty file involved in directory rename' 
 		git checkout A^0 &&
 		echo stuff >>z/c &&
 
-		git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "Refusing to lose dirty file at z/c" out &&
+		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
+		test_i18ngrep "error: Your local changes to the following files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		grep -q stuff z/c &&
 		test_seq 1 10 >expected &&
 		echo stuff >>expected &&
-		test_cmp expected z/c &&
-
-		git ls-files -s >out &&
-		test_line_count = 3 out &&
-		git ls-files -u >out &&
-		test_line_count = 0 out &&
-		git ls-files -m >out &&
-		test_line_count = 0 out &&
-		git ls-files -o >out &&
-		test_line_count = 4 out &&
-
-		git rev-parse >actual \
-			:0:x/b :0:y/a :0:y/c &&
-		git rev-parse >expect \
-			 O:x/b  O:z/a  B:x/c &&
-		test_cmp expect actual &&
-
-		git hash-object y/c >actual &&
-		git rev-parse B:x/c >expect &&
-		test_cmp expect actual
+		test_cmp expected z/c
 	)
 '
 
@@ -3781,29 +3709,14 @@ test_expect_success '11d: Avoid losing not-uptodate with rename + D/F conflict' 
 		echo stuff >>z/c &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "Refusing to lose dirty file at z/c" out &&
+		test_i18ngrep "error: Your local changes to the following files would be overwritten" err &&
+
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		grep -q stuff z/c &&
 		test_seq 1 10 >expected &&
 		echo stuff >>expected &&
-		test_cmp expected z/c &&
-
-		git ls-files -s >out &&
-		test_line_count = 4 out &&
-		git ls-files -u >out &&
-		test_line_count = 1 out &&
-		git ls-files -o >out &&
-		test_line_count = 5 out &&
-
-		git rev-parse >actual \
-			:0:x/b :0:y/a :0:y/c/d :3:y/c &&
-		git rev-parse >expect \
-			 O:x/b  O:z/a  B:y/c/d  B:x/c &&
-		test_cmp expect actual &&
-
-		git hash-object y/c~HEAD >actual &&
-		git rev-parse B:x/c >expect &&
-		test_cmp expect actual
+		test_cmp expected z/c
 	)
 '
 
@@ -3861,37 +3774,13 @@ test_expect_success '11e: Avoid deleting not-uptodate with dir rename/rename(1to
 		echo mods >>y/c &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/rename)" out &&
-		test_i18ngrep "Refusing to lose dirty file at y/c" out &&
+		test_i18ngrep "error: Your local changes to the following files would be overwritten" err &&
 
-		git ls-files -s >out &&
-		test_line_count = 7 out &&
-		git ls-files -u >out &&
-		test_line_count = 4 out &&
-		git ls-files -o >out &&
-		test_line_count = 3 out &&
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		echo different >expected &&
 		echo mods >>expected &&
-		test_cmp expected y/c &&
-
-		git rev-parse >actual \
-			:0:y/a :0:y/b :0:x/d :1:x/c :2:w/c :2:y/c :3:y/c &&
-		git rev-parse >expect \
-			 O:z/a  O:z/b  O:x/d  O:x/c  O:x/c  A:y/c  O:x/c &&
-		test_cmp expect actual &&
-
-		# See if y/c~merged has expected contents; requires manually
-		# doing the expected file merge
-		git cat-file -p A:y/c >c1 &&
-		git cat-file -p B:z/c >c2 &&
-		>empty &&
-		test_must_fail git merge-file \
-			-L "HEAD" \
-			-L "" \
-			-L "B^0" \
-			c1 empty c2 &&
-		test_cmp c1 y/c~merged
+		test_cmp expected y/c
 	)
 '
 
@@ -3944,38 +3833,13 @@ test_expect_success '11f: Avoid deleting not-uptodate with dir rename/rename(2to
 		echo important >>y/wham &&
 
 		test_must_fail git -c merge.directoryRenames=true merge -s recursive B^0 >out 2>err &&
-		test_i18ngrep "CONFLICT (rename/rename)" out &&
-		test_i18ngrep "Refusing to lose dirty file at y/wham" out &&
+		test_i18ngrep "error: Your local changes to the following files would be overwritten" err &&
 
-		git ls-files -s >out &&
-		test_line_count = 4 out &&
-		git ls-files -u >out &&
-		test_line_count = 2 out &&
-		git ls-files -o >out &&
-		test_line_count = 3 out &&
+		test_path_is_missing .git/MERGE_HEAD &&
 
 		test_seq 1 10 >expected &&
 		echo important >>expected &&
-		test_cmp expected y/wham &&
-
-		test_must_fail git rev-parse :1:y/wham &&
-
-		git rev-parse >actual \
-			:0:y/a :0:y/b :2:y/wham :3:y/wham &&
-		git rev-parse >expect \
-			 O:z/a  O:z/b  O:x/c     O:x/d &&
-		test_cmp expect actual &&
-
-		# Test that the two-way merge in y/wham~merged is as expected
-		git cat-file -p :2:y/wham >expect &&
-		git cat-file -p :3:y/wham >other &&
-		>empty &&
-		test_must_fail git merge-file \
-			-L "HEAD" \
-			-L "" \
-			-L "B^0" \
-			expect empty other &&
-		test_cmp expect y/wham~merged
+		test_cmp expected y/wham
 	)
 '
 
