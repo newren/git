@@ -38,6 +38,7 @@ struct merge_options_internal {
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct string_list paths_to_free; /* list of strings to free */
 	const char *current_dir_name;
+	char *toplevel_dir; /* see merge_info.directory_name comment */
 	int call_depth;
 	int needed_rename_limit;
 	unsigned possible_dir_renames:1;
@@ -611,7 +612,9 @@ static int collect_merge_info(struct merge_options *opt,
 	struct tree_desc t[3];
 	struct traverse_info info;
 
-	setup_traverse_info(&info, "");
+	opt->priv->toplevel_dir = "";
+	opt->priv->current_dir_name = opt->priv->toplevel_dir;
+	setup_traverse_info(&info, opt->priv->toplevel_dir);
 	info.fn = collect_merge_info_callback;
 	info.data = opt;
 	info.show_all_errors = 1;
@@ -1842,8 +1845,10 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		char *last_slash = strrchr(cur_path, '/');
 		if (last_slash)
 			parent_name = xstrndup(cur_path, last_slash - cur_path);
-		else
-			parent_name = xstrdup("");
+		else {
+			parent_name = opt->priv->toplevel_dir;
+			break;
+		}
 
 		/* Look it up in opt->priv->paths */
 		item = strmap_get_item(&opt->priv->paths, parent_name);
@@ -2741,7 +2746,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree **result)
 {
 	int code, clean;
-	char root_dir[1] = "\0";
 	struct diff_queue_struct pairs;
 	struct object_id working_tree_oid;
 
@@ -2758,7 +2762,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 		return 1;
 	}
 
-	opt->priv->current_dir_name = root_dir;
 	code = collect_merge_info(opt, merge_base, head, merge);
 	if (code != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
