@@ -1,46 +1,9 @@
-* Renames:
-  * Determine renames
-    * get normal renames
-    * get directory renames
-    * dir renames merely modify normal renames
-  * Rename related information:
-    * source path has at least one and at most two stages associated with it
-    * dest path has at least one and at most two stages associated with it
-    * dest path cannot have a base stage
-    * source path cannot have the stage corresponding to side of history renamed
-    * 1 stage each side: delete/rename (or rename/rename(1to2))
-    * 2 stages in source, 1 in dest: typical rename
-    * 1 stage in source, 2 in dest: delete/rename/add conflict (or r/r(1to2)/a)
-    * 2 stages each side: rename/add
-    * (Note that add can be replaced by rename(2to1), just as rename(1to2) can
-       replace a delete)
-  * Need supplemental information for marking things as conflicted even if not
-    due to contents (clean dir renames are conflicts by default...)
-  * Modify struct rename and get_renames():
-    * Do not use insert_stage_data()
-    * Note the sidemask for the renames
-    * Have the second call to get_renames() append to same rename string_list
-    * Call string_list_append(), NOT string_list_insert; sort at end
-  * process_renames:
-    * Combine two lists of renames into one and sort
-      * But make sure there is a sidemask recorded before doing so
-      * This puts rename/rename(1to2) cases as adjacent entries
-    * Loop over each rename pair
-      * If next entry has same source name, then it's rename/rename(1to2)
-        * FIXME: special handling...
-      * Mark source path as resolved/unused (is_null)
-      * If only 1 stage source side:
-        * Copy base stage from source to dest
-	* Add this rename to a *map* (by source name) for later post-processing
-      * If two stages source side, and one stage dest side:
-        * Copy stages from source side to dest side
-      * If two stages source side, and two stages dest side:
-        * Three-way content merge two source stages with appropriate dest stage
-	* Replace appropriate dest stage with three-way merged content
-
 * Overall plan
-  * Renames
-  * Directory renames
+  X Renames
+  X Write the talk
+  X Directory renames
+  * Implement basic perf ideas
+  * Additional Perf testing
   * Output
   * Path conflict files
   * Check the "Stuff to not forget"
@@ -48,8 +11,6 @@
   * Cleanup of FIXMEs
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
-  * Perf testing
-  * Write the talk
   * Default to histogram diff
   * Features like --remerge-diff
   * Diff3 improvements
@@ -67,7 +28,6 @@ Path_conflict files:
     * add/add, rename/add, rename/rename(2to1)
     * rename/add/delete
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
-
 
 * Stuff to not forget:
   * Perf idea: make sure partial capitulation (source match) does not defeat
@@ -126,7 +86,49 @@ Old stuff, probably delete:
 * Important stuff to call out for reviewers to double-check:
   * write_tree() -- yet another place trees are written (builtin/mktree,
     fast-import, cache-tree); is that okay?
-  * checkout() (quiet? overwrite_ignore? refresh_index?)
+  * checkout() (overwrite_ignore? refresh_index?)
   * record_unmerged_index_entries() (cache-tree invalidation?
     state flags correct?  should I avoid ADD_CACHE_JUST_APPEND if
     strmap_size(unmerged) < O(log(opt->repo->index->cache_nr)/3) ?
+
+
+
+* Old notes on renames:
+  * Determine renames
+    * get normal renames
+    * get directory renames
+    * dir renames merely modify normal renames
+  * Rename related information:
+    * source path has at least one and at most two stages associated with it
+    * dest path has at least one and at most two stages associated with it
+    * dest path cannot have a base stage
+    * source path cannot have the stage corresponding to side of history renamed
+    * 1 stage each side: delete/rename (or rename/rename(1to2))
+    * 2 stages in source, 1 in dest: typical rename
+    * 1 stage in source, 2 in dest: delete/rename/add conflict (or r/r(1to2)/a)
+    * 2 stages each side: rename/add
+    * (Note that add can be replaced by rename(2to1), just as rename(1to2) can
+       replace a delete)
+  * Need supplemental information for marking things as conflicted even if not
+    due to contents (clean dir renames are conflicts by default...)
+  * Modify struct rename and get_renames():
+    * Do not use insert_stage_data()
+    * Note the sidemask for the renames
+    * Have the second call to get_renames() append to same rename string_list
+    * Call string_list_append(), NOT string_list_insert; sort at end
+  * process_renames:
+    * Combine two lists of renames into one and sort
+      * But make sure there is a sidemask recorded before doing so
+      * This puts rename/rename(1to2) cases as adjacent entries
+    * Loop over each rename pair
+      * If next entry has same source name, then it's rename/rename(1to2)
+        * FIXME: special handling...
+      * Mark source path as resolved/unused (is_null)
+      * If only 1 stage source side:
+        * Copy base stage from source to dest
+	* Add this rename to a *map* (by source name) for later post-processing
+      * If two stages source side, and one stage dest side:
+        * Copy stages from source side to dest side
+      * If two stages source side, and two stages dest side:
+        * Three-way content merge two source stages with appropriate dest stage
+	* Replace appropriate dest stage with three-way merged content
