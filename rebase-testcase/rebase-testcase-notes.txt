@@ -1,0 +1,61 @@
+* Setup parameters:
+  * Once before all the runs:
+    * Kill anything but terminals and emacs (e.g. chrome)
+    * git checkout -b 5.4-rename v5.4
+    * git mv drivers pilots
+    * git commit -m "Rename drivers to pilots"
+    * git config merge.renameLimit 30000
+    * Do a git gc
+    * Do a swapoff -a
+    * Do one rebase run to add the garbage objects
+  * Before each run
+    * rm .git/logs/refs/heads/soc-driver .git/logs/HEAD
+    * rm -rf .git/objects/[0-9a-f]*
+  * Questions
+    * 
+    * Hot cache...or cold cache??
+
+* Linux series; some choices:
+  * 101: 29d7e05c5f75fc2ebf3608743b6809aa0ff56800 2020-01-18
+  *  50: 6e62bd36e9ad85a22d92b1adce6a0336ea549733 2020-01-08 (from v5.5-rc1)
+
+$ git checkout v5.4
+$ git branch -f soc-driver 6e62bd36e9ad85a22d92b1adce6a0336ea549733
+$ rm .git/logs/refs/heads/soc-driver .git/logs/HEAD
+$ rm -rf .git/objects/[0-9a-f]*
+$ git status
+
+# git-ort
+$ time git rebase -m --onto HEAD 95e6ba5133163f8241c9ea2439369cec0452fec6 soc-driver
+0m53.313s
+0m54.853s
+
+
+# git-v2.25.0  -m
+0m30.738s  # First run; might have more hot caches (e.g. count-objects -v)
+
+0m32.723s
+0m35.502s
+0m45.495s
+0m43.932s  # background iowait high; don't know why
+0m33.511s  # Waited for lower iowait
+0m31.602s  # Same
+
+
+# git-v2.25.0  no -m
+0m8.124s
+0m8.463s
+0m8.441s
+0m7.610s
+0m7.747s
+
+
+$ git checkout 5.4-rename
+$ git branch -f soc-driver 6e62bd36e9ad85a22d92b1adce6a0336ea549733
+$ rm -f .git/logs/refs/heads/soc-driver .git/logs/HEAD
+$ rm -rf .git/objects/[0-9a-f]*
+$ git status
+$ time git rebase -m --onto HEAD 95e6ba5133163f8241c9ea2439369cec0452fec6 soc-driver
+
+
+REMEMBER: Record the hash!!!
