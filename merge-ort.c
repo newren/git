@@ -36,17 +36,27 @@
 #if 0
 #define VERBOSE_DEBUG
 #endif
+#if 0
+//#error FIXME: You need to have different diff_filepairs for each side!!
+#define NEW_DIFFPAIRS
+#endif
+
+struct rename_info {
+	struct diff_queue_struct side1_pairs;
+	struct diff_queue_struct side2_pairs;
+	unsigned possible_dir_renames:1;
+	unsigned inside_possibly_renamed_dir:1;
+};
 
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
 	struct string_list paths_to_free; /* list of strings to free */
+	struct rename_info *renames;
 	const char *current_dir_name;
 	char *toplevel_dir; /* see merge_info.directory_name comment */
 	int call_depth;
 	int needed_rename_limit;
-	unsigned possible_dir_renames:1;
-	unsigned inside_possibly_renamed_dir:1;
 };
 
 struct version_info {
@@ -322,6 +332,92 @@ static void setup_path_info(struct string_list_item *result,
 	result->util = path_info;
 }
 
+static void collect_rename_information(struct rename_info *renames,
+				       unsigned long filemask,
+				       unsigned long dirmask,
+				       struct string_list_item *pi)
+{
+	struct conflict_info *ci = pi->util;
+	unsigned side;
+
+	/*
+	 * Record directories which could possibly have been renamed.  Notes:
+	 *   - Directory has to exist in mbase to have been renamed (i.e.
+	 *     dirmask & 1 must be true)
+	 *   - Directory cannot exist on both sides or it isn't renamed
+	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
+	 *   - If directory exists in neither side1 nor side2, then
+	 *     there are no new files to send along with the directory
+	 *     rename so there's no point detecting it[1].  (Thus, either
+	 *     dirmask & 2 or dirmask & 4 must be true)
+	 *   - If the side that didn't rename a directory also didn't
+	 *     modify it at all (i.e. the par[12]_matches_mbase cases
+	 *     checked above were true), then we don't need to detect the
+	 *     directory rename as there are not either any new files or
+	 *     file modifications to send along with the rename.  Thus,
+	 *     it's okay that we returned early for the
+	 *     par[12]_matches_mbase cases above.
+	 *
+	 * [1] When neither side1 nor side2 has the directory then at
+	 *     best, both sides renamed it to the same place (which will be
+	 *     handled by all individual files being renamed to the same
+	 *     place and no dir rename detection is needed).  At worst,
+	 *     they both renamed it differently (but all individual files
+	 *     are renamed to different places which will flag errors so
+	 *     again no dir rename detection is needed.)
+	 */
+	if (dirmask == 3 || dirmask == 5) {
+#if 0
+		/*
+		 * For directory rename detection, we can ignore any rename
+		 * whose source path doesn't start with one of the directory
+		 * paths in possible_dir_rename_bases.
+		 */
+		strmap_put(&renames->possible_dir_rename_bases, pi->string,
+			   NULL);
+#endif
+		renames->inside_possibly_renamed_dir = 1;
+		renames->possible_dir_renames = 1;
+	}
+
+#ifdef NEW_DIFFPAIRS
+	if (filemask == 0 || filemask == 7)
+		return;
+
+	for (side = 1; side <= 2; ++side) {
+		struct diff_filespec *one, *two;
+		struct diff_queue_struct * q;
+		unsigned side_mask = (side << 1);
+		int need_pair = 0;
+
+		q = (side == 1 ? &renames->side1_pairs : &renames->side2_pairs);
+		if ((filemask & 1) && !(filemask & side_mask)) {
+			/* File deletion; may be rename source */
+			need_pair = 1;
+			one = alloc_filespec(pi->string);
+			two = alloc_filespec(pi->string);
+			fill_filespec(one, &ci->stages[0].oid, 1,
+				      ci->stages[0].mode);
+			//fprintf(stderr, "Side %d deletion: %s\n", side, pi->string);
+		}
+		if (!(filemask & 1) && (filemask & side_mask)) {
+			/* File addition; may be rename target */
+			need_pair = 1;
+			one = alloc_filespec(pi->string);
+			two = alloc_filespec(pi->string);
+			fill_filespec(two, &ci->stages[side].oid, 1,
+				      ci->stages[side].mode);
+			//fprintf(stderr, "Side %d addition: %s\n", side, pi->string);
+		}
+		if (need_pair)
+			diff_queue(q, one, two);
+	}
+#else
+	(void)side;
+	(void)ci;
+#endif
+}
+
 static int collect_merge_info_callback(int n,
 				       unsigned long mask,
 				       unsigned long dirmask,
@@ -337,7 +433,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options *opt = info->data;
 	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
-	unsigned prev_iprd = opti->inside_possibly_renamed_dir; /* prev value */
+	unsigned prev_iprd = opti->renames->inside_possibly_renamed_dir; /* prev value */
 	unsigned filemask = mask & ~dirmask;
 	unsigned mbase_null = !(mask & 1);
 	unsigned side1_null = !(mask & 2);
@@ -428,7 +524,8 @@ static int collect_merge_info_callback(int n,
 	 * and side1 is a tree), the path on side2 is an add that may
 	 * correspond to a rename target so we have to mark that as conflicted.
 	 */
-	if (!opti->inside_possibly_renamed_dir && side1_matches_mbase) {
+	if (!opti->renames->inside_possibly_renamed_dir &&
+	    side1_matches_mbase) {
 		if (side2_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
@@ -466,7 +563,8 @@ static int collect_merge_info_callback(int n,
 	 * particular, we can ignore mbase as a rename source.  Same
 	 * reasoning as for above but with side1 and side2 swapped.
 	 */
-	if (!opti->inside_possibly_renamed_dir && side2_matches_mbase) {
+	if (!opti->renames->inside_possibly_renamed_dir &&
+	    side2_matches_mbase) {
 		if (side1_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
@@ -509,7 +607,7 @@ static int collect_merge_info_callback(int n,
 			NULL, 0, df_conflict, filemask, dirmask, 0);
 #ifdef VERBOSE_DEBUG
 	printf("Path 3 for %s, iprd = %d\n", pi.string,
-	       opti->inside_possibly_renamed_dir);
+	       opti->renames->inside_possibly_renamed_dir);
 	printf("Stats:\n");
 #endif
 	if (filemask) {
@@ -526,8 +624,8 @@ static int collect_merge_info_callback(int n,
 #endif
 	}
 #ifdef VERBOSE_DEBUG
-	printf("  opti->inside_possibly_renamed_dir: %d\n",
-	       opti->inside_possibly_renamed_dir);
+	printf("  opti->renames->inside_possibly_renamed_dir: %d\n",
+	       opti->renames->inside_possibly_renamed_dir);
 	printf("  side1_null: %d\n", side1_null);
 	printf("  side2_null: %d\n", side2_null);
 	printf("  side1_is_tree: %d\n", side1_is_tree);
@@ -539,44 +637,7 @@ static int collect_merge_info_callback(int n,
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
-	/*
-	 * Record directories which could possibly have been renamed.  Notes:
-	 *   - Directory has to exist in mbase to have been renamed (i.e.
-	 *     dirmask & 1 must be true)
-	 *   - Directory cannot exist on both sides or it isn't renamed
-	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
-	 *   - If directory exists in neither side1 nor side2, then
-	 *     there are no new files to send along with the directory
-	 *     rename so there's no point detecting it[1].  (Thus, either
-	 *     dirmask & 2 or dirmask & 4 must be true)
-	 *   - If the side that didn't rename a directory also didn't
-	 *     modify it at all (i.e. the par[12]_matches_mbase cases
-	 *     checked above were true), then we don't need to detect the
-	 *     directory rename as there are not either any new files or
-	 *     file modifications to send along with the rename.  Thus,
-	 *     it's okay that we returned early for the
-	 *     par[12]_matches_mbase cases above.
-	 *
-	 * [1] When neither side1 nor side2 has the directory then at
-	 *     best, both sides renamed it to the same place (which will be
-	 *     handled by all individual files being renamed to the same
-	 *     place and no dir rename detection is needed).  At worst,
-	 *     they both renamed it differently (but all individual files
-	 *     are renamed to different places which will flag errors so
-	 *     again no dir rename detection is needed.)
-	 */
-	if (dirmask == 3 || dirmask == 5) {
-#if 0
-		/*
-		 * For directory rename detection, we can ignore any rename
-		 * whose source path doesn't start with one of the directory
-		 * paths in possible_dir_rename_bases.
-		 */
-		strmap_put(&opti->possible_dir_rename_bases, pi.string, NULL);
-#endif
-		opti->inside_possibly_renamed_dir = 1;
-		opti->possible_dir_renames = 1;
-	}
+	collect_rename_information(opt->priv->renames, filemask, dirmask, &pi);
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
@@ -626,7 +687,7 @@ static int collect_merge_info_callback(int n,
 		opti->current_dir_name = pi.string;
 		ret = traverse_trees(NULL, 3, t, &newinfo);
 		opti->current_dir_name = original_dir_name;
-		opti->inside_possibly_renamed_dir = prev_iprd;
+		opti->renames->inside_possibly_renamed_dir = prev_iprd;
 
 		for (i = 0; i < 3; i++)
 			free(buf[i]);
@@ -638,6 +699,7 @@ static int collect_merge_info_callback(int n,
 }
 
 static int collect_merge_info(struct merge_options *opt,
+			      /* FIXME: We do NOT need the trees anymore */
 			      struct tree *merge_base,
 			      struct tree *side1,
 			      struct tree *side2)
@@ -1171,8 +1233,12 @@ static int process_renames(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 		printf("collision: %d, source_deleted: %d\n",
 		       collision, source_deleted);
-#endif
 
+		printf("  oldpath: %s, newpath: %s\n", oldpath, newpath);
+		printf("source_deleted: %d\n", source_deleted);
+		printf("oldinfo->filemask: %d\n", oldinfo->filemask);
+		printf("old_sidemask: %d\n", old_sidemask);
+#endif
 		assert(source_deleted || oldinfo->filemask & old_sidemask);
 
 		/* In all cases, mark the original as resolved by removal */
@@ -1848,6 +1914,33 @@ static void dump_conflict_info(struct conflict_info *ci, char *name)
 	printf("  ci->processed:     %d\n", ci->processed);
 }
 
+static void dump_pairs(struct diff_queue_struct *pairs, char *label)
+{
+#ifdef VERBOSE_DEBUG
+	int i;
+
+	printf("%s pairs:\n", label);
+	for (i=0; i<pairs->nr; ++i) {
+		printf("  %c %d %d %d %d %d %d\n",
+		       pairs->queue[i]->status,
+		       pairs->queue[i]->broken_pair,
+		       pairs->queue[i]->renamed_pair,
+		       pairs->queue[i]->is_unmerged,
+		       pairs->queue[i]->done_skip_stat_unmatch,
+		       pairs->queue[i]->skip_stat_unmatch_result,
+		       pairs->queue[i]->score);
+		printf("    %06o %s %s\n",
+		       pairs->queue[i]->one->mode,
+		       oid_to_hex(&pairs->queue[i]->one->oid),
+		       pairs->queue[i]->one->path);
+		printf("    %06o %s %s\n",
+		       pairs->queue[i]->two->mode,
+		       oid_to_hex(&pairs->queue[i]->two->oid),
+		       pairs->queue[i]->two->path);
+	}
+#endif
+}
+
 static void apply_directory_rename_modifications(struct merge_options *opt,
 						 struct diff_filepair *pair,
 						 char *new_path)
@@ -2009,10 +2102,33 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 /*** Rename stuff ***/
 
+static void resolve_diffpair_statuses(void)
+{
+	/*
+	 * A simplified version of diff_resolve_rename_copy(); would probably
+	 * just use that function but it's static...
+	 */
+	int i;
+	struct diff_filepair *p;
+
+	for (i = 0; i < diff_queued_diff.nr; ++i) {
+		p = diff_queued_diff.queue[i];
+		p->status = 0; /* undecided */
+		if (!DIFF_FILE_VALID(p->one))
+			p->status = DIFF_STATUS_ADDED;
+		else if (!DIFF_FILE_VALID(p->two))
+			p->status = DIFF_STATUS_DELETED;
+		else if (DIFF_PAIR_RENAME(p))
+			p->status = DIFF_STATUS_RENAMED;
+	}
+}
+
+
 /* Get the diff_filepairs changed between merge_base and side. */
 static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 					       struct tree *merge_base,
-					       struct tree *side)
+					       struct tree *side,
+					       unsigned side_index)
 {
 	struct diff_queue_struct *ret;
 	struct diff_options opts;
@@ -2034,11 +2150,27 @@ static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 	opts.show_rename_progress = opt->show_rename_progress;
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
+#ifndef NEW_DIFFPAIRS
+	//diff_queued_diff.nr = 0;
+	//diff_queued_diff.queue = NULL;
 	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "", &opts);
 #ifdef VERBOSE_DEBUG
 	printf("opts.detect_rename: %d, opts.rename_limit: %d, opts.rename_score: %d\n", opts.detect_rename, opts.rename_limit, opts.rename_score);
 #endif
 	diffcore_std(&opts);
+	(void)resolve_diffpair_statuses;
+#else
+	ret = (side_index == 1 ? &opt->priv->renames->side1_pairs
+			       : &opt->priv->renames->side2_pairs);
+	diff_queued_diff = *ret;
+	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
+	diffcore_rename(&opts);
+	resolve_diffpair_statuses();
+#endif
+	dump_pairs(&diff_queued_diff, "After diffcore_rename");
+#ifdef VERBOSE_DEBUG
+	printf("Done.\n");
+#endif
 	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
 		opt->priv->needed_rename_limit = opts.needed_rename_limit;
 
@@ -2142,12 +2274,20 @@ static int detect_and_process_renames(struct merge_options *opt,
 	if (!merge_detect_rename(opt))
 		return 1;
 
-	side1_pairs = get_diffpairs(opt, merge_base, side1);
-	side2_pairs = get_diffpairs(opt, merge_base, side2);
+	/*
+	 * FIXME:
+	 *   (1) side1_pairs is just opt->priv->renames->side1_pairs,
+	 *       shouldn't track it separately.
+	 *   (2) shouldn't need merge_base or side[12] anymore
+	 *   (3) Free'ing of side[12]_pairs at end of func might need cleanup
+	 *   (4) Free'ing of combined by caller needs to be done
+	 */
+	side1_pairs = get_diffpairs(opt, merge_base, side1, 1);
+	side2_pairs = get_diffpairs(opt, merge_base, side2, 2);
 
 	need_dir_renames =
 	  !opt->priv->call_depth &&
-	  opt->priv->possible_dir_renames &&
+	  opt->priv->renames->possible_dir_renames &&
 	  (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE ||
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
@@ -2211,10 +2351,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 	side2_dir_renames->strdup_strings = 1;
 	strmap_clear(side1_dir_renames, 1);
 	strmap_clear(side2_dir_renames, 1);
+	side1_pairs->nr = 0;
+	side2_pairs->nr = 0;
 	free(side1_pairs->queue);
 	free(side2_pairs->queue);
-	free(side1_pairs);
-	free(side2_pairs);
 	/*
 	 * We cannot deallocate combined yet; strings contained in it were
 	 * used inside opt->priv->paths, so we need to wait to deallocate it.
@@ -3051,6 +3191,7 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	}
 
 	opt->priv = xcalloc(1, sizeof(*opt->priv));
+	opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
 	/*
 	 * Although we initialize opt->priv->paths_to_free and opt->priv->paths with
 	 * strdup_strings = 0, that's just to avoid making an extra copy of an
@@ -3084,6 +3225,7 @@ static void merge_finalize(struct merge_options *opt)
 				       opt->priv->needed_rename_limit, 0);
 
 	reset_maps(opt, 0);
+	FREE_AND_NULL(opt->priv->renames);
 	FREE_AND_NULL(opt->priv);
 }
 
@@ -3116,6 +3258,9 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 	 * free_util.
 	 */
 	strmap_func(&opt->priv->unmerged, 0);
+
+	/* Zero out all files in opt->priv->renames too */
+	memset(opt->priv->renames, 0, sizeof(*opt->priv->renames));
 }
 
 int merge_ort_nonrecursive(struct merge_options *opt,
