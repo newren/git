@@ -33,6 +33,10 @@
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
 
+#if 0
+#define VERBOSE_DEBUG
+#endif
+
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
@@ -291,10 +295,12 @@ static void setup_path_info(struct string_list_item *result,
 	path_info->merged.basename_offset = info->pathlen;
 	path_info->merged.clean = !!resolved;
 	if (resolved) {
+#ifdef VERBOSE_DEBUG
 		printf("For %s, mode=%o, sha=%s, is_null=%d, clean=%d\n",
 		       fullpath, merged_version->mode,
 		       oid_to_hex(&merged_version->oid), !!is_null,
 		       path_info->merged.clean);
+#endif
 		path_info->merged.result.mode = merged_version->mode;
 		oidcpy(&path_info->merged.result.oid, &merged_version->oid);
 		path_info->merged.is_null = !!is_null;
@@ -355,8 +361,10 @@ static int collect_merge_info_callback(int n,
 	 */
 	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
+#ifdef VERBOSE_DEBUG
 	printf("Called collect_merge_info_callback on %s, %s\n",
 	       info->traverse_path, names[0].path);
+#endif
 
 	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
@@ -385,7 +393,9 @@ static int collect_merge_info_callback(int n,
 		/* mbase, side1, & side2 all match; use mbase as resolution */
 		setup_path_info(&pi, info,  opti->current_dir_name, names,
 				names+0, mbase_null, 0, filemask, dirmask, 1);
+#ifdef VERBOSE_DEBUG
 		printf("Path -1 for %s\n", pi.string);
+#endif
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -399,7 +409,9 @@ static int collect_merge_info_callback(int n,
 		/* use side1 (== side2) version as resolution */
 		setup_path_info(&pi, info, opti->current_dir_name, names,
 				names+1, 0, 0, filemask, dirmask, 1);
+#ifdef VERBOSE_DEBUG
 		printf("Path 0 for %s\n", pi.string);
+#endif
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
@@ -419,23 +431,31 @@ static int collect_merge_info_callback(int n,
 	if (!opti->inside_possibly_renamed_dir && side1_matches_mbase) {
 		if (side2_null) {
 			/* Ignore this path, nothing to do. */
+#ifdef VERBOSE_DEBUG
 			printf("Path 1.A for %s\n", names[0].path);
+#endif
 			return mask;
 		} else if (side1_is_tree || side2_is_tree) {
 			/* clear base and side1 from masks; ignore them */
+#ifdef VERBOSE_DEBUG
 			printf("Path 1.B for %s\n", names[2].path);
 			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
+#endif
 			filemask &= (1 << 2);
 			dirmask &= (1 << 2);
 			side1_matches_mbase = 0;
+#ifdef VERBOSE_DEBUG
 			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
+#endif
 		} else {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
 			setup_path_info(&pi, info, opti->current_dir_name, names,
 					names+2, side2_null, 0, filemask,
 					dirmask, 1);
+#ifdef VERBOSE_DEBUG
 			printf("Path 1.C for %s\n", pi.string);
+#endif
 			strmap_put(&opti->paths, pi.string, pi.util);
 			return mask;
 		}
@@ -449,23 +469,31 @@ static int collect_merge_info_callback(int n,
 	if (!opti->inside_possibly_renamed_dir && side2_matches_mbase) {
 		if (side1_null) {
 			/* Ignore this path, nothing to do. */
+#ifdef VERBOSE_DEBUG
 			printf("Path 2.A for %s\n", names[0].path);
+#endif
 			return mask;
 		} else if (side1_is_tree || side2_is_tree) {
 			/* clear base and side2 from masks; ignore them */
+#ifdef VERBOSE_DEBUG
 			printf("Path 2.B for %s\n", names[1].path);
 			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
+#endif
 			filemask &= (1 << 1);
 			dirmask &= (1 << 1);
 			side2_matches_mbase = 0;
+#ifdef VERBOSE_DEBUG
 			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
+#endif
 		} else {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
 			setup_path_info(&pi, info, opti->current_dir_name, names,
 					names+1, side1_null, 0, filemask,
 					dirmask, 1);
+#ifdef VERBOSE_DEBUG
 			printf("Path 2.C for %s\n", pi.string);
+#endif
 			strmap_put(&opti->paths, pi.string, pi.util);
 			return mask;
 		}
@@ -479,9 +507,11 @@ static int collect_merge_info_callback(int n,
 	 */
 	setup_path_info(&pi, info, opti->current_dir_name, names,
 			NULL, 0, df_conflict, filemask, dirmask, 0);
+#ifdef VERBOSE_DEBUG
 	printf("Path 3 for %s, iprd = %d\n", pi.string,
 	       opti->inside_possibly_renamed_dir);
 	printf("Stats:\n");
+#endif
 	if (filemask) {
 		struct conflict_info *ci = pi.util;
 		if (side1_matches_mbase)
@@ -491,8 +521,11 @@ static int collect_merge_info_callback(int n,
 		else if (sides_match)
 			ci->match_mask = 6;
 		/* else ci->match_mask is already 0; no need to set it */
+#ifdef VERBOSE_DEBUG
 		printf("  matchmask: %u\n", ci->match_mask);
+#endif
 	}
+#ifdef VERBOSE_DEBUG
 	printf("  opti->inside_possibly_renamed_dir: %d\n",
 	       opti->inside_possibly_renamed_dir);
 	printf("  side1_null: %d\n", side1_null);
@@ -503,6 +536,7 @@ static int collect_merge_info_callback(int n,
 	printf("  side2_matches_mbase: %d\n", side2_matches_mbase);
 	printf("  filemask: %u\n", filemask);
 	printf("  dirmask:  %lu\n", dirmask);
+#endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
 	/*
@@ -622,10 +656,12 @@ static int collect_merge_info(struct merge_options *opt,
 	parse_tree(merge_base);
 	parse_tree(side1);
 	parse_tree(side2);
+#ifdef VERBOSE_DEBUG
 	printf("Traversing %s, %s, and %s\n",
 	       oid_to_hex(&merge_base->object.oid),
 	       oid_to_hex(&side1->object.oid),
 	       oid_to_hex(&side2->object.oid));
+#endif
 	init_tree_desc(t+0, merge_base->buffer, merge_base->size);
 	init_tree_desc(t+1, side1->buffer, side1->size);
 	init_tree_desc(t+2, side2->buffer, side2->size);
@@ -1082,6 +1118,7 @@ static int process_renames(struct merge_options *opt,
 
 			/* This is a rename/rename(1to2) */
 			/* FIXME: handle return value of handle_content_merge */
+#ifdef VERBOSE_DEBUG
 			printf("--> Rename/rename(1to2):\n");
 			printf("      Paths: %s, %s, %s\n",
 			       pathnames[0], pathnames[1], pathnames[2]);
@@ -1100,6 +1137,7 @@ static int process_renames(struct merge_options *opt,
 			       oid_to_hex(&side2->stages[2].oid));
 			printf("    pair->score: %d\n", pair->score);
 			printf("    other->score: %d\n", renames->queue[i+1]->score);
+#endif
 			handle_content_merge(opt, pair->one->path,
 					     &base->stages[0],
 					     &side1->stages[1],
@@ -1130,8 +1168,10 @@ static int process_renames(struct merge_options *opt,
 		old_sidemask = (other_source_index << 1); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
+#ifdef VERBOSE_DEBUG
 		printf("collision: %d, source_deleted: %d\n",
 		       collision, source_deleted);
+#endif
 
 		assert(source_deleted || oldinfo->filemask & old_sidemask);
 
@@ -1161,6 +1201,7 @@ static int process_renames(struct merge_options *opt,
 					     pathnames, 1 + 2 * opt->priv->call_depth,
 					     &merged);
 
+#ifdef VERBOSE_DEBUG
 			printf("--> Rename/add:\n");
 			printf("      Paths: %s, %s, %s\n",
 			       pathnames[0], pathnames[1], pathnames[2]);
@@ -1168,6 +1209,7 @@ static int process_renames(struct merge_options *opt,
 			       other_source_index, target_index);
 			printf("      Copied merge result into %s's stage %d\n",
 			       newpath, target_index);
+#endif
 			memcpy(&newinfo->stages[target_index], &merged,
 			       sizeof(merged));
 		} else if (collision && source_deleted) {
@@ -1180,7 +1222,9 @@ static int process_renames(struct merge_options *opt,
 			 * they look like an add/add conflict.
 			 */
 
+#ifdef VERBOSE_DEBUG
 			printf("--> Rename/add/delete; not touching.\n");
+#endif
 			/* FIXME: Would be nicer to look like rename/add than
 			   add/add. */
 		} else {
@@ -1189,16 +1233,20 @@ static int process_renames(struct merge_options *opt,
 			 * stage(s) from oldinfo over the newinfo and update
 			 * the pathname(s).
 			 */
+#ifdef VERBOSE_DEBUG
 			printf("--> Normal rename (or rename/delete):\n");
 			printf("      Involving %s -> %s\n", oldpath, newpath);
 			printf("      Copied stage 0 from old to new\n");
+#endif
 			memcpy(&newinfo->stages[0], &oldinfo->stages[0],
 			       sizeof(newinfo->stages[0]));
 			newinfo->filemask |= (1 << 0);
 			newinfo->pathnames[0] = oldpath;
 			if (!source_deleted) {
+#ifdef VERBOSE_DEBUG
 				printf("      Copied stage %d from old to new\n",
 				       other_source_index);
+#endif
 				memcpy(&newinfo->stages[other_source_index],
 				       &oldinfo->stages[other_source_index],
 				       sizeof(newinfo->stages[0]));
@@ -1560,8 +1608,10 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		} else {
 			assert(info->new_dir.len == 0);
 			strbuf_addstr(&info->new_dir, best);
+#ifdef VERBOSE_DEBUG
 			fprintf(stderr, "Dir rename %s -> %s\n",
 				entry->item.string, best);
+#endif
 		}
 		/*
 		 * The relevant directory sub-portion of the original full
@@ -1886,7 +1936,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	 * ci->pathnames.  So, store it in another string-list for now.
 	 */
 	string_list_append(&opt->priv->paths_to_free, old_path);
+#ifdef VERBOSE_DEBUG
 	printf("Removing %s from opt->priv->paths!\n", old_path);
+#endif
 	assert(ci->filemask == 2 || ci->filemask == 4);
 	assert(ci->dirmask == 0);
 	strmap_remove(&opt->priv->paths, old_path, 0);
@@ -1896,7 +1948,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	len = strlen(parent_name);
 	ci->merged.basename_offset = (len > 0 ? len+1 : len);
 	new_ci = strmap_get(&opt->priv->paths, new_path);
+#ifdef VERBOSE_DEBUG
 	printf("Renaming %s to %s; new_ci = %p\n", old_path, new_path, new_ci);
+#endif
 	if (!new_ci) {
 		/* Place ci back into opt->priv->paths, but at new_path */
 		strmap_put(&opt->priv->paths, new_path, ci);
@@ -1909,9 +1963,11 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		assert(!new_ci->merged.clean);
 
 		/* Massive debuggery */
+#ifdef VERBOSE_DEBUG
 		printf("Copying stuff from ci to new_ci:\n");
 		dump_conflict_info(ci, "ci");
 		dump_conflict_info(new_ci, "new_ci");
+#endif
 
 		/* Copy stuff from ci into new_ci */
 		new_ci->filemask |= ci->filemask;
@@ -1979,7 +2035,9 @@ static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
 	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "", &opts);
+#ifdef VERBOSE_DEBUG
 	printf("opts.detect_rename: %d, opts.rename_limit: %d, opts.rename_score: %d\n", opts.detect_rename, opts.rename_limit, opts.rename_score);
+#endif
 	diffcore_std(&opts);
 	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
 		opt->priv->needed_rename_limit = opts.needed_rename_limit;
@@ -2023,12 +2081,16 @@ static int collect_renames(struct merge_options *opt,
 
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
+#ifdef VERBOSE_DEBUG
 	fprintf(stderr, "All pairs:\n");
+#endif
 	for (i = 0; i < side_pairs->nr; ++i) {
 		struct diff_filepair *p = side_pairs->queue[i];
 		char *new_path; /* non-NULL only with directory renames */
 
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "  (%c, %s -> %s)\n", p->status, p->one->path, p->two->path);
+#endif
 		if (p->status != 'A' && p->status != 'R') {
 			diff_free_filepair(p);
 			continue;
@@ -2039,7 +2101,9 @@ static int collect_renames(struct merge_options *opt,
 						      rename_exclusions,
 						      &collisions,
 						      &clean);
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "    new_path: %s\n", new_path);
+#endif
 		if (p->status != 'R' && !new_path) {
 			diff_free_filepair(p);
 			continue;
@@ -2088,13 +2152,16 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
+#ifdef VERBOSE_DEBUG
 		struct hashmap_iter iter;
 		struct str_entry *entry;
+#endif
 
 		side1_dir_renames = get_directory_renames(opt, side1_pairs,
 							  &clean);
 		side2_dir_renames = get_directory_renames(opt, side2_pairs,
 							  &clean);
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "Side1 dir renames:\n");
 		strmap_for_each_entry(side1_dir_renames, &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
@@ -2108,6 +2175,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 				entry->item.string, info->new_dir.buf);
 		}
 		fprintf(stderr, "Done.\n");
+#endif
 		handle_directory_level_conflicts(opt, side1_dir_renames,
 						 side2_dir_renames);
 
@@ -2126,7 +2194,9 @@ static int detect_and_process_renames(struct merge_options *opt,
 				 side1_dir_renames, side2_dir_renames);
 	QSORT(combined->queue, combined->nr, compare_pairs);
 
+#ifdef VERBOSE_DEBUG
 	printf("=== Processing %d renames ===\n", combined->nr);
+#endif
 	clean &= process_renames(opt, combined);
 
 	/*
@@ -2177,8 +2247,10 @@ static void write_tree(struct object_id *result_oid,
 	 * We won't use relevant_entries again and will let it just pop off the
 	 * stack, so there won't be allocation worries or anything.
 	 */
+#ifdef VERBOSE_DEBUG
 	printf("Called write_tree with offset = %d\n", offset);
 	printf("  versions->nr = %d\n", versions->nr);
+#endif
 	relevant_entries.items = versions->items + offset;
 	relevant_entries.nr = versions->nr - offset;
 	string_list_sort(&relevant_entries);
@@ -2191,12 +2263,16 @@ static void write_tree(struct object_id *result_oid,
 	strbuf_grow(&buf, maxlen);
 
 	/* Write each entry out to buf */
+#ifdef VERBOSE_DEBUG
 	printf("  Writing a tree using:\n");
+#endif
 	for (i = 0; i < nr; i++) {
 		struct merged_info *mi = versions->items[offset+i].util;
 		struct version_info *ri = &mi->result;
+#ifdef VERBOSE_DEBUG
 		printf("%06o %s %s\n", ri->mode, versions->items[offset+i].string,
 		       oid_to_hex(&ri->oid));
+#endif
 		strbuf_addf(&buf, "%o %s%c",
 			    ri->mode,
 			    versions->items[offset+i].string, '\0');
@@ -2229,8 +2305,10 @@ static void record_entry_for_tree(struct directory_versions *dir_metadata,
 	assert(strchr(basename, '/') == NULL);
 	string_list_append(&dir_metadata->versions,
 			   basename)->util = &ci->merged.result;
+#ifdef VERBOSE_DEBUG
 	printf("Added %s (%s) to dir_metadata->versions (now length %d)\n",
 	       basename, path, dir_metadata->versions.nr);
+#endif
 }
 
 static void write_completed_directories(struct merge_options *opt,
@@ -2259,8 +2337,10 @@ static void write_completed_directories(struct merge_options *opt,
 		info->last_directory_len = strlen(info->last_directory);
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
+#ifdef VERBOSE_DEBUG
 		printf("Due to new_directory_name of %s, added (%s, %lu) to offsets\n",
 		       new_directory_name, info->last_directory, offset);
+#endif
 		return;
 	}
 
@@ -2270,7 +2350,9 @@ static void write_completed_directories(struct merge_options *opt,
 	 * the entires in info->versions that are under info->last_directory.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
+#ifdef VERBOSE_DEBUG
 	fprintf(stderr, "*** Looking up '%s'\n", info->last_directory);
+#endif
 	assert(dir_info);
 	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
 	if (offset == info->versions.nr) {
@@ -2279,7 +2361,9 @@ static void write_completed_directories(struct merge_options *opt,
 		dir_info->result.mode = S_IFDIR;
 		write_tree(&dir_info->result.oid, &info->versions, offset);
 		wrote_a_new_tree = 1;
+#ifdef VERBOSE_DEBUG
 		printf("New tree:\n");
+#endif
 	}
 
 	/*
@@ -2288,8 +2372,10 @@ static void write_completed_directories(struct merge_options *opt,
 	 */
 	info->offsets.nr--;
 	info->versions.nr = offset;
+#ifdef VERBOSE_DEBUG
 	printf("  Decremented info->offsets.nr to %d\n", info->offsets.nr);
 	printf("  Decreased info->versions.nr to %d\n", info->versions.nr);
+#endif
 
 	/*
 	 * Now we've got an OID for last_directory in dir_info.  We need to
@@ -2305,8 +2391,10 @@ static void write_completed_directories(struct merge_options *opt,
 		const char *dir_name = strrchr(new_directory_name, '/');
 		dir_name = dir_name ? dir_name+1 : new_directory_name;
 		string_list_append(&info->offsets, dir_name)->util = (void*)c;
+#ifdef VERBOSE_DEBUG
 		printf("  Appended (%s, %lu) to info->offsets\n",
 		       new_directory_name, c);
+#endif
 	}
 
 	/*
@@ -2317,8 +2405,10 @@ static void write_completed_directories(struct merge_options *opt,
 		const char *dir_name = strrchr(info->last_directory, '/');
 		dir_name = dir_name ? dir_name+1 : info->last_directory;
 		string_list_append(&info->versions, dir_name)->util = dir_info;
+#ifdef VERBOSE_DEBUG
 		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
 		       info->last_directory, oid_to_hex(&dir_info->result.oid));
+#endif
 	}
 	info->last_directory = new_directory_name;
 	info->last_directory_len = strlen(info->last_directory);
@@ -2335,7 +2425,9 @@ static void process_entry(struct merge_options *opt,
 
 	/* int normalize = opt->renormalize; */
 
+#ifdef VERBOSE_DEBUG
 	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
+#endif
 	assert(!ci->merged.clean && !ci->processed);
 	ci->processed = 1;
 	assert(ci->filemask >=0 && ci->filemask < 8);
@@ -2425,14 +2517,18 @@ static void process_entry(struct merge_options *opt,
 			unsigned int othermask = 7 & ~ci->match_mask;
 			int side = (othermask == 4) ? 2 : 1;
 
+#ifdef VERBOSE_DEBUG
 			printf("filemask: %d, matchmask: %d, othermask: %d, side: %d\n",
 			       ci->filemask, ci->match_mask, othermask, side);
+#endif
 			ci->merged.is_null = (ci->filemask == ci->match_mask);
 			ci->merged.result.mode = ci->stages[side].mode;
 			oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 
+#ifdef VERBOSE_DEBUG
 			printf("ci->merged.result.mode: %d, is_null: %d\n",
 			       ci->merged.result.mode, ci->merged.is_null);
+#endif
 			assert(othermask == 2 || othermask == 4);
 			assert(ci->merged.is_null == !ci->merged.result.mode);
 		}
@@ -2450,9 +2546,11 @@ static void process_entry(struct merge_options *opt,
 		ci->merged.clean = clean_merge && !ci->df_conflict;
 		ci->merged.result.mode = merged_file.mode;
 		oidcpy(&ci->merged.result.oid, &merged_file.oid);
+#ifdef VERBOSE_DEBUG
 		printf("Content merging %s (%s); mode: %06o, hash: %s\n",
 		       path, ci->merged.clean ? "clean" : "unclean",
 		       ci->merged.result.mode, oid_to_hex(&ci->merged.result.oid));
+#endif
 		if (clean_merge && ci->df_conflict) {
 			assert(df_file_index == 1 || df_file_index == 2);
 			ci->filemask = 1 << df_file_index;
@@ -2541,7 +2639,9 @@ static void process_entries(struct merge_options *opt,
 		 */
 		struct conflict_info *ci = entry->util;
 
+#ifdef VERBOSE_DEBUG
 		printf("==>Handling %s\n", entry->string);
+#endif
 
 		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
@@ -2571,7 +2671,9 @@ static int checkout(struct merge_options *opt,
 	unpack_opts.src_index = opt->repo->index;
 	unpack_opts.dst_index = opt->repo->index;
 
+#ifdef VERBOSE_DEBUG
 	printf("Switching over to tree %s\n", oid_to_hex(&next->object.oid));
+#endif
 	setup_unpack_trees_porcelain(&unpack_opts, "merge");
 
 	/* FIXME: Do I need to refresh the index?? */
@@ -2599,9 +2701,13 @@ static int checkout(struct merge_options *opt,
 	init_tree_desc(&trees[1], next->buffer, next->size);
 
 	ret = unpack_trees(2, trees, &unpack_opts);
+#ifdef VERBOSE_DEBUG
 	printf("ret from unpack_trees: %d\n", ret);
+#endif
 	clear_unpack_trees_porcelain(&unpack_opts);
+#ifdef VERBOSE_DEBUG
 	printf("after clear_unpack_trees_porcelain()\n");
+#endif
 	return ret;
 }
 
@@ -2616,6 +2722,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	if (strmap_empty(&opt->priv->unmerged))
 		return 0;
 
+#ifdef VERBOSE_DEBUG
 	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
 		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
 		       i,
@@ -2627,6 +2734,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		       opt->repo->index->cache[i]->index);
 	}
 	fprintf(stderr, "... AFTER ...\n");
+#endif
 
 	/* If any entries have skip_worktree set, we'll have to check 'em out */
 	state.force = 1;
@@ -2660,7 +2768,9 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
 		pos = index_name_pos(opt->repo->index, path, strlen(path));
 		SWAP(opt->repo->index->cache_nr, original_cache_nr);
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "Found pos %d for %s\n", pos, path);
+#endif
 		if (pos < 0) {
 			if (ci->filemask == 1)
 				cache_tree_invalidate_path(opt->repo->index, path);
@@ -2718,6 +2828,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	remove_marked_cache_entries(opt->repo->index, 1);
 	QSORT(opt->repo->index->cache, opt->repo->index->cache_nr,
 	      cmp_cache_name_compare);
+#ifdef VERBOSE_DEBUG
 	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
 		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
 		       i,
@@ -2728,6 +2839,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		       opt->repo->index->cache[i]->ce_flags,
 		       opt->repo->index->cache[i]->index);
 	}
+#endif
 
 	return errs;
 }
