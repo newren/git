@@ -2927,7 +2927,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 			if (ce_skip_worktree(ce)) {
 				struct stat st;
 
-				if (lstat(path, &st)) {
+				if (!lstat(path, &st)) {
 					char *new_name = unique_path(opt, path, "cruft");
 
 					output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
