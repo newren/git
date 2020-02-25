@@ -664,7 +664,9 @@ test_expect_success 'directory vs modified submodule' '
 	test_must_fail git merge master &&
 	test -n "$(git ls-files -u)" &&
 	test ! -e submod.orig &&
-	yes "r" | git mergetool submod &&
+	yes "r" | git mergetool submod~master &&
+	git mv submod submod.orig &&
+	git mv submod~master submod &&
 	test -d submod.orig &&
 	echo "not a submodule" >expect &&
 	test_cmp expect submod.orig/file16 &&
