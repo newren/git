@@ -1034,12 +1034,18 @@ static int handle_content_merge(struct merge_options *opt,
 
 	if ((S_IFMT & a->mode) != (S_IFMT & b->mode)) {
 		/* Not both files, not both submodules, not both symlinks */
-		/* FIXME: this is a retarded resolution; if we can't have
-		 * both paths, submodule should take precedence, then file,
-		 * then symlink.  But it'd be better to rename paths elsewhere.
+		/*
+		 * FIXME: this is a retarded resolution; it'd be better to
+		 * rename paths elsewhere.
 		 */
 		clean = 0;
-		if (S_ISREG(a->mode)) {
+		if (S_ISGITLINK(a->mode)) {
+			result->mode = a->mode;
+			oidcpy(&result->oid, &a->oid);
+		} else if (S_ISGITLINK(b->mode)) {
+			result->mode = b->mode;
+			oidcpy(&result->oid, &b->oid);
+		} else if (S_ISREG(a->mode)) {
 			result->mode = a->mode;
 			oidcpy(&result->oid, &a->oid);
 		} else {
