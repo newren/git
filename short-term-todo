@@ -30,6 +30,7 @@ Path_conflict files:
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 * Stuff to not forget:
+  * Perf idea: exact matches in diffcore_rename() is quadratic!!  Whoops!
   * Perf idea: make sure partial capitulation (source match) does not defeat
     either exact renames or dimensionality reduction, since those two can
     reduce the number of both potenial rename sources AND destinations.
