@@ -9,6 +9,7 @@
 #include "hashmap.h"
 #include "progress.h"
 #include "promisor-remote.h"
+#include "strmap.h"
 
 /* Table of rename/copy destinations */
 
@@ -412,6 +413,104 @@ static int find_exact_renames(struct diff_options *options)
 	return renames;
 }
 
+static int find_basename_matches(struct diff_options *options, int minimum_score)
+{
+	int i, renames = 0;
+	int skip_unmodified;
+	struct strmap sources; //= STRMAP_INIT_NODUP;
+	struct strmap dests; // = STRMAP_INIT_NODUP;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
+	/*
+	 * The prefeteching stuff wants to know if it can skip prefetching blobs
+	 * that are unmodified.  unmodified blobs are only relevant when doing
+	 * copy detection.  find_basename_matches() is only used when detecting
+	 * renames, not when detecting copies, so it'll only be used when a file
+	 * only existed in the source.  Since we already know that the file
+	 * won't be unmodified, there's no point checking for it; that's just a
+	 * waste of resources.  So set skip_unmodified to 0 so that
+	 * estimate_similarity() and prefetch() won't waste resources checking
+	 * for something we already know is false.
+	 */
+	skip_unmodified = 0;
+
+	/* Create maps of basename -> fullname(s) for sources and dests */
+	strmap_init(&sources, 0);
+	strmap_init(&dests, 0);
+
+	/* Add all sources to the hash table in reverse order, because
+	 * later on they will be retrieved in LIFO order.
+	 */
+	for (i = 0; i < rename_src_nr; ++i) {
+		char *filename = rename_src[i].p->one->path;
+		char *base;
+
+		if (rename_src[i].p->one->rename_used)
+			continue; /* involved in exact match already */
+
+		base = strrchr(filename, '/');
+		base = (base ? base+1 : filename);
+
+		if (strmap_contains(&sources, base))
+			strintmap_set(&sources, base, -1);
+		else
+			strintmap_set(&sources, base, i);
+	}
+	for (i = 0; i < rename_dst_nr; ++i) {
+		char *filename = rename_dst[i].two->path;
+		char *base;
+
+		if (rename_dst[i].pair)
+			continue; /* involved in exact match already. */
+
+		base = strrchr(filename, '/');
+		base = (base ? base+1 : filename);
+
+		if (strmap_contains(&dests, base))
+			strintmap_set(&dests, base, -1);
+		else
+			strintmap_set(&dests, base, i);
+	}
+
+	strmap_for_each_entry(&sources, &iter, entry) {
+		char *base = entry->item.string;
+		intptr_t src_index = (intptr_t)entry->item.util;
+		intptr_t dst_index;
+		if (src_index == -1)
+			continue;
+
+		if (strmap_contains(&dests, base)) {
+			struct diff_filespec *one, *two;
+			int score;
+
+			dst_index = strintmap_get(&dests, base);
+			if (dst_index == -1)
+				continue;
+
+			/* Estimate the similarity */
+			one = rename_src[src_index].p->one;
+			two = rename_dst[dst_index].two;
+			score = estimate_similarity(options->repo, one, two,
+						    minimum_score, skip_unmodified);
+			/* After estimate_similarity, text is unnecessary. */
+			diff_free_filespec_blob(one);
+			diff_free_filespec_blob(two);
+
+			/* If sufficiently similar, record as rename pair */
+			if (score < minimum_score)
+				continue;
+			record_rename_pair(dst_index, src_index, score);
+			renames++;
+		}
+	}
+
+	strintmap_clear(&sources);
+	strintmap_clear(&dests);
+
+	return renames;
+}
+
 #define NUM_CANDIDATE_PER_DST 4
 static void record_if_better(struct diff_score m[], struct diff_score *o)
 {
@@ -564,6 +663,11 @@ void diffcore_rename(struct diff_options *options)
 	/* Did we only want exact renames? */
 	if (minimum_score == MAX_SCORE)
 		goto cleanup;
+
+	/*
+	 * Also cull the candidates list based on basename match.
+	 */
+	rename_count += find_basename_matches(options, minimum_score);
 
 	/*
 	 * Calculate how many renames are left (but all the source
