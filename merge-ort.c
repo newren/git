@@ -2304,7 +2304,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	int need_dir_renames, clean = 1;
 
 	memset(combined, 0, sizeof(*combined));
-	if (!merge_detect_rename(opt))
+	if (!merge_detect_rename(opt) || 1)
 		return 1;
 
 	/*
@@ -2492,6 +2492,7 @@ static void write_completed_directories(struct merge_options *opt,
 	struct merged_info *dir_info = NULL;
 	unsigned int offset;
 	int wrote_a_new_tree = 0;
+	int i;
 
 	if (new_directory_name == info->last_directory)
 		return;
@@ -2511,8 +2512,13 @@ static void write_completed_directories(struct merge_options *opt,
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
 #ifndef VERBOSE_DEBUG
-		printf("Due to new_directory_name of %s, added (%s, %lu) to offsets\n",
-		       new_directory_name, info->last_directory, offset);
+		for (i = 0; i<info->offsets.nr; i++)
+			printf("    %d: %s (%p)\n", i,
+			       info->offsets.items[i].string,
+			       info->offsets.items[i].string);
+		printf("Incremented offsets to %d; new_directory_name=%s; appended (%s, %p, %lu) to offsets)\n",
+		       info->offsets.nr, new_directory_name,
+		       info->last_directory, info->last_directory, offset);
 #endif
 		return;
 	}
@@ -2557,17 +2563,28 @@ static void write_completed_directories(struct merge_options *opt,
 	 * its' parent name was and whether that matches the previous
 	 * info->offsets or we need to set up a new one.
 	 */
-	prev_dir = info->offsets.nr == 0 ? NULL :
+	prev_dir = info->offsets.nr == 0 ? NULL /* opt->priv->toplevel_dir */ :
 		   info->offsets.items[info->offsets.nr-1].string;
+	printf("Ptr comping %p (%s) to %p (%s)\n",
+	       new_directory_name, new_directory_name, prev_dir, prev_dir);
 	if (new_directory_name != prev_dir) {
 		uintptr_t c = info->versions.nr;
-		const char *dir_name = strrchr(new_directory_name, '/');
-		dir_name = dir_name ? dir_name+1 : new_directory_name;
-		string_list_append(&info->offsets, dir_name)->util = (void*)c;
+		string_list_append(&info->offsets,
+				   new_directory_name)->util = (void*)c;
 #ifndef VERBOSE_DEBUG
-		printf("  Appended (%s, %lu) to info->offsets\n",
-		       new_directory_name, c);
+		for (i = 0; i<info->offsets.nr; i++)
+			printf("    %d: %s (%p)\n", i,
+			       info->offsets.items[i].string,
+			       info->offsets.items[i].string);
+		printf("  Incremented offsets to %d; appended (%s, %p, %lu) to info->offsets\n",
+		       info->offsets.nr,
+		       new_directory_name, new_directory_name, c);
 #endif
+	} else {
+		printf("Comparing '%s' (%p) to '%s' (%p)\n",
+		       new_directory_name, new_directory_name,
+		       prev_dir, prev_dir);
+		assert(!strcmp(new_directory_name, prev_dir));
 	}
 
 	/*
