@@ -1923,6 +1923,7 @@ static char *check_for_directory_rename(struct merge_options *opt,
 
 static void dump_conflict_info(struct conflict_info *ci, char *name)
 {
+#ifdef VERBOSE_DEBUG
 	printf("conflict_info for %s (at %p):\n", name, ci);
 	printf("  ci->merged.directory_name: %s\n",
 	       ci->merged.directory_name);
@@ -1945,6 +1946,7 @@ static void dump_conflict_info(struct conflict_info *ci, char *name)
 	printf("  ci->dirmask:       %d\n", ci->dirmask);
 	printf("  ci->match_mask:    %d\n", ci->match_mask);
 	printf("  ci->processed:     %d\n", ci->processed);
+#endif
 }
 
 static void dump_pairs(struct diff_queue_struct *pairs, char *label)
@@ -2304,7 +2306,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	int need_dir_renames, clean = 1;
 
 	memset(combined, 0, sizeof(*combined));
-	if (!merge_detect_rename(opt) || 1)
+	if (!merge_detect_rename(opt))
 		return 1;
 
 	/*
@@ -2478,7 +2480,7 @@ static void record_entry_for_tree(struct directory_versions *dir_metadata,
 	assert(strchr(basename, '/') == NULL);
 	string_list_append(&dir_metadata->versions,
 			   basename)->util = &ci->merged.result;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 	printf("Added %s (%s) to dir_metadata->versions (now length %d)\n",
 	       basename, path, dir_metadata->versions.nr);
 #endif
@@ -2492,7 +2494,9 @@ static void write_completed_directories(struct merge_options *opt,
 	struct merged_info *dir_info = NULL;
 	unsigned int offset;
 	int wrote_a_new_tree = 0;
+#ifdef VERBOSE_DEBUG
 	int i;
+#endif
 
 	if (new_directory_name == info->last_directory)
 		return;
@@ -2511,7 +2515,7 @@ static void write_completed_directories(struct merge_options *opt,
 		info->last_directory_len = strlen(info->last_directory);
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		for (i = 0; i<info->offsets.nr; i++)
 			printf("    %d: %s (%p)\n", i,
 			       info->offsets.items[i].string,
@@ -2529,7 +2533,7 @@ static void write_completed_directories(struct merge_options *opt,
 	 * the entires in info->versions that are under info->last_directory.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 	fprintf(stderr, "*** Looking up '%s'\n", info->last_directory);
 #endif
 	assert(dir_info);
@@ -2540,7 +2544,7 @@ static void write_completed_directories(struct merge_options *opt,
 		dir_info->result.mode = S_IFDIR;
 		write_tree(&dir_info->result.oid, &info->versions, offset);
 		wrote_a_new_tree = 1;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		printf("New tree:\n");
 #endif
 	}
@@ -2551,7 +2555,7 @@ static void write_completed_directories(struct merge_options *opt,
 	 */
 	info->offsets.nr--;
 	info->versions.nr = offset;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 	printf("  Decremented info->offsets.nr to %d\n", info->offsets.nr);
 	printf("  Decreased info->versions.nr to %d\n", info->versions.nr);
 #endif
@@ -2563,15 +2567,17 @@ static void write_completed_directories(struct merge_options *opt,
 	 * its' parent name was and whether that matches the previous
 	 * info->offsets or we need to set up a new one.
 	 */
-	prev_dir = info->offsets.nr == 0 ? NULL /* opt->priv->toplevel_dir */ :
+	prev_dir = info->offsets.nr == 0 ? NULL :
 		   info->offsets.items[info->offsets.nr-1].string;
+#ifdef VERBOSE_DEBUG
 	printf("Ptr comping %p (%s) to %p (%s)\n",
 	       new_directory_name, new_directory_name, prev_dir, prev_dir);
+#endif
 	if (new_directory_name != prev_dir) {
 		uintptr_t c = info->versions.nr;
 		string_list_append(&info->offsets,
 				   new_directory_name)->util = (void*)c;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		for (i = 0; i<info->offsets.nr; i++)
 			printf("    %d: %s (%p)\n", i,
 			       info->offsets.items[i].string,
@@ -2579,12 +2585,12 @@ static void write_completed_directories(struct merge_options *opt,
 		printf("  Incremented offsets to %d; appended (%s, %p, %lu) to info->offsets\n",
 		       info->offsets.nr,
 		       new_directory_name, new_directory_name, c);
-#endif
 	} else {
 		printf("Comparing '%s' (%p) to '%s' (%p)\n",
 		       new_directory_name, new_directory_name,
 		       prev_dir, prev_dir);
 		assert(!strcmp(new_directory_name, prev_dir));
+#endif
 	}
 
 	/*
@@ -2595,7 +2601,7 @@ static void write_completed_directories(struct merge_options *opt,
 		const char *dir_name = strrchr(info->last_directory, '/');
 		dir_name = dir_name ? dir_name+1 : info->last_directory;
 		string_list_append(&info->versions, dir_name)->util = dir_info;
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
 		       info->last_directory, oid_to_hex(&dir_info->result.oid));
 #endif
@@ -2615,7 +2621,7 @@ static void process_entry(struct merge_options *opt,
 
 	/* int normalize = opt->renormalize; */
 
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
 #endif
 	assert(!ci->merged.clean && !ci->processed);
@@ -2825,7 +2831,7 @@ static void process_entries(struct merge_options *opt,
 		 */
 		struct conflict_info *ci = entry->util;
 
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		printf("==>Handling %s\n", entry->string);
 #endif
 
