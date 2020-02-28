@@ -1,0 +1,177 @@
+**********************************************************************
+                  linux single cherry-pick testcase
+git checkout -b v5.4-renames v5.4.0
+git mv drivers pilots
+git commit -m "Rename drivers -> pilots"
+git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e
+**********************************************************************
+
+$ git log --oneline --name-status fd8bdb23b918 ^4703d9119972
+$ ../other-git/bin-wrappers/git --version
+git version 2.25.0
+
+########## With git-v2.25.0 ##########
+$ time ../other-git/bin-wrappers/git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e
+Performing inexact rename detection: 100% (725175808/725175808), done.
+Auto-merging pilots/hwmon/hwmon.c
+
+real	2m15.430s
+user	2m14.632s
+sys	0m0.920s
+$ git write-tree
+3423437991d335dd378ac288d93e3f2979086207
+
+
+########## With git-new, no optimizations but corrected rename count ##########
+
+$ time git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e
+Performing inexact rename detection: 100% (144428480/144428480), done.
+
+real	2m10.524s
+user	2m10.008s
+sys	0m0.672s
+$ git write-tree
+3423437991d335dd378ac288d93e3f2979086207
+
+########## With git-new, exact rename optimization ##########
+
+$ time git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e
+Performing inexact rename detection: 100% (32116945/32116945), done.
+
+real	0m42.959s
+user	0m42.628s
+sys	0m0.508s
+$ git write-tree
+3423437991d335dd378ac288d93e3f2979086207
+
+########## With git-new, exact & basename optimizations ##########
+
+$ time git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e
+Performing inexact rename detection: 100% (2264320/2264320), done.
+
+real	0m4.819s
+user	0m4.504s
+sys	0m0.488s
+$ git write-tree
+3423437991d335dd378ac288d93e3f2979086207
+
+
+OR WITH MODIFIED OUTPUT:
+
+$ time stdbuf -oL -eL git -c merge.renameLimit=30000 cherry-pick --no-commit 4413405f931e |& ts -s "%.s"
+0.211643 Looking for exact renames...
+0.218928 Done.
+0.218998 Looking for basename-based renames...
+2.509216 Done.
+2.509292 Looking for inexact renames...
+4.386828 Done.
+
+real	0m4.765s
+
+Other interesting stats:
+Total: 1160
+  unpaired:    300
+  renames:     860
+    basenames match:  821
+    basenames differ: 39
+Top matchers:
+  197 Kconfig
+  137 Makefile
+  32 core.c
+  23 main.c
+  12 pci.c
+  12 debugfs.c
+  10 phy.c
+
+
+**********************************************************************
+             PGDEV single cherry-pick testcase
+git checkout 3.13.4.3-enterprise_patching
+git fetch origin refs/changes/30/289530/3
+**********************************************************************
+
+########## With ancient git ##########
+$ time git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD
+Performing inexact rename detection: 100% (2836767183/2836767183), done.
+...
+real    9m14.820s
+
+########## With git-v2.25.0 ##########
+
+$ time ~/floss/other-git/bin-wrappers/git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD
+Performing inexact rename detection: 100% (2837990708/2837990708), done.
+...
+real	6m11.921s
+
+re-run with warm cache:
+real	5m42.691s
+
+########## With git-new, exact & basename optimizations ##########
+
+$ time git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD
+Performing inexact rename detection: 100% (127294128/127294128), done.
+real	0m52.365s
+
+re-run with warm cache and more detailed output:
+$ time stdbuf -oL -eL git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD |& ts -s "%.s"
+0.387285 Looking for exact renames...
+0.406061 Done.
+0.406142 Looking for basename-based renames...
+4.311635 Done.
+4.311709 Looking for inexact renames...
+42.938302 Done.
+
+real	0m43.589s
+
+Other interesting stats:
+Total: 16679
+  unpaired:    15512
+  renames:     1167
+    basenames match:  1003
+    basenames differ: 164
+Top matchers:
+  23 monitoring_client.prefs
+  14 ObjectFactory.java
+  12 search.prefs
+  10 dispatch.prefs
+   9 lock.prefs
+   8 upgrade.log.properties
+
+
+**********************************************************************
+                   linux multi cherry-pick testcase
+git checkout -b v5.4-renames v5.4.0
+git mv drivers pilots
+git commit -m "Rename drivers -> pilots"
+git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e
+git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates
+git -c merge.renameLimit=30000 rebase -m --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+**********************************************************************
+
+$ git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates
+35
+
+########## With git-v2.25.0 ##########
+$ time ~/floss/other-git/bin-wrappers/git -c merge.renameLimit=30000 rebase -m --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+...
+Successfully rebased and updated refs/heads/hwmon-updates.
+
+real	90m39.302s
+user	90m9.812s
+sys	0m28.000s
+
+$ git log -35 --format=%T | sha1sum
+3310088081975b72e20f9157b13f2749474baeef  -
+
+########## With git-new, exact & basename optimizations ##########
+
+$ time git -c merge.renameLimit=30000 rebase -m --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+...
+Successfully rebased and updated refs/heads/hwmon-updates.
+
+real	3m18.255s
+user	3m5.008s
+sys	0m13.500s
+
+$ git log -35 --format=%T | sha1sum
+3310088081975b72e20f9157b13f2749474baeef  -
