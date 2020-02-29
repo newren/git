@@ -618,7 +618,7 @@ static int find_renames(struct diff_score *mx, int dst_cnt, int minimum_score, i
 	return count;
 }
 
-void dump_unmatched(void)
+static void dump_unmatched(void)
 {
 #ifdef VERBOSE_DEBUG
 	int i;
