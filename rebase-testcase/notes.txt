@@ -110,6 +110,7 @@ real	5m42.691s
 
 $ time git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD
 Performing inexact rename detection: 100% (127294128/127294128), done.
+...
 real	0m52.365s
 
 re-run with warm cache and more detailed output:
@@ -136,6 +137,24 @@ Top matchers:
   10 dispatch.prefs
    9 lock.prefs
    8 upgrade.log.properties
+
+$ git status
+HEAD detached at origin/3.13.4.3-enterprise_patching
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.gitattributes
+	misc/
+	run-output
+	statme.py
+	statme.py~
+
+########## With git-new, exact & basename & filter rename_src optimizations ##########
+
+$ time git -c merge.renameLimit=48941 cherry-pick FETCH_HEAD
+Performing inexact rename detection: 100% (127294128/127294128), done.
+...
+real	0m32.461s
+
 
 
 **********************************************************************
@@ -172,6 +191,20 @@ Successfully rebased and updated refs/heads/hwmon-updates.
 real	3m18.255s
 user	3m5.008s
 sys	0m13.500s
+
+$ git log -35 --format=%T | sha1sum
+3310088081975b72e20f9157b13f2749474baeef  -
+
+
+########## With git-new, exact & basename & filter rename_src optimizations ##########
+
+$ time git -c merge.renameLimit=30000 rebase -m --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+...
+Successfully rebased and updated refs/heads/hwmon-updates.
+
+real	2m45.413s
+user	2m35.116s
+sys	0m12.660s
 
 $ git log -35 --format=%T | sha1sum
 3310088081975b72e20f9157b13f2749474baeef  -
