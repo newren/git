@@ -1,3 +1,32 @@
+Check whether the list of unmodifieds coming out of current
+implementation sane; I suspect it's picking a lot more than it should.
+
+Perf stuff:
+  * partial capitulation
+    * new functions
+      * tree traversal not fully depth first
+        - iprd setting of 1, 2, or 3
+          - 1 or 2: inside possible dir rename.  Must check all files in current
+                    directory before recursing.  If any files added on side <X>,
+                    set iprd to 3 and turn off partial capitulation on side <X>^1.
+          - 3: partial capitulation entirely off for current directory or below
+      * get_diffpairs(); like current, but can work on a smaller set of paths.
+        In particular, turn off verbose feedback when called on set of 14
+	basenames.
+    * Extra data to gather
+      * - 3 sets of hash -> string mappings (for exact renames)
+      * - 4? sets of strmap -> string_list mappings (for basenames->list of names)
+    * Post traverse_trees steps
+      * if partial capitulation suggests no rename sources (or dests), exit early
+      * otherwise, look in rename sources/dests for exact renames
+      * look in rename sources/dests for basename sets; use new get_diffpairs()
+      * if remaining rename sources and dests, call get_diffpairs()
+  * fast-rebase (demo rebase, fast = forking any subprocesses taboo)
+      * die() if there are any conflicts
+      * die() if there are any arguments to parse
+      * avoid worktree checkout() or index update(), prior to final commit
+      * reuse rename detection from earlier patches on later ones
+
 * Overall plan
   X Renames
   X Write the talk
