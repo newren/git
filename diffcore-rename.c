@@ -666,7 +666,7 @@ void diffcore_rename(struct diff_options *options)
 	struct diff_queue_struct *q = &diff_queued_diff;
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
-	int i, j, rename_count, skip_unmodified = 0;
+	int i, j, exact_count, rename_count, skip_unmodified = 0;
 	int num_create, dst_cnt, num_src;
 	struct progress *progress = NULL;
 
@@ -725,7 +725,7 @@ void diffcore_rename(struct diff_options *options)
 #ifdef SECTION_LABEL
 	printf("Looking for exact renames...\n");
 #endif
-	rename_count = find_exact_renames(options);
+	exact_count = rename_count = find_exact_renames(options);
 #ifdef SECTION_LABEL
 	printf("Done.\n");
 #endif
@@ -754,6 +754,12 @@ void diffcore_rename(struct diff_options *options)
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
+	/* Debug spew */
+	printf("Rename stats:\n");
+	printf("  Started with (%d x %d)\n", rename_src_nr, rename_dst_nr);
+	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
+	printf("  Now have (%d x %d)\n", num_src, num_create);
+	
 	/* All done? */
 	if (!num_create || !num_src)
 		goto cleanup;
