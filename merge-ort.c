@@ -559,19 +559,7 @@ static int collect_merge_info_callback(int n,
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
 			return mask;
-		} else if (side1_is_tree || side2_is_tree) {
-			/* clear base and side1 from masks; ignore them */
-#ifdef VERBOSE_DEBUG
-			printf("Path 1.B for %s\n", names[2].path);
-			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
-#endif
-			filemask &= (1 << 2);
-			dirmask &= (1 << 2);
-			side1_matches_mbase = 0;
-#ifdef VERBOSE_DEBUG
-			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
-#endif
-		} else {
+		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
 			setup_path_info(&pi, info, opti->current_dir_name, names,
@@ -598,19 +586,7 @@ static int collect_merge_info_callback(int n,
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
 			return mask;
-		} else if (side1_is_tree || side2_is_tree) {
-			/* clear base and side2 from masks; ignore them */
-#ifdef VERBOSE_DEBUG
-			printf("Path 2.B for %s\n", names[1].path);
-			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
-#endif
-			filemask &= (1 << 1);
-			dirmask &= (1 << 1);
-			side2_matches_mbase = 0;
-#ifdef VERBOSE_DEBUG
-			printf("dirmask: %lu, filemask: %d\n", dirmask, filemask);
-#endif
-		} else {
+		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
 			setup_path_info(&pi, info, opti->current_dir_name, names,
@@ -639,11 +615,11 @@ static int collect_merge_info_callback(int n,
 #endif
 	if (filemask) {
 		struct conflict_info *ci = pi.util;
-		if (side1_matches_mbase)
+		if (side1_matches_mbase && !side1_is_tree)
 			ci->match_mask = 3;
-		else if (side2_matches_mbase)
+		else if (side2_matches_mbase && !side2_is_tree)
 			ci->match_mask = 5;
-		else if (sides_match)
+		else if (sides_match && !side1_is_tree)
 			ci->match_mask = 6;
 		/* else ci->match_mask is already 0; no need to set it */
 #ifdef VERBOSE_DEBUG
