@@ -36,7 +36,7 @@
 #if 0
 #define VERBOSE_DEBUG
 #endif
-#if 0
+#if 1
 //#error FIXME: You need to have different diff_filepairs for each side!!
 #define NEW_DIFFPAIRS
 #endif
