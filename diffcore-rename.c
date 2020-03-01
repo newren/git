@@ -755,7 +755,7 @@ void diffcore_rename(struct diff_options *options)
 	num_create = (rename_dst_nr - rename_count);
 
 	/* All done? */
-	if (!num_create)
+	if (!num_create || !num_src)
 		goto cleanup;
 
 	switch (too_many_rename_candidates(num_create, num_src, options)) {
