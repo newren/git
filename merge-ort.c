@@ -45,7 +45,13 @@ struct rename_info {
 	struct diff_queue_struct side1_pairs;
 	struct diff_queue_struct side2_pairs;
 	unsigned possible_dir_renames:1;
-	unsigned inside_possibly_renamed_dir:1;
+	/*
+	 * dir_rename_mask:
+	 *   0: optimization removing unmodified potential rename source okay
+	 *   2 or 4: optimization okay, but must check for files added to dir
+	 *   7: optimization forbidden; need rename source in case of dir rename
+	 */
+	unsigned dir_rename_mask:3;
 };
 
 struct merge_options_internal {
@@ -297,6 +303,88 @@ static int string_list_df_name_compare(const char *one, const char *two)
 
 /***** End copy-paste static functions from merge-recursive.c *****/
 
+static struct traverse_trees_callback_data {
+	unsigned long mask;
+	unsigned long dirmask;
+	struct name_entry names[3];
+} *callback_data;
+static int callback_data_nr, callback_data_alloc;
+static char *callback_data_traverse_path;
+
+static int traverse_trees_wrapper_callback(int n,
+					   unsigned long mask,
+					   unsigned long dirmask,
+					   struct name_entry *names,
+					   struct traverse_info *info)
+{
+	struct merge_options *opt = info->data;
+	unsigned filemask = mask & ~dirmask;
+
+	assert(n==3);
+
+	if (!callback_data_traverse_path)
+		callback_data_traverse_path = xstrdup(info->traverse_path);
+
+	if (filemask == opt->priv->renames->dir_rename_mask)
+		opt->priv->renames->dir_rename_mask = 0x07;
+
+	ALLOC_GROW(callback_data, callback_data_nr + 1, callback_data_alloc);
+	callback_data[callback_data_nr].mask = mask;
+	callback_data[callback_data_nr].dirmask = dirmask;
+	memcpy(callback_data[callback_data_nr].names, names, 3*sizeof(*names));
+	callback_data_nr++;
+
+	return mask;
+}
+
+/*
+ * Much like traverse_trees(), BUT:
+ *   - read all the tree entries FIRST
+ *   - determine if any correspond to new entries in index 1 or 2
+ *   - call my callback the way traverse_trees() would, but maks sure that
+ *     opt->priv->renames->dir_rename_mask is set based on new entries
+ */
+static int traverse_trees_wrapper(struct index_state *istate,
+				  int n,
+				  struct tree_desc *t,
+				  struct traverse_info *info)
+{
+	int ret, i, old_offset;
+	traverse_callback_t old_fn;
+	char *old_callback_data_traverse_path;
+	struct merge_options *opt = info->data;
+
+	assert(opt->priv->renames->dir_rename_mask == 2 ||
+	       opt->priv->renames->dir_rename_mask == 4);
+
+	old_callback_data_traverse_path = callback_data_traverse_path;
+	old_fn = info->fn;
+	old_offset = callback_data_nr;
+
+	callback_data_traverse_path = NULL;
+	info->fn = traverse_trees_wrapper_callback;
+	ret = traverse_trees(istate, n, t, info);
+	if (ret < 0)
+		return ret;
+
+	info->traverse_path = callback_data_traverse_path;
+	info->fn = old_fn;
+	for (i = old_offset; i < callback_data_nr; ++i) {
+		info->fn(n,
+			 callback_data[i].mask,
+			 callback_data[i].dirmask,
+			 callback_data[i].names,
+			 info);
+
+	}
+
+	callback_data_nr = old_offset;
+	free(callback_data_traverse_path);
+	callback_data_traverse_path = old_callback_data_traverse_path;
+	info->traverse_path = NULL;
+	return 0;
+}
+
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    const char *current_dir_name,
@@ -393,7 +481,7 @@ static void collect_rename_information(struct rename_info *renames,
 	 *     are renamed to different places which will flag errors so
 	 *     again no dir rename detection is needed.)
 	 */
-	if (dirmask == 3 || dirmask == 5) {
+	if ((dirmask == 3 || dirmask == 5) && renames->dir_rename_mask != 0x07) {
 #if 0
 		/*
 		 * For directory rename detection, we can ignore any rename
@@ -403,7 +491,9 @@ static void collect_rename_information(struct rename_info *renames,
 		strmap_put(&renames->possible_dir_rename_bases, pi->string,
 			   NULL);
 #endif
-		renames->inside_possibly_renamed_dir = 1;
+		assert(renames->dir_rename_mask == 0 ||
+		       renames->dir_rename_mask == (dirmask & ~1));
+		renames->dir_rename_mask = (dirmask & ~1);
 		renames->possible_dir_renames = 1;
 	}
 
@@ -460,7 +550,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options *opt = info->data;
 	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
-	unsigned prev_iprd = opti->renames->inside_possibly_renamed_dir; /* prev value */
+	unsigned prev_dir_rename_mask = opti->renames->dir_rename_mask;
 	unsigned filemask = mask & ~dirmask;
 	unsigned mbase_null = !(mask & 1);
 	unsigned side1_null = !(mask & 2);
@@ -547,12 +637,11 @@ static int collect_merge_info_callback(int n,
 	 *   - side1 contains no new files to move with side2's directory renames
 	 * Note that if side2 is a tree, there may be new files on side2's side
 	 * that are rename targets that need to be merged with changes from
-	 * elsewhere on side1's side of history.  Also, if side2 is a file (
-	 * and side1 is a tree), the path on side2 is an add that may
+	 * elsewhere on side1's side of history.  Also, if side2 is a file
+	 * (and side1 is a tree), the path on side2 is an add that may
 	 * correspond to a rename target so we have to mark that as conflicted.
 	 */
-	if (!opti->renames->inside_possibly_renamed_dir &&
-	    side1_matches_mbase) {
+	if (side1_matches_mbase && opti->renames->dir_rename_mask != 0x07) {
 		if (side2_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
@@ -578,8 +667,7 @@ static int collect_merge_info_callback(int n,
 	 * particular, we can ignore mbase as a rename source.  Same
 	 * reasoning as for above but with side1 and side2 swapped.
 	 */
-	if (!opti->renames->inside_possibly_renamed_dir &&
-	    side2_matches_mbase) {
+	if (side2_matches_mbase && opti->renames->dir_rename_mask != 0x07) {
 		if (side1_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
@@ -609,8 +697,8 @@ static int collect_merge_info_callback(int n,
 	setup_path_info(&pi, info, opti->current_dir_name, names,
 			NULL, 0, df_conflict, filemask, dirmask, 0);
 #ifdef VERBOSE_DEBUG
-	printf("Path 3 for %s, iprd = %d\n", pi.string,
-	       opti->renames->inside_possibly_renamed_dir);
+	printf("Path 3 for %s, iprd = %u\n", pi.string,
+	       opti->renames->dir_rename_mask);
 	printf("Stats:\n");
 #endif
 	if (filemask) {
@@ -627,8 +715,8 @@ static int collect_merge_info_callback(int n,
 #endif
 	}
 #ifdef VERBOSE_DEBUG
-	printf("  opti->renames->inside_possibly_renamed_dir: %d\n",
-	       opti->renames->inside_possibly_renamed_dir);
+	printf("  opti->renames->dir_rename_mask: %u\n",
+	       opti->renames->dir_rename_mask);
 	printf("  side1_null: %d\n", side1_null);
 	printf("  side2_null: %d\n", side2_null);
 	printf("  side1_is_tree: %d\n", side1_is_tree);
@@ -688,9 +776,13 @@ static int collect_merge_info_callback(int n,
 
 		original_dir_name = opti->current_dir_name;
 		opti->current_dir_name = pi.string;
-		ret = traverse_trees(NULL, 3, t, &newinfo);
+		if (opti->renames->dir_rename_mask == 0 ||
+		    opti->renames->dir_rename_mask == 0x07)
+			ret = traverse_trees(NULL, 3, t, &newinfo);
+		else
+			ret = traverse_trees_wrapper(NULL, 3, t, &newinfo);
 		opti->current_dir_name = original_dir_name;
-		opti->renames->inside_possibly_renamed_dir = prev_iprd;
+		opti->renames->dir_rename_mask = prev_dir_rename_mask;
 
 		for (i = 0; i < 3; i++)
 			free(buf[i]);
@@ -3293,6 +3385,10 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 
 	/* Zero out all files in opt->priv->renames too */
 	memset(opt->priv->renames, 0, sizeof(*opt->priv->renames));
+
+	/* Clean out callback_data as well. */
+	FREE_AND_NULL(callback_data);
+	callback_data_nr = callback_data_alloc = 0;
 }
 
 int merge_ort_nonrecursive(struct merge_options *opt,
