@@ -3304,7 +3304,8 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	assert(opt->buffer_output <= 2);
 	assert(opt->obuf.len == 0);
 
-	assert(opt->priv == NULL);
+	if (head)
+		assert(opt->priv == NULL);
 
 	/* Sanity check on repo state; index must match head */
 	if (head && repo_index_has_changes(opt->repo, head, &sb)) {
@@ -3314,17 +3315,23 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		return -1;
 	}
 
-	opt->priv = xcalloc(1, sizeof(*opt->priv));
-	opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
-	/*
-	 * Although we initialize opt->priv->paths_to_free and opt->priv->paths with
-	 * strdup_strings = 0, that's just to avoid making an extra copy of an
-	 * allocated string.  Both of these store strings that we will later need to
-	 * free.
-	 */
-	string_list_init(&opt->priv->paths_to_free, 0);
-	strmap_init(&opt->priv->paths, 0);
-	strmap_init(&opt->priv->unmerged, 0);
+	if (opt->priv) {
+		reset_maps(opt, 1);
+	} else {
+		opt->priv = xcalloc(1, sizeof(*opt->priv));
+		opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
+
+		/*
+		 * Although we initialize opt->priv->paths_to_free and
+		 * opt->priv->paths with strdup_strings = 0, that's just to
+		 * avoid making an extra copy of an allocated string.  Both
+		 * of these store strings that we will later need to free.
+		 */
+		string_list_init(&opt->priv->paths_to_free, 0);
+		strmap_init(&opt->priv->paths, 0);
+		strmap_init(&opt->priv->unmerged, 0);
+	}
+
 	return 0;
 }
 
@@ -3408,9 +3415,6 @@ void merge_ort_inmemory_nonrecursive(struct merge_options *opt,
 	}
 	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
 						&result->automerge_tree);
-	if (switch_to_merge_result(opt, head, result))
-		clean = -1;
-	merge_finalize(opt, result);
 
 	result->clean = clean;
 }
