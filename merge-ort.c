@@ -3307,7 +3307,7 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	assert(opt->priv == NULL);
 
 	/* Sanity check on repo state; index must match head */
-	if (repo_index_has_changes(opt->repo, head, &sb)) {
+	if (head && repo_index_has_changes(opt->repo, head, &sb)) {
 		err(opt, _("Your local changes to the following files would be overwritten by merge:\n  %s"),
 		    sb.buf);
 		strbuf_release(&sb);
@@ -3328,18 +3328,19 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	return 0;
 }
 
-static int switch_to_merge_result(struct merge_options *opt,
-				  struct tree *head,
-				  struct tree *merge_result)
+int switch_to_merge_result(struct merge_options *opt,
+			   struct tree *head,
+			   struct merge_result *result)
 {
-	if (checkout(opt, head, merge_result))
+	if (checkout(opt, head, result->automerge_tree))
 		return -1; /* failure to function */
 	if (record_unmerged_index_entries(opt))
 		return -1; /* failure to function */
 	return 0;
 }
 
-static void merge_finalize(struct merge_options *opt)
+void merge_finalize(struct merge_options *opt,
+		    struct merge_result *result)
 {
 	flush_output(opt);
 	if (!opt->priv->call_depth && opt->buffer_output < 2)
@@ -3391,45 +3392,70 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 	callback_data_nr = callback_data_alloc = 0;
 }
 
+void merge_ort_inmemory_nonrecursive(struct merge_options *opt,
+				     struct tree *head,
+				     struct tree *merge,
+				     struct tree *merge_base,
+				     struct merge_result *result)
+{
+	int clean;
+
+	assert(opt->ancestor != NULL);
+
+	if (merge_start(opt, NULL)) {
+		result->clean = -1;
+		return;
+	}
+	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
+						&result->automerge_tree);
+	if (switch_to_merge_result(opt, head, result))
+		clean = -1;
+	merge_finalize(opt, result);
+
+	result->clean = clean;
+}
+
 int merge_ort_nonrecursive(struct merge_options *opt,
 			   struct tree *head,
 			   struct tree *merge,
 			   struct tree *merge_base)
 {
 	int clean;
-	struct tree *result;
+	struct merge_result result;
 
 	assert(opt->ancestor != NULL);
 
 	if (merge_start(opt, head))
 		return -1;
 	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
-						&result);
-	if (switch_to_merge_result(opt, head, result))
+						&result.automerge_tree);
+	if (switch_to_merge_result(opt, head, &result))
 		clean = -1;
-	merge_finalize(opt);
+	merge_finalize(opt, &result);
 
 	return clean;
 }
 
-int merge_ort(struct merge_options *opt,
-	      struct commit *h1,
-	      struct commit *h2,
-	      struct commit_list *merge_bases,
-	      struct tree **result)
+int merge_ort_recursive(struct merge_options *opt,
+			struct commit *side1,
+			struct commit *side2,
+			struct commit_list *merge_bases,
+			struct tree **result)
 {
 	int clean;
-	struct tree *head = repo_get_commit_tree(opt->repo, h1);
+	struct tree *head = repo_get_commit_tree(opt->repo, side1);
+	struct merge_result tmp;
 
 	assert(opt->ancestor == NULL ||
 	       !strcmp(opt->ancestor, "constructed merge base"));
 
-	if (merge_start(opt, repo_get_commit_tree(opt->repo, h1)))
+	if (merge_start(opt, head))
 		return -1;
-	clean = merge_ort_internal(opt, h1, h2, merge_bases, result);
-	if (switch_to_merge_result(opt, head, *result))
+	clean = merge_ort_internal(opt, side1, side2, merge_bases, result);
+	tmp.automerge_tree = *result;
+	if (switch_to_merge_result(opt, head, &tmp))
 		clean = -1;
-	merge_finalize(opt);
+	merge_finalize(opt, &tmp);
 
 	return clean;
 }

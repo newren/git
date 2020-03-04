@@ -1087,6 +1087,7 @@ BUILTIN_OBJS += builtin/difftool.o
 BUILTIN_OBJS += builtin/env--helper.o
 BUILTIN_OBJS += builtin/fast-export.o
 BUILTIN_OBJS += builtin/fast-import.o
+BUILTIN_OBJS += builtin/fast-rebase.o
 BUILTIN_OBJS += builtin/fetch-pack.o
 BUILTIN_OBJS += builtin/fetch.o
 BUILTIN_OBJS += builtin/fmt-merge-msg.o
