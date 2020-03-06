@@ -32,12 +32,12 @@ Perf stuff:
   X Renames
   X Write the talk
   X Directory renames
-  * Implement basic perf ideas
+  / Implement basic perf ideas
   * Additional Perf testing
   * Output
   * Path conflict files
   * Check the "Stuff to not forget"
-  * Make sure the API is clean/clear
+  / Make sure the API is clean/clear
   * Cleanup of FIXMEs
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
@@ -70,6 +70,7 @@ Path_conflict files:
     we can't recurse into entries as we go, we have to first check all the
     tree entries for the toplevel directory, verify that only one differs,
     then can use the trick.
+  * Perf Idea: should be able to memoize values in check_dir_renamed()
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
     D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
