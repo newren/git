@@ -341,7 +341,7 @@ static int traverse_trees_wrapper_callback(int n,
  * Much like traverse_trees(), BUT:
  *   - read all the tree entries FIRST
  *   - determine if any correspond to new entries in index 1 or 2
- *   - call my callback the way traverse_trees() would, but maks sure that
+ *   - call my callback the way traverse_trees() would, but make sure that
  *     opt->priv->renames->dir_rename_mask is set based on new entries
  */
 static int traverse_trees_wrapper(struct index_state *istate,
