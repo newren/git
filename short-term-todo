@@ -71,6 +71,8 @@ Path_conflict files:
     tree entries for the toplevel directory, verify that only one differs,
     then can use the trick.
   * Perf Idea: should be able to memoize values in check_dir_renamed()
+  * Perf Idea: hashmap->khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
+
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
     D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
