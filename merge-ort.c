@@ -36,15 +36,10 @@
 #if 0
 #define VERBOSE_DEBUG
 #endif
-#if 1
-//#error FIXME: You need to have different diff_filepairs for each side!!
-#define NEW_DIFFPAIRS
-#endif
 
 struct rename_info {
-	struct diff_queue_struct side1_pairs;
-	struct diff_queue_struct side2_pairs;
 	unsigned possible_dir_renames:1;
+	struct diff_queue_struct pairs[3]; /* pairs[0] ignored and unused */
 	/*
 	 * dir_rename_mask:
 	 *   0: optimization removing unmodified potential rename source okay
@@ -497,17 +492,15 @@ static void collect_rename_information(struct rename_info *renames,
 		renames->possible_dir_renames = 1;
 	}
 
-#ifdef NEW_DIFFPAIRS
+	/* Create diffpairs */
 	if (filemask == 0 || filemask == 7)
 		return;
 
 	for (side = 1; side <= 2; ++side) {
 		struct diff_filespec *one, *two;
-		struct diff_queue_struct * q;
 		unsigned side_mask = (side << 1);
 		int need_pair = 0;
 
-		q = (side == 1 ? &renames->side1_pairs : &renames->side2_pairs);
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			/* File deletion; may be rename source */
 			need_pair = 1;
@@ -527,12 +520,9 @@ static void collect_rename_information(struct rename_info *renames,
 			//fprintf(stderr, "Side %d addition: %s\n", side, pi->string);
 		}
 		if (need_pair)
-			diff_queue(q, one, two);
+			diff_queue(&renames->pairs[side], one, two);
 	}
-#else
-	(void)side;
-	(void)ci;
-#endif
+	/* end creation of diffpairs */
 }
 
 static int collect_merge_info_callback(int n,
@@ -1677,13 +1667,14 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 }
 
 static struct strmap *get_directory_renames(struct merge_options *opt,
-					    struct diff_queue_struct *pairs,
+					    unsigned side,
 					    int *clean)
 {
 	struct strmap *dir_renames;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 	struct string_list to_remove = STRING_LIST_INIT_NODUP;
+	struct diff_queue_struct *pairs = &opt->priv->renames->pairs[side];
 	int i;
 
 	/*
@@ -2227,13 +2218,10 @@ static void resolve_diffpair_statuses(void)
 }
 
 
-/* Get the diff_filepairs changed between merge_base and side. */
-static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
-					       struct tree *merge_base,
-					       struct tree *side,
-					       unsigned side_index)
+/* Call diffcore_rename() to update deleted/added pairs into rename pairs */
+static void detect_regular_renames(struct merge_options *opt,
+				   unsigned side_index)
 {
-	struct diff_queue_struct *ret;
 	struct diff_options opts;
 
 	repo_diff_setup(opt->repo, &opts);
@@ -2253,23 +2241,11 @@ static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 	opts.show_rename_progress = opt->show_rename_progress;
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
-#ifndef NEW_DIFFPAIRS
-	//diff_queued_diff.nr = 0;
-	//diff_queued_diff.queue = NULL;
-	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "", &opts);
-#ifdef VERBOSE_DEBUG
-	printf("opts.detect_rename: %d, opts.rename_limit: %d, opts.rename_score: %d\n", opts.detect_rename, opts.rename_limit, opts.rename_score);
-#endif
-	diffcore_std(&opts);
-	(void)resolve_diffpair_statuses;
-#else
-	ret = (side_index == 1 ? &opt->priv->renames->side1_pairs
-			       : &opt->priv->renames->side2_pairs);
-	diff_queued_diff = *ret;
+
+	diff_queued_diff = opt->priv->renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
 	diffcore_rename(&opts);
 	resolve_diffpair_statuses();
-#endif
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
 #ifdef VERBOSE_DEBUG
 	printf("Done.\n");
@@ -2277,14 +2253,12 @@ static struct diff_queue_struct *get_diffpairs(struct merge_options *opt,
 	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
 		opt->priv->needed_rename_limit = opts.needed_rename_limit;
 
-	ret = xmalloc(sizeof(*ret));
-	*ret = diff_queued_diff;
+	opt->priv->renames->pairs[side_index] = diff_queued_diff;
 
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_queued_diff.nr = 0;
 	diff_queued_diff.queue = NULL;
 	diff_flush(&opts);
-	return ret;
 }
 
 static int compare_pairs(const void *a_, const void *b_)
@@ -2307,13 +2281,14 @@ static int compare_pairs(const void *a_, const void *b_)
 static int collect_renames(struct merge_options *opt,
 			   struct diff_queue_struct *result,
 			   unsigned side_index,
-			   struct diff_queue_struct *side_pairs,
 			   struct strmap *dir_renames_for_side,
 			   struct strmap *rename_exclusions)
 {
 	int i, clean = 1;
 	struct strmap collisions;
+	struct diff_queue_struct *side_pairs;
 
+	side_pairs = &opt->priv->renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
 #ifdef VERBOSE_DEBUG
@@ -2369,7 +2344,6 @@ static int detect_and_process_renames(struct merge_options *opt,
 				      struct tree *side1,
 				      struct tree *side2)
 {
-	struct diff_queue_struct *side1_pairs, *side2_pairs;
 	struct strmap *side1_dir_renames, *side2_dir_renames;
 	int need_dir_renames, clean = 1;
 
@@ -2379,14 +2353,12 @@ static int detect_and_process_renames(struct merge_options *opt,
 
 	/*
 	 * FIXME:
-	 *   (1) side1_pairs is just opt->priv->renames->side1_pairs,
-	 *       shouldn't track it separately.
-	 *   (2) shouldn't need merge_base or side[12] anymore
-	 *   (3) Free'ing of side[12]_pairs at end of func might need cleanup
-	 *   (4) Free'ing of combined by caller needs to be done
+	 *   (1) Free'ing of opt->priv->renames->pairs at end of func might
+	 *       need cleanup
+	 *   (2) Free'ing of combined by caller needs to be done
 	 */
-	side1_pairs = get_diffpairs(opt, merge_base, side1, 1);
-	side2_pairs = get_diffpairs(opt, merge_base, side2, 2);
+	detect_regular_renames(opt, 1);
+	detect_regular_renames(opt, 2);
 
 	need_dir_renames =
 	  !opt->priv->call_depth &&
@@ -2400,19 +2372,17 @@ static int detect_and_process_renames(struct merge_options *opt,
 		struct str_entry *entry;
 #endif
 
-		side1_dir_renames = get_directory_renames(opt, side1_pairs,
-							  &clean);
-		side2_dir_renames = get_directory_renames(opt, side2_pairs,
-							  &clean);
+		side1_dir_renames = get_directory_renames(opt, 1, &clean);
+		side2_dir_renames = get_directory_renames(opt, 2, &clean);
 #ifdef VERBOSE_DEBUG
 		fprintf(stderr, "Side1 dir renames:\n");
-		strmap_for_each_entry(side1_dir_renames, &iter, entry) {
+		strmap_for_each_entry(&opt->priv->renames->pairs[1], &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
 			fprintf(stderr, "    %s -> %s:\n",
 				entry->item.string, info->new_dir.buf);
 		}
 		fprintf(stderr, "Side2 dir renames:\n");
-		strmap_for_each_entry(side2_dir_renames, &iter, entry) {
+		strmap_for_each_entry(&opt->priv->renames->pairs[2], &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
 			fprintf(stderr, "    %s -> %s:\n",
 				entry->item.string, info->new_dir.buf);
@@ -2430,10 +2400,12 @@ static int detect_and_process_renames(struct merge_options *opt,
 	}
 
 	ALLOC_GROW(combined->queue,
-		   side1_pairs->nr + side2_pairs->nr, combined->alloc);
-	clean &= collect_renames(opt, combined, 1, side1_pairs,
+		   opt->priv->renames->pairs[1].nr +
+		   opt->priv->renames->pairs[2].nr,
+		   combined->alloc);
+	clean &= collect_renames(opt, combined, 1,
 				 side2_dir_renames, side1_dir_renames);
-	clean &= collect_renames(opt, combined, 2, side2_pairs,
+	clean &= collect_renames(opt, combined, 2,
 				 side1_dir_renames, side2_dir_renames);
 	QSORT(combined->queue, combined->nr, compare_pairs);
 
@@ -2454,10 +2426,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 	side2_dir_renames->strdup_strings = 1;
 	strmap_clear(side1_dir_renames, 1);
 	strmap_clear(side2_dir_renames, 1);
-	side1_pairs->nr = 0;
-	side2_pairs->nr = 0;
-	free(side1_pairs->queue);
-	free(side2_pairs->queue);
+	opt->priv->renames->pairs[1].nr = 0;
+	opt->priv->renames->pairs[2].nr = 0;
+	free(opt->priv->renames->pairs[1].queue);
+	free(opt->priv->renames->pairs[2].queue);
 	/*
 	 * We cannot deallocate combined yet; strings contained in it were
 	 * used inside opt->priv->paths, so we need to wait to deallocate it.
