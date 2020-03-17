@@ -754,11 +754,15 @@ void diffcore_rename(struct diff_options *options)
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
+#if 1
 	/* Debug spew */
 	printf("Rename stats:\n");
 	printf("  Started with (%d x %d)\n", rename_src_nr, rename_dst_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
 	printf("  Now have (%d x %d)\n", num_src, num_create);
+#else
+	(void)exact_count;
+#endif
 	
 	/* All done? */
 	if (!num_create || !num_src)

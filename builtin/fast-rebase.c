@@ -173,6 +173,11 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	if (clean < 0)
 		exit(128);
 
+#if 0
+	printf("last_commit obj: %s\n", oid_to_hex(&last_commit->object.oid));
+	printf("commit obj: %s\n", oid_to_hex(&last_picked_commit->object.oid));
+	printf("automerge_tree: %s\n", oid_to_hex(&result.automerge_tree->object.oid));
+#endif
 	strbuf_addf(&reflog_msg, "finish rebase %s onto %s",
 		    oid_to_hex(&last_picked_commit->object.oid),
 		    oid_to_hex(&last_commit->object.oid));

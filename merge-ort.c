@@ -39,7 +39,13 @@
 
 struct rename_info {
 	unsigned possible_dir_renames:1;
-	struct diff_queue_struct pairs[3]; /* pairs[0] ignored and unused */
+	/* For the next six vars, the 0th entry is ignored and unused */
+	struct diff_queue_struct pairs[3];
+	struct diff_queue_struct renames[3];
+	struct strmap src_basenames[3]; /* basename->unsorted fullnames list */
+	struct strmap dst_basenames[3]; /* basename->unsorted fullnames list */
+	struct oidmap src_hashes[3];    /* oid->unsorted fullnames list */
+	struct oidmap dst_hashes[3];    /* oid->unsorted fullnames list */
 	/*
 	 * dir_rename_mask:
 	 *   0: optimization removing unmodified potential rename source okay
@@ -508,7 +514,7 @@ static void collect_rename_information(struct rename_info *renames,
 			two = alloc_filespec(pi->string);
 			fill_filespec(one, &ci->stages[0].oid, 1,
 				      ci->stages[0].mode);
-			//fprintf(stderr, "Side %d deletion: %s\n", side, pi->string);
+			// // fprintf(stderr, "Side %d deletion: %s\n", side, pi->string);
 		}
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			/* File addition; may be rename target */
@@ -522,7 +528,7 @@ static void collect_rename_information(struct rename_info *renames,
 		if (need_pair)
 			diff_queue(&renames->pairs[side], one, two);
 	}
-	/* end creation of diffpairs */
+	/* FIXME: end creation of diffpairs */
 }
 
 static int collect_merge_info_callback(int n,
@@ -3290,8 +3296,16 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	if (opt->priv) {
 		reset_maps(opt, 1);
 	} else {
+		int i;
+
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
 		opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
+		for (i=1; i<3; i++) {
+			strmap_init(&opt->priv->renames->src_basenames[i], 0);
+			strmap_init(&opt->priv->renames->dst_basenames[i], 0);
+			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
+			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
+		}
 
 		/*
 		 * Although we initialize opt->priv->paths_to_free and
@@ -3335,6 +3349,7 @@ void merge_finalize(struct merge_options *opt,
 
 static void reset_maps(struct merge_options *opt, int reinitialize)
 {
+	int i;
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_clear : strmap_free;
 
@@ -3365,6 +3380,17 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 
 	/* Zero out all files in opt->priv->renames too */
 	memset(opt->priv->renames, 0, sizeof(*opt->priv->renames));
+	for (i=1; i<3; ++i) {
+		/* FIXME: Free data in basenames and hashes too!!! */
+		strmap_func(&opt->priv->renames->src_basenames[i], 1);
+		strmap_func(&opt->priv->renames->dst_basenames[i], 1);
+		oidmap_free(&opt->priv->renames->src_hashes[i], 1);
+		oidmap_free(&opt->priv->renames->dst_hashes[i], 1);
+		if (reinitialize) {
+			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
+			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
+		}
+	}
 
 	/* Clean out callback_data as well. */
 	FREE_AND_NULL(callback_data);
