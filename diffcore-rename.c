@@ -754,7 +754,7 @@ void diffcore_rename(struct diff_options *options)
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
-#if 1
+#if 0
 	/* Debug spew */
 	printf("Rename stats:\n");
 	printf("  Started with (%d x %d)\n", rename_src_nr, rename_dst_nr);
