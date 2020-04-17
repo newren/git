@@ -111,6 +111,10 @@ struct conflict_info {
 	unsigned processed:1;
 };
 
+struct oidmap_string_list_entry {
+	struct oidmap_entry entry;
+	struct string_list fullpaths;
+};
 
 /***** Copy-paste static functions from merge-recursive.c *****/
 
@@ -3381,15 +3385,39 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 	/* Zero out all files in opt->priv->renames too */
 	memset(opt->priv->renames, 0, sizeof(*opt->priv->renames));
 	for (i=1; i<3; ++i) {
-		/* FIXME: Free data in basenames and hashes too!!! */
+		struct hashmap_iter sm_iter;
+		struct str_entry *sm_entry;
+		struct oidmap_iter om_iter;
+		struct oidmap_string_list_entry *om_entry;
+
+		/* clear src_basenames and its data */
+		strmap_for_each_entry(&opt->priv->renames->src_basenames[i],
+				      &sm_iter, sm_entry)
+			string_list_clear(sm_entry->item.util, 0);
 		strmap_func(&opt->priv->renames->src_basenames[i], 1);
+
+		/* clear dst_basenames and its data */
+		strmap_for_each_entry(&opt->priv->renames->dst_basenames[i],
+				      &sm_iter, sm_entry)
+			string_list_clear(sm_entry->item.util, 0);
 		strmap_func(&opt->priv->renames->dst_basenames[i], 1);
+
+		/* clear src_hashes and its data */
+		oidmap_iter_init(&opt->priv->renames->src_hashes[i], &om_iter);
+		while ((om_entry = oidmap_iter_next(&om_iter)))
+			string_list_clear(&om_entry->fullpaths, 0);
 		oidmap_free(&opt->priv->renames->src_hashes[i], 1);
-		oidmap_free(&opt->priv->renames->dst_hashes[i], 1);
-		if (reinitialize) {
+		if (reinitialize)
 			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
-			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
+
+		/* clear dst_hashes and its data */
+		oidmap_iter_init(&opt->priv->renames->dst_hashes[i], &om_iter);
+		while ((om_entry = oidmap_iter_next(&om_iter))) {
+			string_list_clear(&om_entry->fullpaths, 0);
 		}
+		oidmap_free(&opt->priv->renames->dst_hashes[i], 1);
+		if (reinitialize)
+			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
 	}
 
 	/* Clean out callback_data as well. */
