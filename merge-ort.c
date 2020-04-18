@@ -390,62 +390,6 @@ static int traverse_trees_wrapper(struct index_state *istate,
 	return 0;
 }
 
-static void setup_maps(struct strmap *basenames, const char *basename,
-		       struct oidmap *hashes,    struct object_id *oid,
-		       const char *fullname)
-{
-	struct string_list *sl;
-	struct oidmap_string_list_entry *osle;
-	
-	sl = strmap_get(basenames, basename);
-	if (sl)
-		string_list_append(sl, fullname);
-	else {
-		sl = xmalloc(sizeof(*sl));
-		string_list_init(sl, 0);
-		string_list_append(sl, fullname);
-		strmap_put(basenames, basename, sl);
-	}
-			
-	osle = oidmap_get(hashes, oid);
-	if (osle)
-		string_list_append(&osle->fullpaths, fullname);
-	else {
-		osle = xmalloc(sizeof(*osle));
-		oidcpy(&osle->entry.oid, oid);
-		string_list_init(&osle->fullpaths, 0);
-		string_list_append(&osle->fullpaths, fullname);
-		oidmap_put(hashes, osle);
-	}
-}
-
-static void setup_path_rename_info(struct rename_info *rename_maps,
-				   const char *fullname,
-				   const char *basename,
-				   struct name_entry *names,
-				   unsigned filemask)
-{
-	int i;
-	if (filemask == 0 || filemask == 7)
-		return;
-	
-	for (i = 1; i < 3; i++) {
-		if ( (filemask & 1) && !(filemask & (1ul << i)))
-			setup_maps(&rename_maps->src_basenames[i],
-				   basename,
-				   &rename_maps->src_hashes[i],
-				   &names[0].oid,
-				   fullname);
-
-		if (!(filemask & 1) &&  (filemask & (1ul << i)))
-			setup_maps(&rename_maps->dst_basenames[i],
-				   basename,
-				   &rename_maps->dst_hashes[i],
-				   &names[i].oid,
-				   fullname);
-	}
-}
-
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    const char *current_dir_name,
@@ -504,18 +448,75 @@ static void setup_path_info(struct string_list_item *result,
 		path_info->filemask = filemask;
 		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
-		setup_path_rename_info(rename_maps, fullpath, p->path, names,
-				       filemask);
 	}
 	result->string = fullpath;
 	result->util = path_info;
 }
 
+static void setup_maps(struct strmap *basenames, const char *basename,
+		       struct oidmap *hashes,    struct object_id *oid,
+		       const char *fullname)
+{
+	struct string_list *sl;
+	struct oidmap_string_list_entry *osle;
+
+	sl = strmap_get(basenames, basename);
+	if (sl)
+		string_list_append(sl, fullname);
+	else {
+		sl = xmalloc(sizeof(*sl));
+		string_list_init(sl, 0);
+		string_list_append(sl, fullname);
+		strmap_put(basenames, basename, sl);
+	}
+
+	osle = oidmap_get(hashes, oid);
+	if (osle)
+		string_list_append(&osle->fullpaths, fullname);
+	else {
+		osle = xmalloc(sizeof(*osle));
+		oidcpy(&osle->entry.oid, oid);
+		string_list_init(&osle->fullpaths, 0);
+		string_list_append(&osle->fullpaths, fullname);
+		oidmap_put(hashes, osle);
+	}
+}
+
+static void collect_rename_hash_info(struct rename_info *rename_maps,
+				     struct name_entry *oids,
+				     const char *fullname,
+				     const char *basename,
+				     unsigned filemask)
+{
+	int i;
+	if (filemask == 0 || filemask == 7)
+		return;
+
+	for (i = 1; i < 3; i++) {
+		if ( (filemask & 1) && !(filemask & (1ul << i)))
+			setup_maps(&rename_maps->src_basenames[i],
+				   basename,
+				   &rename_maps->src_hashes[i],
+				   &oids[0].oid,
+				   fullname);
+
+		if (!(filemask & 1) &&  (filemask & (1ul << i)))
+			setup_maps(&rename_maps->dst_basenames[i],
+				   basename,
+				   &rename_maps->dst_hashes[i],
+				   &oids[i].oid,
+				   fullname);
+	}
+}
+
 static void collect_rename_information(struct rename_info *renames,
+				       struct name_entry *oids,
+				       const char *basename,
 				       unsigned long filemask,
 				       unsigned long dirmask,
 				       struct string_list_item *pi)
 {
+	const char *fullname = pi->string;
 	struct conflict_info *ci = pi->util;
 	unsigned side;
 
@@ -565,6 +566,7 @@ static void collect_rename_information(struct rename_info *renames,
 	if (filemask == 0 || filemask == 7)
 		return;
 
+	collect_rename_hash_info(renames, oids, fullname, basename, filemask);
 	for (side = 1; side <= 2; ++side) {
 		struct diff_filespec *one, *two;
 		unsigned side_mask = (side << 1);
@@ -573,20 +575,20 @@ static void collect_rename_information(struct rename_info *renames,
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			/* File deletion; may be rename source */
 			need_pair = 1;
-			one = alloc_filespec(pi->string);
-			two = alloc_filespec(pi->string);
+			one = alloc_filespec(fullname);
+			two = alloc_filespec(fullname);
 			fill_filespec(one, &ci->stages[0].oid, 1,
 				      ci->stages[0].mode);
-			// // fprintf(stderr, "Side %d deletion: %s\n", side, pi->string);
+			// // fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
 		}
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			/* File addition; may be rename target */
 			need_pair = 1;
-			one = alloc_filespec(pi->string);
-			two = alloc_filespec(pi->string);
+			one = alloc_filespec(fullname);
+			two = alloc_filespec(fullname);
 			fill_filespec(two, &ci->stages[side].oid, 1,
 				      ci->stages[side].mode);
-			//fprintf(stderr, "Side %d addition: %s\n", side, pi->string);
+			//fprintf(stderr, "Side %d addition: %s\n", side, fullname);
 		}
 		if (need_pair)
 			diff_queue(&renames->pairs[side], one, two);
@@ -609,6 +611,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options *opt = info->data;
 	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
+	struct name_entry *p;
 	const char *dirname = opti->current_dir_name;
 	unsigned prev_dir_rename_mask = opti->renames->dir_rename_mask;
 	unsigned filemask = mask & ~dirmask;
@@ -788,21 +791,20 @@ static int collect_merge_info_callback(int n,
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
-	collect_rename_information(opt->priv->renames, filemask, dirmask, &pi);
+	p = names;
+	while (!p->mode)
+		p++;
+	collect_rename_information(opt->priv->renames, names, p->path,
+				   filemask, dirmask, &pi);
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
 		struct traverse_info newinfo;
-		struct name_entry *p;
 		struct tree_desc t[3];
 		void *buf[3] = {NULL,};
 		const char *original_dir_name;
 		int ret;
 		int i;
-
-		p = names;
-		while (!p->mode)
-			p++;
 
 		newinfo = *info;
 		newinfo.prev = info;
