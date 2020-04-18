@@ -390,9 +390,66 @@ static int traverse_trees_wrapper(struct index_state *istate,
 	return 0;
 }
 
+static void setup_maps(struct strmap *basenames, const char *basename,
+		       struct oidmap *hashes,    struct object_id *oid,
+		       const char *fullname)
+{
+	struct string_list *sl;
+	struct oidmap_string_list_entry *osle;
+	
+	sl = strmap_get(basenames, basename);
+	if (sl)
+		string_list_append(sl, fullname);
+	else {
+		sl = xmalloc(sizeof(*sl));
+		string_list_init(sl, 0);
+		string_list_append(sl, fullname);
+		strmap_put(basenames, basename, sl);
+	}
+			
+	osle = oidmap_get(hashes, oid);
+	if (osle)
+		string_list_append(&osle->fullpaths, fullname);
+	else {
+		osle = xmalloc(sizeof(*osle));
+		oidcpy(&osle->entry.oid, oid);
+		string_list_init(&osle->fullpaths, 0);
+		string_list_append(&osle->fullpaths, fullname);
+		oidmap_put(hashes, osle);
+	}
+}
+
+static void setup_path_rename_info(struct rename_info *rename_maps,
+				   const char *fullname,
+				   const char *basename,
+				   struct name_entry *names,
+				   unsigned filemask)
+{
+	int i;
+	if (filemask == 0 || filemask == 7)
+		return;
+	
+	for (i = 1; i < 3; i++) {
+		if ( (filemask & 1) && !(filemask & (1ul << i)))
+			setup_maps(&rename_maps->src_basenames[i],
+				   basename,
+				   &rename_maps->src_hashes[i],
+				   &names[0].oid,
+				   fullname);
+
+		if (!(filemask & 1) &&  (filemask & (1ul << i)))
+			setup_maps(&rename_maps->dst_basenames[i],
+				   basename,
+				   &rename_maps->dst_hashes[i],
+				   &names[i].oid,
+				   fullname);
+	}
+}
+
 static void setup_path_info(struct string_list_item *result,
 			    struct traverse_info *info,
 			    const char *current_dir_name,
+			    struct rename_info *rename_maps,
 			    struct name_entry *names,
 			    struct name_entry *merged_version,
 			    unsigned is_null,     /* boolean */
@@ -447,6 +504,8 @@ static void setup_path_info(struct string_list_item *result,
 		path_info->filemask = filemask;
 		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
+		setup_path_rename_info(rename_maps, fullpath, p->path, names,
+				       filemask);
 	}
 	result->string = fullpath;
 	result->util = path_info;
@@ -550,6 +609,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options *opt = info->data;
 	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
+	const char *dirname = opti->current_dir_name;
 	unsigned prev_dir_rename_mask = opti->renames->dir_rename_mask;
 	unsigned filemask = mask & ~dirmask;
 	unsigned mbase_null = !(mask & 1);
@@ -604,7 +664,7 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, info,  opti->current_dir_name, names,
+		setup_path_info(&pi, info, dirname, opti->renames, names,
 				names+0, mbase_null, 0, filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path -1 for %s\n", pi.string);
@@ -620,7 +680,7 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, info, opti->current_dir_name, names,
+		setup_path_info(&pi, info, dirname, opti->renames, names,
 				names+1, 0, 0, filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path 0 for %s\n", pi.string);
@@ -651,7 +711,7 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, info, opti->current_dir_name, names,
+			setup_path_info(&pi, info, dirname, opti->renames, names,
 					names+2, side2_null, 0, filemask,
 					dirmask, 1);
 #ifdef VERBOSE_DEBUG
@@ -677,7 +737,7 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, info, opti->current_dir_name, names,
+			setup_path_info(&pi, info, dirname, opti->renames, names,
 					names+1, side1_null, 0, filemask,
 					dirmask, 1);
 #ifdef VERBOSE_DEBUG
@@ -694,7 +754,7 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, info, opti->current_dir_name, names,
+	setup_path_info(&pi, info, dirname, opti->renames, names,
 			NULL, 0, df_conflict, filemask, dirmask, 0);
 #ifdef VERBOSE_DEBUG
 	printf("Path 3 for %s, iprd = %u\n", pi.string,
@@ -3305,8 +3365,8 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
 		opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
 		for (i=1; i<3; i++) {
-			strmap_init(&opt->priv->renames->src_basenames[i], 0);
-			strmap_init(&opt->priv->renames->dst_basenames[i], 0);
+			strmap_init(&opt->priv->renames->src_basenames[i], 1);
+			strmap_init(&opt->priv->renames->dst_basenames[i], 1);
 			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
 			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
 		}
