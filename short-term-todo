@@ -19,6 +19,8 @@ Perf stuff:
       2b. if file deletions, recurse into one-sided tree-match cases
     3. do normal rename detection
 
+Perf command example:
+  * hyperfine --warmup 1 -c 'git reset --hard' 'git cherry-pick --no-commit 4413405f931e'
 
 * Overall plan
   X Renames

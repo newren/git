@@ -391,8 +391,9 @@ static int traverse_trees_wrapper(struct index_state *istate,
 }
 
 static void setup_path_info(struct string_list_item *result,
-			    struct traverse_info *info,
 			    const char *current_dir_name,
+			    int current_dir_name_len,
+			    char *fullpath, /* we'll take over ownership */
 			    struct rename_info *rename_maps,
 			    struct name_entry *names,
 			    struct name_entry *merged_version,
@@ -403,27 +404,15 @@ static void setup_path_info(struct string_list_item *result,
 			    int resolved          /* boolean */)
 {
 	struct conflict_info *path_info;
-	struct name_entry *p;
-	size_t len;
-	char *fullpath;
-
-	p = names;
-	while (!p->mode)
-		p++;
-
-	len = traverse_path_len(info, p->pathlen);
-	fullpath = xmalloc(len+1);  /* +1 to include the NUL byte */
 
 	assert(!is_null || resolved);      /* is_null implies resolved */
 	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
 	assert(resolved == (merged_version != NULL));
 
-	/* len + 1 again to include the NUL byte */
-	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
 					  sizeof(struct conflict_info));
 	path_info->merged.directory_name = current_dir_name;
-	path_info->merged.basename_offset = info->pathlen;
+	path_info->merged.basename_offset = current_dir_name_len;
 	path_info->merged.clean = !!resolved;
 	if (resolved) {
 #ifdef VERBOSE_DEBUG
@@ -566,7 +555,6 @@ static void collect_rename_information(struct rename_info *renames,
 	if (filemask == 0 || filemask == 7)
 		return;
 
-	collect_rename_hash_info(renames, oids, fullname, basename, filemask);
 	for (side = 1; side <= 2; ++side) {
 		struct diff_filespec *one, *two;
 		unsigned side_mask = (side << 1);
@@ -612,6 +600,8 @@ static int collect_merge_info_callback(int n,
 	struct merge_options_internal *opti = opt->priv;
 	struct string_list_item pi;  /* Path Info */
 	struct name_entry *p;
+	size_t len;
+	char *fullpath;
 	const char *dirname = opti->current_dir_name;
 	unsigned prev_dir_rename_mask = opti->renames->dir_rename_mask;
 	unsigned filemask = mask & ~dirmask;
@@ -661,13 +651,26 @@ static int collect_merge_info_callback(int n,
 	assert(mask == (dirmask | filemask));
 
 	/*
+	 * Get the name of the relevant filepath, which we'll pass to
+	 * setup_path_info() for tracking.
+	 */
+	p = names;
+	while (!p->mode)
+		p++;
+	len = traverse_path_len(info, p->pathlen);
+	/* +1 in both of the following lines to include the NUL byte */
+	fullpath = xmalloc(len+1);
+	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
+
+	/*
 	 * If mbase, side1, and side2 all match, we can resolve early.  Even
 	 * if these are trees, there will be no renames or anything
 	 * underneath.
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, info, dirname, opti->renames, names,
+		setup_path_info(&pi, dirname, info->pathlen, fullpath,
+				opti->renames, names,
 				names+0, mbase_null, 0, filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path -1 for %s\n", pi.string);
@@ -683,7 +686,8 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, info, dirname, opti->renames, names,
+		setup_path_info(&pi, dirname, info->pathlen, fullpath,
+				opti->renames, names,
 				names+1, 0, 0, filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path 0 for %s\n", pi.string);
@@ -691,6 +695,16 @@ static int collect_merge_info_callback(int n,
 		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
+
+	/*
+	 * We collect_rename_hash_info() even for paths that we do not need
+	 * to detect renames for, because it might help us find an exact rename.
+	 * An exact rename allows us to remove both a dest and src diff_filepair
+	 * from the set to exhaustively search, whereas the optimizations below
+	 * for base matching one side only allows us to remove the src.
+	 */
+	collect_rename_hash_info(opt->priv->renames, names, fullpath, p->path,
+				 filemask);
 
 	/*
 	 * If side1 matches mbase, then we have some simplifications.  In
@@ -714,7 +728,8 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, info, dirname, opti->renames, names,
+			setup_path_info(&pi, dirname, info->pathlen, fullpath,
+					opti->renames, names,
 					names+2, side2_null, 0, filemask,
 					dirmask, 1);
 #ifdef VERBOSE_DEBUG
@@ -740,7 +755,8 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, info, dirname, opti->renames, names,
+			setup_path_info(&pi, dirname, info->pathlen, fullpath,
+					opti->renames, names,
 					names+1, side1_null, 0, filemask,
 					dirmask, 1);
 #ifdef VERBOSE_DEBUG
@@ -757,8 +773,8 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, info, dirname, opti->renames, names,
-			NULL, 0, df_conflict, filemask, dirmask, 0);
+	setup_path_info(&pi, dirname, info->pathlen, fullpath, opti->renames,
+			names, NULL, 0, df_conflict, filemask, dirmask, 0);
 #ifdef VERBOSE_DEBUG
 	printf("Path 3 for %s, iprd = %u\n", pi.string,
 	       opti->renames->dir_rename_mask);
@@ -791,9 +807,6 @@ static int collect_merge_info_callback(int n,
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
-	p = names;
-	while (!p->mode)
-		p++;
 	collect_rename_information(opt->priv->renames, names, p->path,
 				   filemask, dirmask, &pi);
 
