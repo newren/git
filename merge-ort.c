@@ -2283,6 +2283,21 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 /*** Rename stuff ***/
 
+static void detect_exact_renames(struct rename_info *renames,
+				 unsigned side)
+{
+}
+
+static void detect_renames_by_basename(struct rename_info *renames,
+				       unsigned side)
+{
+}
+
+static void purge_unnecessary_filepairs(struct rename_info *renames,
+					unsigned side)
+{
+}
+
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 {
 	/*
@@ -2340,6 +2355,10 @@ static void detect_regular_renames(struct merge_options *opt,
 	opts.show_rename_progress = opt->show_rename_progress;
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
+
+	detect_exact_renames(renames, side_index);
+	detect_renames_by_basename(renames, side_index);
+	purge_unnecessary_filepairs(renames, side_index);
 
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
