@@ -471,43 +471,79 @@ static void setup_maps(struct strmap *basenames, const char *basename,
 	}
 }
 
-static void collect_rename_hash_info(struct rename_info *rename_maps,
-				     struct name_entry *oids,
-				     const char *fullname,
-				     const char *basename,
-				     unsigned filemask)
+static void collect_pairs(struct rename_info *rename_maps,
+			  struct name_entry *names,
+			  const char *fullname,
+			  const char *basename,
+			  unsigned filemask)
 {
-	int i;
+	int side;
 	if (filemask == 0 || filemask == 7)
 		return;
 
-	for (i = 1; i < 3; i++) {
-		if ( (filemask & 1) && !(filemask & (1ul << i)))
-			setup_maps(&rename_maps->src_basenames[i],
-				   basename,
-				   &rename_maps->src_hashes[i],
-				   &oids[0].oid,
-				   fullname);
+	for (side = 1; side <= 2; ++side) {
+		struct diff_filespec *one, *two;
+		unsigned side_mask = (side << 1);
+		int need_pair = 0;
 
-		if (!(filemask & 1) &&  (filemask & (1ul << i)))
-			setup_maps(&rename_maps->dst_basenames[i],
+		if ((filemask & 1) && !(filemask & side_mask)) {
+			/* File deletion; may be rename source */
+			need_pair = 1;
+			one = alloc_filespec(fullname);
+			two = alloc_filespec(fullname);
+			fill_filespec(one, &names[0].oid, 1, names[0].mode);
+			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
+			setup_maps(&rename_maps->src_basenames[side],
 				   basename,
-				   &rename_maps->dst_hashes[i],
-				   &oids[i].oid,
+				   &rename_maps->src_hashes[side],
+				   &names[0].oid,
 				   fullname);
+		}
+
+		if (!(filemask & 1) && (filemask & side_mask)) {
+			/* File addition; may be rename target */
+			need_pair = 1;
+			one = alloc_filespec(fullname);
+			two = alloc_filespec(fullname);
+			fill_filespec(two, &names[side].oid, 1, names[side].mode);
+			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
+			setup_maps(&rename_maps->dst_basenames[side],
+				   basename,
+				   &rename_maps->dst_hashes[side],
+				   &names[side].oid,
+				   fullname);
+		}
+
+		if (need_pair)
+			diff_queue(&rename_maps->pairs[side], one, two);
 	}
 }
 
-static void collect_rename_information(struct rename_info *renames,
-				       struct name_entry *oids,
-				       const char *basename,
-				       unsigned long filemask,
-				       unsigned long dirmask,
-				       struct string_list_item *pi)
+static inline void mark_rename_source_unused(struct rename_info *renames,
+					     int side)
 {
+	struct diff_filepair *pair;
+	pair = renames->pairs[side].queue[renames->pairs[side].nr-1];
+	pair->one->rename_used = -1;
+}
+
+static void collect_needed_renames(struct rename_info *renames,
+#if 0
+				   struct name_entry *oids,
+				   const char *basename,
+				   unsigned long filemask,
+#endif
+				   unsigned long dirmask
+#if 0
+				   struct string_list_item *pi)
+#endif
+				   )
+{
+#if 0
 	const char *fullname = pi->string;
 	struct conflict_info *ci = pi->util;
-	unsigned side;
+#endif
+	/* FIXME: Fold this all into collect_pairs() */
 
 	/*
 	 * Record directories which could possibly have been renamed.  Notes:
@@ -551,37 +587,29 @@ static void collect_rename_information(struct rename_info *renames,
 		renames->possible_dir_renames = 1;
 	}
 
-	/* Create diffpairs */
+#if 0
 	if (filemask == 0 || filemask == 7)
 		return;
 
+	/*
+	 * In collect_pairs() we set up more diff_filepairs than we probably
+	 * need; we can get rid of them here...
+	 */
 	for (side = 1; side <= 2; ++side) {
-		struct diff_filespec *one, *two;
+		struct diff_filepair *pair;
 		unsigned side_mask = (side << 1);
-		int need_pair = 0;
 
-		if ((filemask & 1) && !(filemask & side_mask)) {
-			/* File deletion; may be rename source */
-			need_pair = 1;
-			one = alloc_filespec(fullname);
-			two = alloc_filespec(fullname);
-			fill_filespec(one, &ci->stages[0].oid, 1,
-				      ci->stages[0].mode);
-			// // fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
-		}
-		if (!(filemask & 1) && (filemask & side_mask)) {
-			/* File addition; may be rename target */
-			need_pair = 1;
-			one = alloc_filespec(fullname);
-			two = alloc_filespec(fullname);
-			fill_filespec(two, &ci->stages[side].oid, 1,
-				      ci->stages[side].mode);
-			//fprintf(stderr, "Side %d addition: %s\n", side, fullname);
-		}
-		if (need_pair)
-			diff_queue(&renames->pairs[side], one, two);
+		pair = diff_queued_diff.queue[diff_queued_diff.nr-1];
+
+		/* Check for file deletion (i.e. might be rename source) */
+		if ((filemask & 1) && !(filemask & side_mask))
+			pair->one->renamed_used = 0;
+
+		/* Check for file addition (i.e. might be rename target) */
+		if (!(filemask & 1) && (filemask & side_mask))
+			pair->two->rename_used = 0;
 	}
-	/* FIXME: end creation of diffpairs */
+#endif
 }
 
 static int collect_merge_info_callback(int n,
@@ -697,14 +725,14 @@ static int collect_merge_info_callback(int n,
 	}
 
 	/*
-	 * We collect_rename_hash_info() even for paths that we do not need
-	 * to detect renames for, because it might help us find an exact rename.
-	 * An exact rename allows us to remove both a dest and src diff_filepair
-	 * from the set to exhaustively search, whereas the optimizations below
-	 * for base matching one side only allows us to remove the src.
+	 * We collect_pairs() even for paths that we do not need to detect
+	 * renames, because it might help us find an exact rename.  When we
+	 * do exhaustive pairwise comparison of diff_filepairs in normal
+	 * rename detection, that's expensive.  The optimizations for base
+	 * matching one side only allows us to remove the src from the set
+	 * of diff_filepairs, but an exact rename allows us to remove both.
 	 */
-	collect_rename_hash_info(opt->priv->renames, names, fullpath, p->path,
-				 filemask);
+	collect_pairs(opt->priv->renames, names, fullpath, p->path, filemask);
 
 	/*
 	 * If side1 matches mbase, then we have some simplifications.  In
@@ -724,6 +752,8 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
+			if (filemask)
+				mark_rename_source_unused(opt->priv->renames, 2);
 			return mask;
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
@@ -751,6 +781,8 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
+			if (filemask)
+				mark_rename_source_unused(opt->priv->renames, 1);
 			return mask;
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
@@ -807,8 +839,12 @@ static int collect_merge_info_callback(int n,
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
-	collect_rename_information(opt->priv->renames, names, p->path,
-				   filemask, dirmask, &pi);
+#if 0
+	collect_needed_renames(opt->priv->renames, names, p->path,
+			       filemask, dirmask, &pi);
+#else
+	collect_needed_renames(opt->priv->renames, dirmask);
+#endif
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
