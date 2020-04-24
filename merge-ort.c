@@ -528,21 +528,9 @@ static inline void mark_rename_source_unused(struct rename_info *renames,
 }
 
 static void collect_needed_renames(struct rename_info *renames,
-#if 0
-				   struct name_entry *oids,
-				   const char *basename,
-				   unsigned long filemask,
-#endif
 				   unsigned long dirmask
-#if 0
-				   struct string_list_item *pi)
-#endif
 				   )
 {
-#if 0
-	const char *fullname = pi->string;
-	struct conflict_info *ci = pi->util;
-#endif
 	/* FIXME: Fold this all into collect_pairs() */
 
 	/*
@@ -586,30 +574,6 @@ static void collect_needed_renames(struct rename_info *renames,
 		renames->dir_rename_mask = (dirmask & ~1);
 		renames->possible_dir_renames = 1;
 	}
-
-#if 0
-	if (filemask == 0 || filemask == 7)
-		return;
-
-	/*
-	 * In collect_pairs() we set up more diff_filepairs than we probably
-	 * need; we can get rid of them here...
-	 */
-	for (side = 1; side <= 2; ++side) {
-		struct diff_filepair *pair;
-		unsigned side_mask = (side << 1);
-
-		pair = diff_queued_diff.queue[diff_queued_diff.nr-1];
-
-		/* Check for file deletion (i.e. might be rename source) */
-		if ((filemask & 1) && !(filemask & side_mask))
-			pair->one->renamed_used = 0;
-
-		/* Check for file addition (i.e. might be rename target) */
-		if (!(filemask & 1) && (filemask & side_mask))
-			pair->two->rename_used = 0;
-	}
-#endif
 }
 
 static int collect_merge_info_callback(int n,
@@ -839,12 +803,7 @@ static int collect_merge_info_callback(int n,
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
 
-#if 0
-	collect_needed_renames(opt->priv->renames, names, p->path,
-			       filemask, dirmask, &pi);
-#else
 	collect_needed_renames(opt->priv->renames, dirmask);
-#endif
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
