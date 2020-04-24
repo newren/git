@@ -39,13 +39,15 @@
 
 struct rename_info {
 	unsigned possible_dir_renames:1;
-	/* For the next six vars, the 0th entry is ignored and unused */
+	/* For the next eight vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3];
 	struct diff_queue_struct renames[3];
 	struct strmap src_basenames[3]; /* basename->unsorted fullnames list */
 	struct strmap dst_basenames[3]; /* basename->unsorted fullnames list */
 	struct oidmap src_hashes[3];    /* oid->unsorted fullnames list */
 	struct oidmap dst_hashes[3];    /* oid->unsorted fullnames list */
+	int nr_sources[3];
+	int nr_targets[3];
 	/*
 	 * dir_rename_mask:
 	 *   0: optimization removing unmodified potential rename source okay
@@ -540,6 +542,7 @@ static void collect_rename_info(struct rename_info *renames,
 
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			/* File deletion; may be rename source */
+			renames->nr_sources[side] += 1;
 			need_pair = 1;
 			one = alloc_filespec(fullname);
 			two = alloc_filespec(fullname);
@@ -554,6 +557,7 @@ static void collect_rename_info(struct rename_info *renames,
 
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			/* File addition; may be rename target */
+			renames->nr_targets[side] += 1;
 			need_pair = 1;
 			one = alloc_filespec(fullname);
 			two = alloc_filespec(fullname);
@@ -577,6 +581,7 @@ static inline void mark_rename_source_unused(struct rename_info *renames,
 	struct diff_filepair *pair;
 	pair = renames->pairs[side].queue[renames->pairs[side].nr-1];
 	pair->one->rename_used = -1;
+	renames->nr_sources[side] -= 1;
 }
 
 static int collect_merge_info_callback(int n,
@@ -2278,7 +2283,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 /*** Rename stuff ***/
 
-static void resolve_diffpair_statuses(void)
+static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 {
 	/*
 	 * A simplified version of diff_resolve_rename_copy(); would probably
@@ -2287,8 +2292,8 @@ static void resolve_diffpair_statuses(void)
 	int i;
 	struct diff_filepair *p;
 
-	for (i = 0; i < diff_queued_diff.nr; ++i) {
-		p = diff_queued_diff.queue[i];
+	for (i = 0; i < q->nr; ++i) {
+		p = q->queue[i];
 		p->status = 0; /* undecided */
 		if (!DIFF_FILE_VALID(p->one))
 			p->status = DIFF_STATUS_ADDED;
@@ -2305,6 +2310,18 @@ static void detect_regular_renames(struct merge_options *opt,
 				   unsigned side_index)
 {
 	struct diff_options opts;
+	struct rename_info *renames = opt->priv->renames;
+
+	if (renames->nr_sources[side_index] == 0 ||
+	    renames->nr_targets[side_index] == 0) {
+		/*
+		 * No rename detection needed for this side, but we still need
+		 * adds to be marked correctly in case the other side had
+		 * directory renames.
+		 */
+		resolve_diffpair_statuses(&renames->pairs[side_index]);
+		return;
+	}
 
 	repo_diff_setup(opt->repo, &opts);
 	opts.flags.recursive = 1;
@@ -2324,10 +2341,10 @@ static void detect_regular_renames(struct merge_options *opt,
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&opts);
 
-	diff_queued_diff = opt->priv->renames->pairs[side_index];
+	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
 	diffcore_rename(&opts);
-	resolve_diffpair_statuses();
+	resolve_diffpair_statuses(&diff_queued_diff);
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
 #ifdef VERBOSE_DEBUG
 	printf("Done.\n");
@@ -2335,7 +2352,7 @@ static void detect_regular_renames(struct merge_options *opt,
 	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
 		opt->priv->needed_rename_limit = opts.needed_rename_limit;
 
-	opt->priv->renames->pairs[side_index] = diff_queued_diff;
+	renames->pairs[side_index] = diff_queued_diff;
 
 	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_queued_diff.nr = 0;
