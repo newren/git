@@ -471,13 +471,65 @@ static void setup_maps(struct strmap *basenames, const char *basename,
 	}
 }
 
-static void collect_pairs(struct rename_info *rename_maps,
-			  struct name_entry *names,
-			  const char *fullname,
-			  const char *basename,
-			  unsigned filemask)
+static void collect_rename_info(struct rename_info *renames,
+				struct name_entry *names,
+				const char *fullname,
+				const char *basename,
+				unsigned filemask,
+				unsigned dirmask)
 {
-	int side;
+	unsigned side;
+
+	/*
+	 * Update:
+	 *   - possible_dir_renames (a boolean for whether directory
+	 *     renames might have occurred)
+	 *   - dir_rename_mask (a mask for determining whether it is safe to
+	 *     ignore source paths that match on one side for inclusion in
+	 *     rename detection)
+	 *   - the if-condition here is explained inside the loop for both
+	 *     vars
+	 */
+	if ((dirmask == 3 || dirmask == 5) && renames->dir_rename_mask != 0x07) {
+		/*
+		 * Simple rule for possible_dir_renames: set it whenever
+		 * dirmask is 3 or 5.  (If dir_rename_mask was 0x07, that
+		 * means a previous call to this function already set
+		 * possible_dir_renames.)
+		 */
+		renames->possible_dir_renames = 1;
+
+		/*
+		 * Complicated rules for dir_rename_mask (based on how we can
+		 * know whether a directory might be involved in a directory
+		 * rename):
+		 *   - Directory has to exist in mbase to have been renamed
+		 *     (i.e. dirmask & 1 must be true)
+		 *   - Directory cannot exist on both sides or it isn't renamed
+		 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
+		 *   - If directory exists in neither side1 nor side2, then
+		 *     there are no new files to send along with the directory
+		 *     rename so there's no point detecting it[1].  (Thus,
+		 *     either dirmask & 2 or dirmask & 4 must be true)
+		 *   - The above rules mean dirmask is either 3 or 5, as checked
+		 *     above.  If dir_rename_mask is 0x07 we've already ruled
+		 *     the optimization completely unsafe, so we don't need to
+		 *     mark it as we need to be careful with it.
+		 *
+		 * [1] When neither side1 nor side2 has the directory then at
+		 *     best, both sides renamed it to the same place (which
+		 *     will be handled by all individual files being renamed
+		 *     to the same place and no dir rename detection is
+		 *     needed).  At worst, they both renamed it differently
+		 *     (but all individual files are renamed to different
+		 *     places which will flag errors so again no dir rename
+		 *     detection is needed.)
+		 */
+		assert(renames->dir_rename_mask == 0 ||
+		       renames->dir_rename_mask == (dirmask & ~1));
+		renames->dir_rename_mask = (dirmask & ~1);
+	}
+
 	if (filemask == 0 || filemask == 7)
 		return;
 
@@ -493,9 +545,9 @@ static void collect_pairs(struct rename_info *rename_maps,
 			two = alloc_filespec(fullname);
 			fill_filespec(one, &names[0].oid, 1, names[0].mode);
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
-			setup_maps(&rename_maps->src_basenames[side],
+			setup_maps(&renames->src_basenames[side],
 				   basename,
-				   &rename_maps->src_hashes[side],
+				   &renames->src_hashes[side],
 				   &names[0].oid,
 				   fullname);
 		}
@@ -507,15 +559,15 @@ static void collect_pairs(struct rename_info *rename_maps,
 			two = alloc_filespec(fullname);
 			fill_filespec(two, &names[side].oid, 1, names[side].mode);
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
-			setup_maps(&rename_maps->dst_basenames[side],
+			setup_maps(&renames->dst_basenames[side],
 				   basename,
-				   &rename_maps->dst_hashes[side],
+				   &renames->dst_hashes[side],
 				   &names[side].oid,
 				   fullname);
 		}
 
 		if (need_pair)
-			diff_queue(&rename_maps->pairs[side], one, two);
+			diff_queue(&renames->pairs[side], one, two);
 	}
 }
 
@@ -525,55 +577,6 @@ static inline void mark_rename_source_unused(struct rename_info *renames,
 	struct diff_filepair *pair;
 	pair = renames->pairs[side].queue[renames->pairs[side].nr-1];
 	pair->one->rename_used = -1;
-}
-
-static void collect_needed_renames(struct rename_info *renames,
-				   unsigned long dirmask
-				   )
-{
-	/* FIXME: Fold this all into collect_pairs() */
-
-	/*
-	 * Record directories which could possibly have been renamed.  Notes:
-	 *   - Directory has to exist in mbase to have been renamed (i.e.
-	 *     dirmask & 1 must be true)
-	 *   - Directory cannot exist on both sides or it isn't renamed
-	 *     (i.e. !(dirmask & 2) or !(dirmask & 4) must be true)
-	 *   - If directory exists in neither side1 nor side2, then
-	 *     there are no new files to send along with the directory
-	 *     rename so there's no point detecting it[1].  (Thus, either
-	 *     dirmask & 2 or dirmask & 4 must be true)
-	 *   - If the side that didn't rename a directory also didn't
-	 *     modify it at all (i.e. the par[12]_matches_mbase cases
-	 *     checked above were true), then we don't need to detect the
-	 *     directory rename as there are not either any new files or
-	 *     file modifications to send along with the rename.  Thus,
-	 *     it's okay that we returned early for the
-	 *     par[12]_matches_mbase cases above.
-	 *
-	 * [1] When neither side1 nor side2 has the directory then at
-	 *     best, both sides renamed it to the same place (which will be
-	 *     handled by all individual files being renamed to the same
-	 *     place and no dir rename detection is needed).  At worst,
-	 *     they both renamed it differently (but all individual files
-	 *     are renamed to different places which will flag errors so
-	 *     again no dir rename detection is needed.)
-	 */
-	if ((dirmask == 3 || dirmask == 5) && renames->dir_rename_mask != 0x07) {
-#if 0
-		/*
-		 * For directory rename detection, we can ignore any rename
-		 * whose source path doesn't start with one of the directory
-		 * paths in possible_dir_rename_bases.
-		 */
-		strmap_put(&renames->possible_dir_rename_bases, pi->string,
-			   NULL);
-#endif
-		assert(renames->dir_rename_mask == 0 ||
-		       renames->dir_rename_mask == (dirmask & ~1));
-		renames->dir_rename_mask = (dirmask & ~1);
-		renames->possible_dir_renames = 1;
-	}
 }
 
 static int collect_merge_info_callback(int n,
@@ -689,14 +692,15 @@ static int collect_merge_info_callback(int n,
 	}
 
 	/*
-	 * We collect_pairs() even for paths that we do not need to detect
-	 * renames, because it might help us find an exact rename.  When we
-	 * do exhaustive pairwise comparison of diff_filepairs in normal
-	 * rename detection, that's expensive.  The optimizations for base
-	 * matching one side only allows us to remove the src from the set
-	 * of diff_filepairs, but an exact rename allows us to remove both.
+	 * Sometimes we can tell that a source path need not be included in
+	 * rename detection (because it matches one of the two sides; see
+	 * more below).  However, we call collect_rename_info() even in that
+	 * case, because exact renames are cheap and would let us remove both
+	 * a source and destination path.  We'll cull the unneeded sources
+	 * later.
 	 */
-	collect_pairs(opt->priv->renames, names, fullpath, p->path, filemask);
+	collect_rename_info(opt->priv->renames, names, fullpath, p->path,
+			    filemask, dirmask);
 
 	/*
 	 * If side1 matches mbase, then we have some simplifications.  In
@@ -802,8 +806,6 @@ static int collect_merge_info_callback(int n,
 	printf("  dirmask:  %lu\n", dirmask);
 #endif
 	strmap_put(&opti->paths, pi.string, pi.util);
-
-	collect_needed_renames(opt->priv->renames, dirmask);
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
