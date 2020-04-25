@@ -2465,15 +2465,16 @@ static int detect_and_process_renames(struct merge_options *opt,
 				      struct tree *side2)
 {
 	struct strmap *side1_dir_renames, *side2_dir_renames;
+	struct rename_info *renames = opt->priv->renames;
 	int need_dir_renames, clean = 1;
 
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
-		return 1;
+		return 1; /* clean */
 
 	/*
 	 * FIXME:
-	 *   (1) Free'ing of opt->priv->renames->pairs at end of func might
+	 *   (1) Free'ing of renames->pairs at end of func might
 	 *       need cleanup
 	 *   (2) Free'ing of combined by caller needs to be done
 	 */
@@ -2482,7 +2483,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 
 	need_dir_renames =
 	  !opt->priv->call_depth &&
-	  opt->priv->renames->possible_dir_renames &&
+	  renames->possible_dir_renames &&
 	  (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE ||
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
@@ -2496,13 +2497,13 @@ static int detect_and_process_renames(struct merge_options *opt,
 		side2_dir_renames = get_directory_renames(opt, 2, &clean);
 #ifdef VERBOSE_DEBUG
 		fprintf(stderr, "Side1 dir renames:\n");
-		strmap_for_each_entry(&opt->priv->renames->pairs[1], &iter, entry) {
+		strmap_for_each_entry(&renames->pairs[1], &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
 			fprintf(stderr, "    %s -> %s:\n",
 				entry->item.string, info->new_dir.buf);
 		}
 		fprintf(stderr, "Side2 dir renames:\n");
-		strmap_for_each_entry(&opt->priv->renames->pairs[2], &iter, entry) {
+		strmap_for_each_entry(&renames->pairs[2], &iter, entry) {
 			struct dir_rename_info *info = entry->item.util;
 			fprintf(stderr, "    %s -> %s:\n",
 				entry->item.string, info->new_dir.buf);
@@ -2513,15 +2514,14 @@ static int detect_and_process_renames(struct merge_options *opt,
 						 side2_dir_renames);
 
 	} else {
-		side1_dir_renames  = xmalloc(sizeof(*side1_dir_renames));
+		side1_dir_renames = xmalloc(sizeof(*side1_dir_renames));
 		side2_dir_renames = xmalloc(sizeof(*side2_dir_renames));
 		strmap_init(side1_dir_renames, 0);
 		strmap_init(side2_dir_renames, 0);
 	}
 
 	ALLOC_GROW(combined->queue,
-		   opt->priv->renames->pairs[1].nr +
-		   opt->priv->renames->pairs[2].nr,
+		   renames->pairs[1].nr + renames->pairs[2].nr,
 		   combined->alloc);
 	clean &= collect_renames(opt, combined, 1,
 				 side2_dir_renames, side1_dir_renames);
@@ -2546,10 +2546,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 	side2_dir_renames->strdup_strings = 1;
 	strmap_clear(side1_dir_renames, 1);
 	strmap_clear(side2_dir_renames, 1);
-	opt->priv->renames->pairs[1].nr = 0;
-	opt->priv->renames->pairs[2].nr = 0;
-	free(opt->priv->renames->pairs[1].queue);
-	free(opt->priv->renames->pairs[2].queue);
+	renames->pairs[1].nr = 0;
+	renames->pairs[2].nr = 0;
+	free(renames->pairs[1].queue);
+	free(renames->pairs[2].queue);
 	/*
 	 * We cannot deallocate combined yet; strings contained in it were
 	 * used inside opt->priv->paths, so we need to wait to deallocate it.
