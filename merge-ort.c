@@ -39,15 +39,22 @@
 
 struct rename_info {
 	unsigned possible_dir_renames:1;
-	/* For the next eight vars, the 0th entry is ignored and unused */
+	/* For the next ten vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3];
 	struct diff_queue_struct renames[3];
-	struct strmap src_basenames[3]; /* basename->unsorted fullnames list */
-	struct strmap dst_basenames[3]; /* basename->unsorted fullnames list */
-	struct oidmap src_hashes[3];    /* oid->unsorted fullnames list */
-	struct oidmap dst_hashes[3];    /* oid->unsorted fullnames list */
-	int nr_sources[3];
-	int nr_targets[3];
+	/* possible_(sources|targets): sets of full pathnames */
+	struct strmap possible_sources[3]; /* set of fullnames */
+	struct strmap possible_targets[3]; /* set of fullnames */
+	/* sources_to_skip: fullname -> {1:unneeded, 2:exact_match} */
+	struct strmap sources_to_skip[3];
+	/* targets_to_skip: set of full pathnames */
+	struct strmap targets_to_skip[3];
+	/* (src|dst)_basenames: basename -> unsorted string_list(fullnames) */
+	struct strmap src_basenames[3];
+	struct strmap dst_basenames[3];
+	/* (src|dst)_hashes: maps from oid -> unsorted string_list(fullnames) */
+	struct oidmap src_hashes[3];
+	struct oidmap dst_hashes[3];
 	/*
 	 * dir_rename_mask:
 	 *   0: optimization removing unmodified potential rename source okay
@@ -536,18 +543,12 @@ static void collect_rename_info(struct rename_info *renames,
 		return;
 
 	for (side = 1; side <= 2; ++side) {
-		struct diff_filespec *one, *two;
 		unsigned side_mask = (side << 1);
-		int need_pair = 0;
 
 		if ((filemask & 1) && !(filemask & side_mask)) {
-			/* File deletion; may be rename source */
-			renames->nr_sources[side] += 1;
-			need_pair = 1;
-			one = alloc_filespec(fullname);
-			two = alloc_filespec(fullname);
-			fill_filespec(one, &names[0].oid, 1, names[0].mode);
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
+			strmap_put(&renames->possible_sources[side],
+				   fullname, NULL);
 			setup_maps(&renames->src_basenames[side],
 				   basename,
 				   &renames->src_hashes[side],
@@ -556,32 +557,16 @@ static void collect_rename_info(struct rename_info *renames,
 		}
 
 		if (!(filemask & 1) && (filemask & side_mask)) {
-			/* File addition; may be rename target */
-			renames->nr_targets[side] += 1;
-			need_pair = 1;
-			one = alloc_filespec(fullname);
-			two = alloc_filespec(fullname);
-			fill_filespec(two, &names[side].oid, 1, names[side].mode);
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
+			strmap_put(&renames->possible_targets[side],
+				   fullname, NULL);
 			setup_maps(&renames->dst_basenames[side],
 				   basename,
 				   &renames->dst_hashes[side],
 				   &names[side].oid,
 				   fullname);
 		}
-
-		if (need_pair)
-			diff_queue(&renames->pairs[side], one, two);
 	}
-}
-
-static inline void mark_rename_source_unused(struct rename_info *renames,
-					     int side)
-{
-	struct diff_filepair *pair;
-	pair = renames->pairs[side].queue[renames->pairs[side].nr-1];
-	pair->one->rename_used = -1;
-	renames->nr_sources[side] -= 1;
 }
 
 static int collect_merge_info_callback(int n,
@@ -726,7 +711,8 @@ static int collect_merge_info_callback(int n,
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
 			if (filemask)
-				mark_rename_source_unused(opt->priv->renames, 2);
+				strintmap_set(&opti->renames->sources_to_skip[2],
+					      fullpath, 1);
 			return mask;
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
@@ -755,7 +741,8 @@ static int collect_merge_info_callback(int n,
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
 			if (filemask)
-				mark_rename_source_unused(opt->priv->renames, 1);
+				strintmap_set(&opti->renames->sources_to_skip[1],
+					      fullpath, 1);
 			return mask;
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
@@ -867,6 +854,7 @@ static int collect_merge_info_callback(int n,
 		if (ret < 0)
 			return -1;
 	}
+
 	return mask;
 }
 
@@ -2298,6 +2286,43 @@ static void purge_unnecessary_filepairs(struct rename_info *renames,
 {
 }
 
+static void generate_pairs(struct strmap *paths,
+			   struct rename_info *renames,
+			   unsigned side)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	struct diff_filespec *one, *two;
+	struct conflict_info *ci;
+
+	strmap_for_each_entry(&renames->possible_sources[side], &iter, entry) {
+		char *fullname = entry->item.string;
+		if (strmap_contains(&renames->sources_to_skip[side], fullname))
+			continue;
+
+		ci = strmap_get(paths, fullname);
+		assert(ci);
+		one = alloc_filespec(fullname);
+		two = alloc_filespec(fullname);
+		fill_filespec(one, &ci->stages[0].oid, 1, ci->stages[0].mode);
+		diff_queue(&renames->pairs[side], one, two);
+	}
+
+	strmap_for_each_entry(&renames->possible_targets[side], &iter, entry) {
+		char *fullname = entry->item.string;
+		if (strmap_contains(&renames->targets_to_skip[side], fullname))
+			continue;
+
+		ci = strmap_get(paths, fullname);
+		assert(ci);
+		one = alloc_filespec(fullname);
+		two = alloc_filespec(fullname);
+		fill_filespec(two, &ci->stages[side].oid, 1,
+			      ci->stages[side].mode);
+		diff_queue(&renames->pairs[side], one, two);
+	}
+}
+
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 {
 	/*
@@ -2319,6 +2344,16 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 	}
 }
 
+static inline int possible_renames(struct rename_info *renames,
+				   unsigned side_index)
+{
+	int nr_sources = strmap_get_size(&renames->possible_sources[side_index])
+		       - strmap_get_size(&renames->sources_to_skip[side_index]);
+	int nr_targets = strmap_get_size(&renames->possible_targets[side_index])
+		       - strmap_get_size(&renames->targets_to_skip[side_index]);
+	return nr_sources > 0 && nr_targets > 0;
+}
+
 
 /* Call diffcore_rename() to update deleted/added pairs into rename pairs */
 static void detect_regular_renames(struct merge_options *opt,
@@ -2327,13 +2362,13 @@ static void detect_regular_renames(struct merge_options *opt,
 	struct diff_options diff_opts;
 	struct rename_info *renames = opt->priv->renames;
 
-	if (renames->nr_sources[side_index] == 0 ||
-	    renames->nr_targets[side_index] == 0) {
+	if (!possible_renames(renames, side_index)) {
 		/*
 		 * No rename detection needed for this side, but we still need
-		 * adds to be marked correctly in case the other side had
-		 * directory renames.
+		 * to generate pairs and make sure 'adds' are marked correctly
+		 * in case the other side had directory renames.
 		 */
+		generate_pairs(&opt->priv->paths, renames, side_index);
 		resolve_diffpair_statuses(&renames->pairs[side_index]);
 		return;
 	}
@@ -2361,6 +2396,7 @@ static void detect_regular_renames(struct merge_options *opt,
 	detect_exact_renames(renames, side_index);
 	detect_renames_by_basename(renames, side_index);
 	purge_unnecessary_filepairs(renames, side_index);
+	generate_pairs(&opt->priv->paths, renames, side_index);
 
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
@@ -2470,6 +2506,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
+		return 1; /* clean */
+	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
 		return 1; /* clean */
 
 	/*
@@ -3410,15 +3448,20 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	if (opt->priv) {
 		reset_maps(opt, 1);
 	} else {
+		struct rename_info *renames;
 		int i;
 
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
-		opt->priv->renames = xcalloc(1, sizeof(*opt->priv->renames));
+		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
-			strmap_init(&opt->priv->renames->src_basenames[i], 1);
-			strmap_init(&opt->priv->renames->dst_basenames[i], 1);
-			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
-			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
+			strmap_init(&renames->possible_sources[i], 0);
+			strmap_init(&renames->possible_targets[i], 0);
+			strmap_init(&renames->sources_to_skip[i], 0);
+			strmap_init(&renames->targets_to_skip[i], 0);
+			strmap_init(&renames->src_basenames[i], 1);
+			strmap_init(&renames->dst_basenames[i], 1);
+			oidmap_init(&renames->src_hashes[i], 0);
+			oidmap_init(&renames->dst_hashes[i], 0);
 		}
 
 		/*
@@ -3463,6 +3506,7 @@ void merge_finalize(struct merge_options *opt,
 
 static void reset_maps(struct merge_options *opt, int reinitialize)
 {
+	struct rename_info *renames = opt->priv->renames;
 	int i;
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_clear : strmap_free;
@@ -3492,43 +3536,51 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 	 */
 	strmap_func(&opt->priv->unmerged, 0);
 
-	/* Zero out all files in opt->priv->renames too */
-	memset(opt->priv->renames, 0, sizeof(*opt->priv->renames));
+	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
 		struct hashmap_iter sm_iter;
 		struct str_entry *sm_entry;
 		struct oidmap_iter om_iter;
 		struct oidmap_string_list_entry *om_entry;
 
+		/* FIXME: Clean up the pairs too? */
+
+		strmap_func(&renames->possible_sources[i], 0);
+		strmap_func(&renames->possible_targets[i], 0);
+		strmap_func(&renames->sources_to_skip[i], 0);
+		strmap_func(&renames->targets_to_skip[i], 0);
+
 		/* clear src_basenames and its data */
-		strmap_for_each_entry(&opt->priv->renames->src_basenames[i],
+		strmap_for_each_entry(&renames->src_basenames[i],
 				      &sm_iter, sm_entry)
 			string_list_clear(sm_entry->item.util, 0);
-		strmap_func(&opt->priv->renames->src_basenames[i], 1);
+		strmap_func(&renames->src_basenames[i], 1);
 
 		/* clear dst_basenames and its data */
-		strmap_for_each_entry(&opt->priv->renames->dst_basenames[i],
+		strmap_for_each_entry(&renames->dst_basenames[i],
 				      &sm_iter, sm_entry)
 			string_list_clear(sm_entry->item.util, 0);
-		strmap_func(&opt->priv->renames->dst_basenames[i], 1);
+		strmap_func(&renames->dst_basenames[i], 1);
 
 		/* clear src_hashes and its data */
-		oidmap_iter_init(&opt->priv->renames->src_hashes[i], &om_iter);
+		oidmap_iter_init(&renames->src_hashes[i], &om_iter);
 		while ((om_entry = oidmap_iter_next(&om_iter)))
 			string_list_clear(&om_entry->fullpaths, 0);
-		oidmap_free(&opt->priv->renames->src_hashes[i], 1);
+		oidmap_free(&renames->src_hashes[i], 1);
 		if (reinitialize)
-			oidmap_init(&opt->priv->renames->src_hashes[i], 0);
+			oidmap_init(&renames->src_hashes[i], 0);
 
 		/* clear dst_hashes and its data */
-		oidmap_iter_init(&opt->priv->renames->dst_hashes[i], &om_iter);
+		oidmap_iter_init(&renames->dst_hashes[i], &om_iter);
 		while ((om_entry = oidmap_iter_next(&om_iter))) {
 			string_list_clear(&om_entry->fullpaths, 0);
 		}
-		oidmap_free(&opt->priv->renames->dst_hashes[i], 1);
+		oidmap_free(&renames->dst_hashes[i], 1);
 		if (reinitialize)
-			oidmap_init(&opt->priv->renames->dst_hashes[i], 0);
+			oidmap_init(&renames->dst_hashes[i], 0);
 	}
+	renames->possible_dir_renames = 0;
+	renames->dir_rename_mask = 0;
 
 	/* Clean out callback_data as well. */
 	FREE_AND_NULL(callback_data);
