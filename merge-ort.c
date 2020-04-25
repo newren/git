@@ -2324,7 +2324,7 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 static void detect_regular_renames(struct merge_options *opt,
 				   unsigned side_index)
 {
-	struct diff_options opts;
+	struct diff_options diff_opts;
 	struct rename_info *renames = opt->priv->renames;
 
 	if (renames->nr_sources[side_index] == 0 ||
@@ -2338,23 +2338,25 @@ static void detect_regular_renames(struct merge_options *opt,
 		return;
 	}
 
-	repo_diff_setup(opt->repo, &opts);
-	opts.flags.recursive = 1;
-	opts.flags.rename_empty = 0;
-	opts.detect_rename = merge_detect_rename(opt);
+	repo_diff_setup(opt->repo, &diff_opts);
+	diff_opts.flags.recursive = 1;
+	diff_opts.flags.rename_empty = 0;
+	diff_opts.detect_rename = merge_detect_rename(opt);
 	/*
 	 * We do not have logic to handle the detection of copies.  In
 	 * fact, it may not even make sense to add such logic: would we
 	 * really want a change to a base file to be propagated through
 	 * multiple other files by a merge?
 	 */
-	if (opts.detect_rename > DIFF_DETECT_RENAME)
-		opts.detect_rename = DIFF_DETECT_RENAME;
-	opts.rename_limit = (opt->rename_limit >= 0) ? opt->rename_limit : 1000;
-	opts.rename_score = opt->rename_score;
-	opts.show_rename_progress = opt->show_rename_progress;
-	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
-	diff_setup_done(&opts);
+	if (diff_opts.detect_rename > DIFF_DETECT_RENAME)
+		diff_opts.detect_rename = DIFF_DETECT_RENAME;
+	diff_opts.rename_limit = opt->rename_limit;
+	if (opt->rename_limit <= 0)
+		diff_opts.rename_limit = 1000;
+	diff_opts.rename_score = opt->rename_score;
+	diff_opts.show_rename_progress = opt->show_rename_progress;
+	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_setup_done(&diff_opts);
 
 	detect_exact_renames(renames, side_index);
 	detect_renames_by_basename(renames, side_index);
@@ -2362,21 +2364,21 @@ static void detect_regular_renames(struct merge_options *opt,
 
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
-	diffcore_rename(&opts);
+	diffcore_rename(&diff_opts);
 	resolve_diffpair_statuses(&diff_queued_diff);
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
 #ifdef VERBOSE_DEBUG
 	printf("Done.\n");
 #endif
-	if (opts.needed_rename_limit > opt->priv->needed_rename_limit)
-		opt->priv->needed_rename_limit = opts.needed_rename_limit;
+	if (diff_opts.needed_rename_limit > opt->priv->needed_rename_limit)
+		opt->priv->needed_rename_limit = diff_opts.needed_rename_limit;
 
 	renames->pairs[side_index] = diff_queued_diff;
 
-	opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_queued_diff.nr = 0;
 	diff_queued_diff.queue = NULL;
-	diff_flush(&opts);
+	diff_flush(&diff_opts);
 }
 
 static int compare_pairs(const void *a_, const void *b_)
