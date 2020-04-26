@@ -2546,10 +2546,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 	side2_dir_renames->strdup_strings = 1;
 	strmap_clear(side1_dir_renames, 1);
 	strmap_clear(side2_dir_renames, 1);
-	renames->pairs[1].nr = 0;
-	renames->pairs[2].nr = 0;
 	free(renames->pairs[1].queue);
+	DIFF_QUEUE_CLEAR(&renames->pairs[1]);
 	free(renames->pairs[2].queue);
+	DIFF_QUEUE_CLEAR(&renames->pairs[2]);
 	/*
 	 * We cannot deallocate combined yet; strings contained in it were
 	 * used inside opt->priv->paths, so we need to wait to deallocate it.
