@@ -2461,8 +2461,12 @@ static void generate_pairs(struct strmap *paths,
 		   renames->pairs[side].alloc);
 	memcpy(&renames->pairs[side].queue[renames->pairs[side].nr],
 	       renames->renames[side].queue,
-	       renames->renames[side].nr * sizeof(struct diff_filepair));
+	       renames->renames[side].nr *
+		 sizeof(*renames->renames[side].queue));
 	renames->pairs[side].nr += renames->renames[side].nr;
+	/* And since we have a copy, clear out renames->renames[side] now */
+	free(renames->renames[side].queue);
+	DIFF_QUEUE_CLEAR(&renames->renames[side]);
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
