@@ -2296,10 +2296,12 @@ static void record_rename(struct rename_info *renames,
 
 	one = alloc_filespec(src_fullname);
 	ci = strmap_get(paths, src_fullname);
+	assert(ci);
 	fill_filespec(one, &ci->stages[0].oid,    1, ci->stages[0].mode);
 
 	two = alloc_filespec(dst_fullname);
 	ci = strmap_get(paths, dst_fullname);
+	assert(ci);
 	fill_filespec(two, &ci->stages[side].oid, 1, ci->stages[side].mode);
 
 	diff_queue(storage, one, two);
