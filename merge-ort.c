@@ -412,17 +412,18 @@ static void setup_path_info(struct string_list_item *result,
 			    int resolved          /* boolean */)
 {
 	struct conflict_info *path_info;
+	int merged_only = (resolved && !is_null);
 
-	assert(!is_null || resolved);      /* is_null implies resolved */
 	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
 	assert(resolved == (merged_version != NULL));
 
-	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
-					  sizeof(struct conflict_info));
+	path_info = xcalloc(1, merged_only ? sizeof(struct merged_info) :
+					     sizeof(struct conflict_info));
 	path_info->merged.directory_name = current_dir_name;
 	path_info->merged.basename_offset = current_dir_name_len;
 	path_info->merged.clean = !!resolved;
-	if (resolved) {
+	path_info->merged.is_null = !!is_null;
+	if (merged_only) {
 #ifdef VERBOSE_DEBUG
 		printf("For %s, mode=%o, sha=%s, is_null=%d, clean=%d\n",
 		       fullpath, merged_version->mode,
@@ -431,7 +432,6 @@ static void setup_path_info(struct string_list_item *result,
 #endif
 		path_info->merged.result.mode = merged_version->mode;
 		oidcpy(&path_info->merged.result.oid, &merged_version->oid);
-		path_info->merged.is_null = !!is_null;
 	} else {
 		int i;
 
@@ -705,24 +705,29 @@ static int collect_merge_info_callback(int n,
 	 * correspond to a rename target so we have to mark that as conflicted.
 	 */
 	if (side1_matches_mbase && opti->renames->dir_rename_mask != 0x07) {
+		int record = 0;
 		if (side2_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
-			if (filemask)
+			if (filemask) {
+				record = 1;
 				strintmap_set(&opti->renames->sources_to_skip[2],
 					      fullpath, 1);
-			return mask;
+			}
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, dirname, info->pathlen, fullpath,
-					names, names+2, side2_null, 0, filemask,
-					dirmask, 1);
+			record = 1;
 #ifdef VERBOSE_DEBUG
 			printf("Path 1.C for %s\n", pi.string);
 #endif
+		}
+		if (record) {
+			setup_path_info(&pi, dirname, info->pathlen, fullpath,
+					names, names+2, side2_null, 0, filemask,
+					dirmask, 1);
 			strmap_put(&opti->paths, pi.string, pi.util);
 			return mask;
 		}
@@ -734,24 +739,29 @@ static int collect_merge_info_callback(int n,
 	 * reasoning as for above but with side1 and side2 swapped.
 	 */
 	if (side2_matches_mbase && opti->renames->dir_rename_mask != 0x07) {
+		int record = 0;
 		if (side1_null) {
 			/* Ignore this path, nothing to do. */
 #ifdef VERBOSE_DEBUG
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
-			if (filemask)
+			if (filemask) {
+				record = 1;
 				strintmap_set(&opti->renames->sources_to_skip[1],
 					      fullpath, 1);
-			return mask;
+			}
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, dirname, info->pathlen, fullpath,
-					names, names+1, side1_null, 0, filemask,
-					dirmask, 1);
+			record = 1;
 #ifdef VERBOSE_DEBUG
 			printf("Path 2.C for %s\n", pi.string);
 #endif
+		}
+		if (record) {
+			setup_path_info(&pi, dirname, info->pathlen, fullpath,
+					names, names+1, side1_null, 0, filemask,
+					dirmask, 1);
 			strmap_put(&opti->paths, pi.string, pi.util);
 			return mask;
 		}
