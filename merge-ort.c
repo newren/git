@@ -544,8 +544,10 @@ static void collect_rename_info(struct rename_info *renames,
 
 	for (side = 1; side <= 2; ++side) {
 		unsigned side_mask = (side << 1);
+		unsigned regular_mode;
 
-		if ((filemask & 1) && !(filemask & side_mask)) {
+		regular_mode = S_ISREG(names[0].mode);
+		if ((filemask & 1) && !(filemask & side_mask) && regular_mode) {
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
 			strmap_put(&renames->possible_sources[side],
 				   fullname, NULL);
@@ -556,7 +558,8 @@ static void collect_rename_info(struct rename_info *renames,
 				   fullname);
 		}
 
-		if (!(filemask & 1) && (filemask & side_mask)) {
+		regular_mode = S_ISREG(names[side].mode);
+		if (!(filemask & 1) && (filemask & side_mask) && regular_mode) {
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
 			strmap_put(&renames->possible_targets[side],
 				   fullname, NULL);
