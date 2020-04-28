@@ -2274,9 +2274,139 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 /*** Rename stuff ***/
 
-static void detect_exact_renames(struct rename_info *renames,
+static int basename_same(const char *path1, const char *path2)
+{
+	int len1 = strlen(path1), len2 = strlen(path2);
+	while (len1 && len2) {
+		char c1 = path1[--len1];
+		char c2 = path2[--len2];
+		if (c1 != c2)
+			return 0;
+		if (c1 == '/')
+			return 1;
+	}
+	return (!len1 || path1[len1 - 1] == '/') &&
+	       (!len2 || path2[len2 - 1] == '/');
+}
+
+static void record_rename(struct rename_info *renames,
+			  struct strmap *paths,
+			  const char *src_fullname,
+			  const char *dst_fullname,
+			  unsigned side)
+{
+	struct diff_queue_struct *storage = &renames->renames[side];
+	struct diff_filespec *one, *two;
+	struct conflict_info *ci;
+
+	one = alloc_filespec(src_fullname);
+	ci = strmap_get(paths, src_fullname);
+	fill_filespec(one, &ci->stages[0].oid,    1, ci->stages[0].mode);
+
+	two = alloc_filespec(dst_fullname);
+	ci = strmap_get(paths, dst_fullname);
+	fill_filespec(two, &ci->stages[side].oid, 1, ci->stages[side].mode);
+
+	diff_queue(storage, one, two);
+	storage->queue[storage->nr-1]->renamed_pair = 1;
+
+	strmap_put(&renames->targets_to_skip[side], dst_fullname, NULL);
+	strintmap_set(&renames->sources_to_skip[side], src_fullname, 2);
+}
+
+static void detect_exact_renames(struct strmap *paths,
+				 struct rename_info *renames,
 				 unsigned side)
 {
+	struct oidmap_iter iter;
+	struct oidmap_string_list_entry *src_entry;
+	/* Simple aliases to make it easier to access */
+	struct strmap *skip_sources = &renames->sources_to_skip[side];
+	struct strmap *skip_targets = &renames->targets_to_skip[side];
+
+	oidmap_iter_init(&renames->src_hashes[side], &iter);
+	while ((src_entry = oidmap_iter_next(&iter))) {
+		struct oidmap_string_list_entry *dst_entry;
+		struct string_list *src_paths;
+		struct string_list *dst_paths;
+		int i, j;
+
+		/* Find the corresponding destination hashes with same oid */
+		dst_entry = oidmap_get(&renames->dst_hashes[side],
+				       &src_entry->entry.oid);
+		if (!dst_entry)
+			continue;
+
+		/*
+		 * At this point, we have src_entry and dst_entry which have
+		 * a list of pathnames.  No pathname from src can appear in
+		 * dst and vice-versa, by construction (we don't do break
+		 * detection in merge-ort).
+		 */
+		src_paths = &src_entry->fullpaths;
+		dst_paths = &dst_entry->fullpaths;
+
+		/*
+		 * Basename matching.
+		 *
+		 * TODO: This is O(N^2), or actually O(N*M), where N and M
+		 * are the number of paths all with the same oid in the
+		 * source and target sides of history, respectively.  I
+		 * expect N and M to be 1 in most cases and never more than
+		 * about half a dozen, so I'm just going to do a stupid
+		 * quadratic algorithm here.  Technically, someone could
+		 * construct a weird history with a whole bunch of identical
+		 * files that all get renamed and not modified and make this
+		 * loop slow, though.
+		 *
+		 * In most cases I could just match up entries from src and
+		 * entries from dst in order, but I'd prefer to use
+		 * basenames as a tie-breaker.  (TODO: It could also make
+		 * sense to use file modes as an additional tie-breaker.)
+		 */
+		for (i = 0; i < src_paths->nr; i++) {
+			char *src_path = src_paths->items[i].string;
+
+			for (j = 0; j < dst_paths->nr; j++) {
+				char *dst_path = dst_paths->items[j].string;
+
+				if (strmap_contains(skip_targets, dst_path))
+					continue;
+
+				if (basename_same(src_path, dst_path)) {
+					record_rename(renames, paths,
+						      src_path, dst_path, side);
+					break;
+				}
+			}
+		}
+
+		/*
+		 * It's possible we still have multiple paths left that did
+		 * not have matching basenames, if so, just pair them up in
+		 * the order we iterate over them.  Their oids match after
+		 * all.
+		 */
+		i = j = 0;
+		while (i < src_paths->nr && j < dst_paths->nr) {
+			char *src_path, *dst_path;
+
+			src_path = src_paths->items[i++].string;
+			if (strintmap_get(skip_sources, src_path) == 2)
+				continue;
+
+			dst_path = NULL; /* Silence the stupid compiler. */
+			while (j < dst_paths->nr) {
+				dst_path = dst_paths->items[j++].string;
+				if (!strmap_contains(skip_targets, dst_path))
+					break;
+			}
+
+			if (j == dst_paths->nr)
+				break;
+			record_rename(renames, paths, src_path, dst_path, side);
+		}
+	}
 }
 
 static void detect_renames_by_basename(struct rename_info *renames,
@@ -2324,6 +2454,18 @@ static void generate_pairs(struct strmap *paths,
 			      ci->stages[side].mode);
 		diff_queue(&renames->pairs[side], one, two);
 	}
+
+	/*
+	 * Now copy over all the renames found from exact oid match and
+	 * basename similarity.
+	 */
+	ALLOC_GROW(renames->pairs[side].queue,
+		   renames->pairs[side].nr + renames->renames[side].nr,
+		   renames->pairs[side].alloc);
+	memcpy(&renames->pairs[side].queue[renames->pairs[side].nr],
+	       renames->renames[side].queue,
+	       renames->renames[side].nr * sizeof(struct diff_filepair));
+	renames->pairs[side].nr += renames->renames[side].nr;
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
@@ -2396,7 +2538,7 @@ static void detect_regular_renames(struct merge_options *opt,
 	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&diff_opts);
 
-	detect_exact_renames(renames, side_index);
+	detect_exact_renames(&opt->priv->paths, renames, side_index);
 	detect_renames_by_basename(renames, side_index);
 	purge_unnecessary_filepairs(renames, side_index);
 	generate_pairs(&opt->priv->paths, renames, side_index);
