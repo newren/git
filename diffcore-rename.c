@@ -495,7 +495,7 @@ static int find_basename_matches(struct diff_options *options, int minimum_score
 			struct diff_filespec *one, *two;
 			int score;
 
-			dst_index = strintmap_get(&dests, base);
+			dst_index = strintmap_get(&dests, base, -1);
 			if (dst_index == -1)
 				continue;
 

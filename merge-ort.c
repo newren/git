@@ -1804,7 +1804,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			strmap_put(dir_renames, old_dir, info);
 		}
 
-		count = strintmap_get(&info->possible_new_dirs, new_dir);
+		count = strintmap_get(&info->possible_new_dirs, new_dir, 0);
 		strintmap_set(&info->possible_new_dirs, new_dir, count+1);
 		if (count)
 			free(new_dir);
@@ -2399,7 +2399,7 @@ static void detect_exact_renames(struct strmap *paths,
 			char *src_path, *dst_path;
 
 			src_path = src_paths->items[i++].string;
-			if (strintmap_get(skip_sources, src_path) == 2)
+			if (strintmap_get(skip_sources, src_path, 0) == 2)
 				continue;
 
 			dst_path = NULL; /* Silence the stupid compiler. */
