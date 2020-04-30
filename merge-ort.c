@@ -2279,6 +2279,16 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 
 /*** Rename stuff ***/
 
+static inline int possible_renames(struct rename_info *renames,
+				   unsigned side_index)
+{
+	int nr_sources = strmap_get_size(&renames->possible_sources[side_index])
+		       - strmap_get_size(&renames->sources_to_skip[side_index]);
+	int nr_targets = strmap_get_size(&renames->possible_targets[side_index])
+		       - strmap_get_size(&renames->targets_to_skip[side_index]);
+	return nr_sources > 0 && nr_targets > 0;
+}
+
 static int basename_same(const char *path1, const char *path2)
 {
 	int len1 = strlen(path1), len2 = strlen(path2);
@@ -2499,17 +2509,6 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 			p->status = DIFF_STATUS_RENAMED;
 	}
 }
-
-static inline int possible_renames(struct rename_info *renames,
-				   unsigned side_index)
-{
-	int nr_sources = strmap_get_size(&renames->possible_sources[side_index])
-		       - strmap_get_size(&renames->sources_to_skip[side_index]);
-	int nr_targets = strmap_get_size(&renames->possible_targets[side_index])
-		       - strmap_get_size(&renames->targets_to_skip[side_index]);
-	return nr_sources > 0 && nr_targets > 0;
-}
-
 
 /* Call diffcore_rename() to update deleted/added pairs into rename pairs */
 static void detect_regular_renames(struct merge_options *opt,
