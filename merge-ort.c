@@ -2426,6 +2426,28 @@ static void detect_exact_renames(struct strmap *paths,
 	}
 }
 
+static void resolve_diffpair_statuses(struct diff_queue_struct *q)
+{
+	/*
+	 * A simplified version of diff_resolve_rename_copy(); would probably
+	 * just use that function but it's static...
+	 */
+	int i;
+	struct diff_filepair *p;
+
+	for (i = 0; i < q->nr; ++i) {
+		p = q->queue[i];
+		p->status = 0; /* undecided */
+		if (!DIFF_FILE_VALID(p->one))
+			p->status = DIFF_STATUS_ADDED;
+		else if (!DIFF_FILE_VALID(p->two))
+			p->status = DIFF_STATUS_DELETED;
+		else if (DIFF_PAIR_RENAME(p))
+			p->status = DIFF_STATUS_RENAMED;
+	}
+}
+
+
 static void detect_renames_by_basename(struct rename_info *renames,
 				       unsigned side)
 {
@@ -2487,27 +2509,6 @@ static void generate_pairs(struct strmap *paths,
 	/* And since we have a copy, clear out renames->renames[side] now */
 	free(renames->renames[side].queue);
 	DIFF_QUEUE_CLEAR(&renames->renames[side]);
-}
-
-static void resolve_diffpair_statuses(struct diff_queue_struct *q)
-{
-	/*
-	 * A simplified version of diff_resolve_rename_copy(); would probably
-	 * just use that function but it's static...
-	 */
-	int i;
-	struct diff_filepair *p;
-
-	for (i = 0; i < q->nr; ++i) {
-		p = q->queue[i];
-		p->status = 0; /* undecided */
-		if (!DIFF_FILE_VALID(p->one))
-			p->status = DIFF_STATUS_ADDED;
-		else if (!DIFF_FILE_VALID(p->two))
-			p->status = DIFF_STATUS_DELETED;
-		else if (DIFF_PAIR_RENAME(p))
-			p->status = DIFF_STATUS_RENAMED;
-	}
 }
 
 /* Call diffcore_rename() to update deleted/added pairs into rename pairs */
