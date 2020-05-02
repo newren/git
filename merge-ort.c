@@ -2463,9 +2463,112 @@ static void diff_queue_path(struct diff_queue_struct *queue,
 	diff_queue(queue, one, two);
 }
 
-static void detect_renames_by_basename(struct rename_info *renames,
-				       unsigned side)
+static void detect_renames_by_basename(struct strmap *paths,
+				       struct rename_info *renames,
+				       unsigned side,
+				       struct diff_options *diff_opts)
 {
+	struct diff_queue_struct tmp_queue;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	struct strmap *skip_sources = &renames->sources_to_skip[side];
+	struct strmap *skip_targets = &renames->targets_to_skip[side];
+
+	/* If exact renames detected all the renames for us, bail early */
+	if (!possible_renames(renames, side))
+		return;
+
+	DIFF_QUEUE_CLEAR(&tmp_queue);
+
+	strmap_for_each_entry(&renames->src_basenames[side], &iter, entry) {
+		struct string_list *src_names = entry->item.util;
+		struct string_list *dst_names;
+		int i, nr_sources, nr_targets, check_needed;
+
+		/* If no destinations had same basename, skip to next basename */
+		dst_names = strmap_get(&renames->dst_basenames[side],
+				       entry->item.string);
+		if (!dst_names)
+			continue;
+
+		/* If we don't need renames for any of the sources, skip it */
+		check_needed = 0;
+		for (i = 0; i < src_names->nr; i++) {
+			char *fullname = src_names->items[i].string;
+			if (strintmap_get(skip_sources, fullname, 0) == 0)
+				check_needed = 1;
+		}
+		if (!check_needed)
+			continue;
+
+		/*
+		 * Add pairs for sources with this basename that aren't already
+		 * part of an exact rename.
+		 */
+		for (i = 0; i < src_names->nr; i++) {
+			char *fullname = src_names->items[i].string;
+			if (strintmap_get(skip_sources, fullname, 0) == 2)
+				continue;
+
+			diff_queue_path(&tmp_queue, paths, fullname, 0);
+		}
+		nr_sources = tmp_queue.nr;
+
+		/*
+		 * Add pairs for destinations with this basename that aren't
+		 * already part of an exact rename.
+		 */
+		for (i = 0; i < dst_names->nr; i++) {
+			char *fullname = dst_names->items[i].string;
+			if (strmap_contains(skip_targets, fullname))
+				continue;
+
+			diff_queue_path(&tmp_queue, paths, fullname, side);
+		}
+		nr_targets = tmp_queue.nr - nr_sources;
+
+		/*
+		 * Detect renames among added pairs.  There needs to be at
+		 * least a source and a target for this to be worthwhile, and
+		 * the point of the optimization is to compare very small
+		 * numbers of files (preferably 1 on each side).  If we are
+		 * dealing with a filename like "Makefile" of which there are
+		 * hundreds on each side, then doing a big N^2 comparison here
+		 * and then again later defeats the point of the exercise.
+		 */
+		if (nr_sources > 0 && nr_targets > 0 &&
+		    nr_sources < 5 && nr_targets < 5) {
+			diff_queued_diff = tmp_queue;
+
+#if 0
+			printf("\nLooking for renames of %s\n",
+			       entry->item.string);
+#endif
+			diffcore_rename(diff_opts);
+			resolve_diffpair_statuses(&diff_queued_diff);
+
+			tmp_queue = diff_queued_diff;
+			DIFF_QUEUE_CLEAR(&diff_queued_diff);
+		}
+
+		/* Record renames, free the other pairs */
+		for (i = 0; i < tmp_queue.nr; i++) {
+			struct diff_filepair *p = tmp_queue.queue[i];
+			if (p->status == DIFF_STATUS_RENAMED) {
+#if 0
+				printf("Found rename %s -> %s\n",
+				       p->one->path, p->two->path);
+#endif
+				diff_q(&renames->renames[side], p);
+				strintmap_set(skip_sources, p->one->path, 2);
+				strmap_put(skip_targets, p->two->path, NULL);
+			}
+			else
+				diff_free_filepair(p);
+		}
+		free(tmp_queue.queue);
+		DIFF_QUEUE_CLEAR(&tmp_queue);
+	}
 }
 
 static void generate_pairs(struct strmap *paths,
@@ -2547,11 +2650,15 @@ static void detect_regular_renames(struct merge_options *opt,
 	diff_setup_done(&diff_opts);
 
 	detect_exact_renames(&opt->priv->paths, renames, side_index);
-	detect_renames_by_basename(renames, side_index);
+	detect_renames_by_basename(&opt->priv->paths, renames, side_index,
+				   &diff_opts);
 	generate_pairs(&opt->priv->paths, renames, side_index);
 
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
+#if 0
+	printf("\nLooking for exhaustive pair-wise comparisons\n");
+#endif
 	diffcore_rename(&diff_opts);
 	resolve_diffpair_statuses(&diff_queued_diff);
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
