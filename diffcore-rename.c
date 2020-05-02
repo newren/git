@@ -204,9 +204,13 @@ static int estimate_similarity(struct repository *r,
 		dpf_options.missing_object_data = &prefetch_options;
 	}
 
-	/* We deal only with regular files.  Symlink renames are handled
+	/*
+	 * We deal only with regular files.  Symlink renames are handled
 	 * only when they are exact matches --- in other words, no edits
-	 * after renaming.
+	 * after renaming.  Similarly, submodule renames would require
+	 * a bunch of additional comparison logic (or might be better
+	 * done through just looking at changes to the toplevel
+	 * .gitmodules file and comparing submodule.*.url fields).
 	 */
 	if (!S_ISREG(src->mode) || !S_ISREG(dst->mode))
 		return 0;
