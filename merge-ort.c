@@ -2447,6 +2447,21 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 	}
 }
 
+static void diff_queue_path(struct diff_queue_struct *queue,
+			    struct strmap *paths,
+			    char *pathname,
+			    unsigned side) {
+	struct conflict_info *ci;
+	struct diff_filespec *one, *two;
+
+	ci = strmap_get(paths, pathname);
+	assert(ci);
+	one = alloc_filespec(pathname);
+	two = alloc_filespec(pathname);
+	fill_filespec((side == 0) ? one : two,
+		      &ci->stages[side].oid, 1, ci->stages[side].mode);
+	diff_queue(queue, one, two);
+}
 
 static void detect_renames_by_basename(struct rename_info *renames,
 				       unsigned side)
@@ -2464,20 +2479,13 @@ static void generate_pairs(struct strmap *paths,
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
-	struct diff_filespec *one, *two;
-	struct conflict_info *ci;
 
 	strmap_for_each_entry(&renames->possible_sources[side], &iter, entry) {
 		char *fullname = entry->item.string;
 		if (strmap_contains(&renames->sources_to_skip[side], fullname))
 			continue;
 
-		ci = strmap_get(paths, fullname);
-		assert(ci);
-		one = alloc_filespec(fullname);
-		two = alloc_filespec(fullname);
-		fill_filespec(one, &ci->stages[0].oid, 1, ci->stages[0].mode);
-		diff_queue(&renames->pairs[side], one, two);
+		diff_queue_path(&renames->pairs[side], paths, fullname, 0);
 	}
 
 	strmap_for_each_entry(&renames->possible_targets[side], &iter, entry) {
@@ -2485,13 +2493,7 @@ static void generate_pairs(struct strmap *paths,
 		if (strmap_contains(&renames->targets_to_skip[side], fullname))
 			continue;
 
-		ci = strmap_get(paths, fullname);
-		assert(ci);
-		one = alloc_filespec(fullname);
-		two = alloc_filespec(fullname);
-		fill_filespec(two, &ci->stages[side].oid, 1,
-			      ci->stages[side].mode);
-		diff_queue(&renames->pairs[side], one, two);
+		diff_queue_path(&renames->pairs[side], paths, fullname, side);
 	}
 
 	/*
