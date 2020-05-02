@@ -2468,11 +2468,6 @@ static void detect_renames_by_basename(struct rename_info *renames,
 {
 }
 
-static void purge_unnecessary_filepairs(struct rename_info *renames,
-					unsigned side)
-{
-}
-
 static void generate_pairs(struct strmap *paths,
 			   struct rename_info *renames,
 			   unsigned side)
@@ -2553,7 +2548,6 @@ static void detect_regular_renames(struct merge_options *opt,
 
 	detect_exact_renames(&opt->priv->paths, renames, side_index);
 	detect_renames_by_basename(renames, side_index);
-	purge_unnecessary_filepairs(renames, side_index);
 	generate_pairs(&opt->priv->paths, renames, side_index);
 
 	diff_queued_diff = renames->pairs[side_index];
