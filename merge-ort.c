@@ -2306,7 +2306,10 @@ static void detect_regular_renames(struct merge_options *opt,
 
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
-	diffcore_rename(&diff_opts);
+	diffcore_rename_extended(&diff_opts,
+				 &renames->relevant_sources[side_index],
+				 NULL,
+				 &renames->dirs_removed[side_index]);
 	resolve_diffpair_statuses(&diff_queued_diff);
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
 #ifdef VERBOSE_DEBUG

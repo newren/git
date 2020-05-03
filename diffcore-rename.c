@@ -428,7 +428,11 @@ static int find_exact_renames(struct diff_options *options)
 	return renames;
 }
 
-static int find_basename_matches(struct diff_options *options, int minimum_score)
+static int find_basename_matches(struct diff_options *options,
+				 int minimum_score,
+				 struct strmap *relevant_sources,
+				 struct strmap *relevant_targets,
+				 struct strmap *dirs_removed)
 {
 	int i, renames = 0;
 	int skip_unmodified;
@@ -503,26 +507,38 @@ static int find_basename_matches(struct diff_options *options, int minimum_score
 			if (dst_index == -1)
 				continue;
 
-			/* Estimate the similarity */
 			one = rename_src[src_index].p->one;
 			two = rename_dst[dst_index].two;
+
+			/* If we don't care about the source/target, skip it */
+			if (relevant_sources &&
+			    !strmap_contains(relevant_sources, one->path))
+				continue;
+			if (relevant_targets &&
+			    !strmap_contains(relevant_targets, two->path))
+				continue;
+
+			/* Estimate the similarity */
 			score = estimate_similarity(options->repo, one, two,
 						    minimum_score, skip_unmodified);
-			/* After estimate_similarity, text is unnecessary. */
-			diff_free_filespec_blob(one);
-			diff_free_filespec_blob(two);
 
 			/* If sufficiently similar, record as rename pair */
 			if (score < minimum_score)
 				continue;
 #ifdef VERBOSE_DEBUG
 			printf("  Basename-matched rename: %s -> %s (%d)\n",
-			       rename_src[src_index].p->one->path,
-			       rename_dst[dst_index].two->path,
-			       score);
+			       one->path, two->path, score);
 #endif
 			record_rename_pair(dst_index, src_index, score);
 			renames++;
+
+			/*
+			 * Found a rename so don't need text anymore; if we
+			 * didn't find a rename, the filespec_blob would get
+			 * re-used when doing the matrix of comparisons.
+			 */
+			diff_free_filespec_blob(one);
+			diff_free_filespec_blob(two);
 		}
 	}
 
@@ -646,24 +662,43 @@ static void dump_unmatched(void)
 #endif
 }
 
-static int remove_renames_from_src(void)
+static int remove_unneeded_paths_from_src(int num_src,
+					  int detecting_copies,
+					  struct strmap *interesting)
 {
-	int j, new_j;
+	int i, new_num_src;
 
-	for (j = 0, new_j = 0; j < rename_src_nr; j++) {
-		if (rename_src[j].p->one->rename_used)
+	if (detecting_copies && !interesting)
+		return num_src;
+
+	for (i = 0, new_num_src = 0; i < num_src; i++) {
+		struct diff_filespec *one = rename_src[i].p->one;
+
+		/*
+		 * renames are stored in rename_dst, so if a rename has
+		 * already been detected using this source, just remove it.
+		 */
+		if (!detecting_copies && one->rename_used)
 			continue;
 
-		if (new_j < j)
-			memcpy(&rename_src[new_j], &rename_src[j],
+		/* If we don't care about the source path, skip it */
+		if (interesting && !strmap_contains(interesting, one->path))
+			continue;
+
+		if (new_num_src < i)
+			/* FIXME: Does this leak memory of what we overwrite? */
+			memcpy(&rename_src[new_num_src], &rename_src[i],
 			       sizeof(struct diff_rename_src));
-		new_j++;
+		new_num_src++;
 	}
 
-	return new_j;
+	return new_num_src;
 }
 
-void diffcore_rename(struct diff_options *options)
+void diffcore_rename_extended(struct diff_options *options,
+			      struct strmap *relevant_sources,
+			      struct strmap *relevant_targets,
+			      struct strmap *dirs_removed)
 {
 	int detect_rename = options->detect_rename;
 	int minimum_score = options->rename_score;
@@ -671,8 +706,12 @@ void diffcore_rename(struct diff_options *options)
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
 	int i, j, exact_count, rename_count, skip_unmodified = 0;
-	int num_create, dst_cnt, num_src;
+	int num_create, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
+
+	want_copies = (detect_rename == DIFF_DETECT_COPY);
+	if (want_copies && dirs_removed)
+		BUG("dirs_removed incompatible with copy detection");
 
 	if (!minimum_score)
 		minimum_score = DEFAULT_RENAME_SCORE;
@@ -738,23 +777,32 @@ void diffcore_rename(struct diff_options *options)
 	if (minimum_score == MAX_SCORE)
 		goto cleanup;
 
+	/* Cull sources used in exact renames if not needed anymore */
+	num_src = rename_src_nr;
+	num_src = remove_unneeded_paths_from_src(num_src, want_copies, NULL);
+
 	/*
 	 * Also cull the candidates list based on basename match.
 	 */
 #ifdef SECTION_LABEL
 	printf("Looking for basename-based renames...\n");
 #endif
-	rename_count += find_basename_matches(options, minimum_score);
+	rename_count += find_basename_matches(options, minimum_score,
+					      relevant_sources, relevant_targets,
+					      dirs_removed);
 #ifdef SECTION_LABEL
 	printf("Done.\n");
 #endif
 
-	num_src = rename_src_nr;
-	if (detect_rename != DIFF_DETECT_COPY)
-		num_src = remove_renames_from_src();
+	/*
+	 * Cull sources used in basename renames or which aren't found in
+	 * relevant_sources if we don't need them anymore.
+	 */
+	num_src = remove_unneeded_paths_from_src(num_src, want_copies,
+						 relevant_sources);
 
 	/*
-	 * Calculate how many renames are left
+	 * Calculate how many rename targets are left
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
@@ -798,7 +846,11 @@ void diffcore_rename(struct diff_options *options)
 		struct diff_score *m;
 
 		if (rename_dst[i].pair)
-			continue; /* dealt with exact match already. */
+			continue; /* dealt with exact & basename match already */
+
+		if (relevant_targets &&
+		    !strmap_contains(relevant_targets, two->path))
+			continue;
 
 		m = &mx[dst_cnt * NUM_CANDIDATE_PER_DST];
 		for (j = 0; j < NUM_CANDIDATE_PER_DST; j++)
@@ -808,6 +860,12 @@ void diffcore_rename(struct diff_options *options)
 			struct diff_filespec *one = rename_src[j].p->one;
 			struct diff_score this_src;
 
+			assert(!one->rename_used ||
+			       detect_rename == DIFF_DETECT_COPY);
+			/*
+			 * FIXME: Can remove the below if condition based on the
+			 * assertion above.
+			 */
 			if (one->rename_used &&
 			    detect_rename != DIFF_DETECT_COPY)
 				continue;
@@ -938,4 +996,9 @@ void diffcore_rename(struct diff_options *options)
 	FREE_AND_NULL(rename_src);
 	rename_src_nr = rename_src_alloc = 0;
 	return;
+}
+
+void diffcore_rename(struct diff_options *options)
+{
+	diffcore_rename_extended(options, NULL, NULL, NULL);
 }
