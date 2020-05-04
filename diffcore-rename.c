@@ -435,6 +435,31 @@ static int find_basename_matches(struct diff_options *options,
 				 struct strmap *relevant_targets,
 				 struct strmap *dirs_removed)
 {
+	/*
+	 * When I checked, over 76% of file renames in linux just moved
+	 * files to a different directory but kept the same basename.  gcc
+	 * did that with over 64% of renames, gecko did it with over 79%,
+	 * and WebKit did it with over 89%.
+	 *
+	 * Therefore we can bypass the normal exhaustive NxM matrix
+	 * comparison of similarities between all potential rename sources
+	 * and targets by instead using file basename as a hint, checking
+	 * for similarity between files with the same basename, and if we
+	 * find a pair that are sufficiently similar, record the rename
+	 * pair and exclude those two from the NxM matrix.
+	 *
+	 * This *might* cause us to find a less than optimal pairing (if
+	 * there is another file that we are even more similar to but has a
+	 * different basename).  Given the huge performance advantage
+	 * basename matching provides, and given the frequency with which
+	 * people use the same basename in real world projects, that's a
+	 * trade-off we are willing to accept when doing just rename
+	 * detection.  However, if someone wants copy detection that
+	 * implies they are willing to spend more cycles to find
+	 * similarities between files, so it may be less likely that this
+	 * heuristic is wanted.
+	 */
+
 	int i, renames = 0;
 	int skip_unmodified;
 	struct strmap sources; //= STRMAP_INIT_NODUP;
@@ -462,8 +487,8 @@ static int find_basename_matches(struct diff_options *options,
 		char *filename = rename_src[i].p->one->path;
 		char *base;
 
-		if (rename_src[i].p->one->rename_used)
-			continue; /* involved in exact match already */
+		/* exact renames removed in remove_unneeded_paths_from_src() */
+		assert(!rename_src[i].p->one->rename_used);
 
 		base = strrchr(filename, '/');
 		base = (base ? base+1 : filename);
@@ -489,6 +514,7 @@ static int find_basename_matches(struct diff_options *options,
 			strintmap_set(&dests, base, i);
 	}
 
+	/* Now look for basename matchups and do similarity estimation */
 	strmap_for_each_entry(&sources, &iter, entry) {
 		char *base = entry->item.string;
 		intptr_t src_index = (intptr_t)entry->item.util;
