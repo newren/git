@@ -635,16 +635,16 @@ static int find_renames(struct diff_score *mx, int dst_cnt, int minimum_score, i
 	return count;
 }
 
-static void dump_unmatched(void)
+static void dump_unmatched(int num_src)
 {
 #ifdef VERBOSE_DEBUG
 	int i;
 
-	for (i = 0; i < rename_src_nr; ++i) {
+	for (i = 0; i < num_src; ++i) {
 		char *filename = rename_src[i].p->one->path;
 
 		if (rename_src[i].p->one->rename_used)
-			continue; /* involved in exact match already */
+			continue;
 
 		printf("  Unmatched source: %s\n", filename);
 	}
@@ -652,7 +652,7 @@ static void dump_unmatched(void)
 		char *filename = rename_dst[i].two->path;
 
 		if (rename_dst[i].pair)
-			continue; /* involved in exact match already. */
+			continue;
 
 		printf("  Unmatched target: %s\n", filename);
 	}
@@ -812,6 +812,8 @@ void diffcore_rename_extended(struct diff_options *options,
 #else
 	(void)exact_count;
 #endif
+	/* Avoid other code trying to use invalidated entries */
+	rename_src_nr = num_src;
 	
 	/* All done? */
 	if (!num_create || !num_src)
@@ -902,7 +904,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	printf("Done.\n");
 #endif
 
-	dump_unmatched();
+	dump_unmatched(num_src);
 
  cleanup:
 	/* At this point, we have found some renames and copies and they
