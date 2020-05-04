@@ -567,11 +567,11 @@ static void record_if_better(struct diff_score m[], struct diff_score *o)
  * 1 if we need to disable inexact rename detection;
  * 2 if we would be under the limit if we were given -C instead of -C -C.
  */
-static int too_many_rename_candidates(int num_create, int num_src,
+static int too_many_rename_candidates(int num_targets, int num_sources,
 				      struct diff_options *options)
 {
 	int rename_limit = options->rename_limit;
-	int i;
+	int i, num_src;
 
 	options->needed_rename_limit = 0;
 
@@ -579,30 +579,30 @@ static int too_many_rename_candidates(int num_create, int num_src,
 	 * This basically does a test for the rename matrix not
 	 * growing larger than a "rename_limit" square matrix, ie:
 	 *
-	 *    num_create * num_src > rename_limit * rename_limit
+	 *    num_targets * num_sources > rename_limit * rename_limit
 	 */
 	if (rename_limit <= 0)
 		rename_limit = 32767;
-	if ((num_create <= rename_limit || num_src <= rename_limit) &&
-	    ((uint64_t)num_create * (uint64_t)num_src
+	if ((num_targets <= rename_limit || num_sources <= rename_limit) &&
+	    ((uint64_t)num_targets * (uint64_t)num_sources
 	     <= (uint64_t)rename_limit * (uint64_t)rename_limit))
 		return 0;
 
 	options->needed_rename_limit =
-		num_src > num_create ? num_src : num_create;
+		num_sources > num_targets ? num_sources : num_targets;
 
 	/* Are we running under -C -C? */
 	if (!options->flags.find_copies_harder)
 		return 1;
 
 	/* Would we bust the limit if we were running under -C? */
-	for (num_src = i = 0; i < rename_src_nr; i++) {
+	for (num_src = i = 0; i < num_sources; i++) {
 		if (diff_unmodified_pair(rename_src[i].p))
 			continue;
 		num_src++;
 	}
-	if ((num_create <= rename_limit || num_src <= rename_limit) &&
-	    ((uint64_t)num_create * (uint64_t)num_src
+	if ((num_targets <= rename_limit || num_src <= rename_limit) &&
+	    ((uint64_t)num_targets * (uint64_t)num_src
 	     <= (uint64_t)rename_limit * (uint64_t)rename_limit))
 		return 2;
 	return 1;
