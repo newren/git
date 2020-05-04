@@ -800,26 +800,30 @@ void diffcore_rename_extended(struct diff_options *options,
 	if (minimum_score == MAX_SCORE)
 		goto cleanup;
 
-	/* Cull sources used in exact renames if not needed anymore */
 	num_src = rename_src_nr;
-	num_src = remove_unneeded_paths_from_src(num_src, want_copies, NULL);
+
+	if (!want_copies) {
+		/* Cull sources used in exact renames */
+		num_src = remove_unneeded_paths_from_src(num_src, want_copies,
+							 NULL);
+
+#ifdef SECTION_LABEL
+		printf("Looking for basename-based renames...\n");
+#endif
+		/* Cull the candidates list based on basename match. */
+		rename_count += find_basename_matches(options, minimum_score,
+						      num_src, relevant_sources,
+						      relevant_targets,
+						      dirs_removed);
+#ifdef SECTION_LABEL
+		printf("Done.\n");
+#endif
+	}
 
 	/*
-	 * Also cull the candidates list based on basename match.
-	 */
-#ifdef SECTION_LABEL
-	printf("Looking for basename-based renames...\n");
-#endif
-	rename_count += find_basename_matches(options, minimum_score, num_src,
-					      relevant_sources, relevant_targets,
-					      dirs_removed);
-#ifdef SECTION_LABEL
-	printf("Done.\n");
-#endif
-
-	/*
-	 * Cull sources used in basename renames or which aren't found in
-	 * relevant_sources if we don't need them anymore.
+	 * Cull sources:
+	 *   - remove ones already involved in renames if we don't want copies
+	 *   - remove ones not found in relevant_sources (if it's not NULL)
 	 */
 	num_src = remove_unneeded_paths_from_src(num_src, want_copies,
 						 relevant_sources);
@@ -832,7 +836,9 @@ void diffcore_rename_extended(struct diff_options *options,
 #if 0
 	/* Debug spew */
 	printf("Rename stats:\n");
-	printf("  Started with (%d x %d)\n", rename_src_nr, rename_dst_nr);
+	printf("  Started with (%d x %d), %d relevant\n",
+	       rename_src_nr, rename_dst_nr,
+	       relevant_sources ? strmap_get_size(relevant_sources) : rename_src_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
 	printf("  Now have (%d x %d)\n", num_src, num_create);
 #else
