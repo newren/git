@@ -457,10 +457,6 @@ static int find_basename_matches(struct diff_options *options,
 	/* Create maps of basename -> fullname(s) for sources and dests */
 	strmap_init(&sources, 0);
 	strmap_init(&dests, 0);
-
-	/* Add all sources to the hash table in reverse order, because
-	 * later on they will be retrieved in LIFO order.
-	 */
 	for (i = 0; i < rename_src_nr; ++i) {
 		char *filename = rename_src[i].p->one->path;
 		char *base;
