@@ -430,6 +430,7 @@ static int find_exact_renames(struct diff_options *options)
 
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
+				 int num_src,
 				 struct strmap *relevant_sources,
 				 struct strmap *relevant_targets,
 				 struct strmap *dirs_removed)
@@ -457,7 +458,7 @@ static int find_basename_matches(struct diff_options *options,
 	/* Create maps of basename -> fullname(s) for sources and dests */
 	strmap_init(&sources, 0);
 	strmap_init(&dests, 0);
-	for (i = 0; i < rename_src_nr; ++i) {
+	for (i = 0; i < num_src; ++i) {
 		char *filename = rename_src[i].p->one->path;
 		char *base;
 
@@ -783,7 +784,7 @@ void diffcore_rename_extended(struct diff_options *options,
 #ifdef SECTION_LABEL
 	printf("Looking for basename-based renames...\n");
 #endif
-	rename_count += find_basename_matches(options, minimum_score,
+	rename_count += find_basename_matches(options, minimum_score, num_src,
 					      relevant_sources, relevant_targets,
 					      dirs_removed);
 #ifdef SECTION_LABEL
