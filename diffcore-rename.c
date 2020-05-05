@@ -428,6 +428,134 @@ static int find_exact_renames(struct diff_options *options)
 	return renames;
 }
 
+struct rename_guess_info {
+	struct strmap idx_map;
+	struct strmap dir_rename;
+	int initialized;
+};
+
+static char *get_dirname(char *filename)
+{
+	char *slash = strrchr(filename, '/');
+	return slash ? xstrndup(filename, slash-filename) : xstrdup("");
+}
+
+static char *get_highest_rename_path(struct strmap *counts) {
+	int highest_count = 0;
+	char *highest_target_dir = NULL;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
+	strmap_for_each_entry(counts, &iter, entry) {
+		char *target_dir = entry->item.string;
+		intptr_t count = (intptr_t)entry->item.util;
+		if (count > highest_count) {
+			highest_count = count;
+			highest_target_dir = target_dir;
+		}
+	}
+	return highest_target_dir;
+}
+
+static void initialize_rename_guess_info(struct rename_guess_info *info,
+					 struct strmap *dirs_removed)
+{
+	char *prev_old_dir = NULL, *old_dir, *new_dir;
+	char *best_newdir;
+	struct strmap counts;
+	int i;
+
+	info->initialized = 1;
+	strmap_init(&info->idx_map, 0);
+	strmap_init(&info->dir_rename, 1);
+
+	// FIXME: Ensure rename_dst[] sorted by filename
+
+	strmap_init(&counts, 1);
+	for (i = 0; i < rename_dst_nr; ++i) {
+		char *filename = rename_dst[i].two->path;
+		char *oldname;
+		int prev_count;
+
+		if (!rename_dst[i].pair) {
+			strintmap_set(&info->idx_map, filename, i);
+			continue;
+		}
+
+		/* FIXME: Remove this assert once I verify it's sane. */
+		assert(rename_dst[i].pair->two->path ==
+		       rename_dst[i].two->path);
+
+		oldname = rename_dst[i].pair->one->path;
+		old_dir = get_dirname(oldname);
+		new_dir = get_dirname(filename);
+		if (!strmap_contains(dirs_removed, old_dir))
+			goto cleanup;
+
+		if (!prev_old_dir) {
+			prev_old_dir = xstrdup(old_dir);
+		} else if (strcmp(old_dir, prev_old_dir)) {
+			best_newdir = get_highest_rename_path(&counts);
+			strmap_put(&info->dir_rename, prev_old_dir,
+				   xstrdup(best_newdir));
+			prev_old_dir = xstrdup(old_dir);
+			strintmap_clear(&counts);
+		}
+
+		prev_count = strintmap_get(&counts, new_dir, 0);
+		strintmap_set(&counts, new_dir, prev_count + 1);
+
+	cleanup:
+		free(old_dir);
+		free(new_dir);
+	}
+
+	best_newdir = get_highest_rename_path(&counts);
+	strmap_put(&info->dir_rename, prev_old_dir, xstrdup(best_newdir));
+	strintmap_clear(&counts);
+}
+
+static void cleanup_rename_guess_info(struct rename_guess_info *info)
+{
+	if (!info->initialized)
+		return;
+	/*
+	 * The strings placed into dir_rename were not strdup()'ed an extra
+	 * time, but they weren't used anywhere else and weren't free'd.  So,
+	 * pretend we strdup()'ed them earlier so they'll be freed now.
+	 */
+	info->dir_rename.strdup_strings = 1;
+	strmap_clear(&info->dir_rename, 1);
+	strintmap_clear(&info->idx_map);
+}
+
+static int idx_possible_rename(char *filename,
+			       struct rename_guess_info *info,
+			       struct strmap *dirs_removed)
+{
+	char *old_dir, *new_dir, *new_path, *basename;
+	int idx;
+
+	if (!dirs_removed)
+		return -1;
+	if (!info->initialized)
+		initialize_rename_guess_info(info, dirs_removed);
+
+	old_dir = get_dirname(filename);
+	new_dir = strmap_get(&info->dir_rename, old_dir);
+	free(old_dir);
+	if (!new_dir)
+		return -1;
+
+	basename = strrchr(filename, '/');
+	basename = (basename ? basename+1 : filename);
+	new_path = xstrfmt("%s/%s", new_dir, basename);
+
+	idx = strintmap_get(&info->idx_map, new_path, -1);
+	free(new_path);
+	return idx;
+}
+
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
 				 int num_src,
@@ -464,8 +592,9 @@ static int find_basename_matches(struct diff_options *options,
 	int skip_unmodified;
 	struct strmap sources; //= STRMAP_INIT_NODUP;
 	struct strmap dests; // = STRMAP_INIT_NODUP;
-	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct rename_guess_info info;
+
+	info.initialized = 0;
 
 	/*
 	 * The prefeteching stuff wants to know if it can skip prefetching blobs
@@ -515,20 +644,34 @@ static int find_basename_matches(struct diff_options *options,
 	}
 
 	/* Now look for basename matchups and do similarity estimation */
-	strmap_for_each_entry(&sources, &iter, entry) {
-		char *base = entry->item.string;
-		intptr_t src_index = (intptr_t)entry->item.util;
+	for (i = 0; i < num_src; ++i) {
+		char *filename = rename_src[i].p->one->path;
+		char *base = NULL;
+		intptr_t src_index;
 		intptr_t dst_index;
-		if (src_index == -1)
-			continue;
+
+		base = strrchr(filename, '/');
+		base = (base ? base+1 : filename);
+
+		src_index = strintmap_get(&sources, base, -1);
+		assert(src_index == -1 || src_index == i);
 
 		if (strmap_contains(&dests, base)) {
 			struct diff_filespec *one, *two;
 			int score;
 
 			dst_index = strintmap_get(&dests, base, -1);
+			if (src_index == -1 || dst_index == -1) {
+				src_index = i;
+				dst_index = idx_possible_rename(filename,
+								&info,
+								dirs_removed);
+			}
 			if (dst_index == -1)
 				continue;
+
+			if (rename_dst[dst_index].pair)
+				continue; /* already used previously */
 
 			one = rename_src[src_index].p->one;
 			two = rename_dst[dst_index].two;
@@ -567,6 +710,7 @@ static int find_basename_matches(struct diff_options *options,
 
 	strintmap_clear(&sources);
 	strintmap_clear(&dests);
+	cleanup_rename_guess_info(&info);
 
 	return renames;
 }
