@@ -488,24 +488,24 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 
 		oldname = rename_dst[i].pair->one->path;
 		old_dir = get_dirname(oldname);
-		new_dir = get_dirname(filename);
-		if (!strmap_contains(dirs_removed, old_dir))
-			goto cleanup;
+		if (!strmap_contains(dirs_removed, old_dir)) {
+			free(old_dir);
+			continue;
+		}
 
-		if (!prev_old_dir) {
-			prev_old_dir = xstrdup(old_dir);
-		} else if (strcmp(old_dir, prev_old_dir)) {
+		new_dir = get_dirname(filename);
+
+		if (prev_old_dir && strcmp(old_dir, prev_old_dir)) {
 			best_newdir = get_highest_rename_path(&counts);
 			strmap_put(&info->dir_rename, prev_old_dir,
 				   xstrdup(best_newdir));
-			prev_old_dir = xstrdup(old_dir);
 			strintmap_clear(&counts);
 		}
+		prev_old_dir = xstrdup(old_dir);
 
 		prev_count = strintmap_get(&counts, new_dir, 0);
 		strintmap_set(&counts, new_dir, prev_count + 1);
 
-	cleanup:
 		free(old_dir);
 		free(new_dir);
 	}
@@ -595,6 +595,9 @@ static int find_basename_matches(struct diff_options *options,
 	struct rename_guess_info info;
 
 	info.initialized = 0;
+	if (dirs_removed && strmap_empty(dirs_removed))
+		/* If we have no dirs_removed, make it easy to exit early. */
+		dirs_removed = NULL;
 
 	/*
 	 * The prefeteching stuff wants to know if it can skip prefetching blobs
