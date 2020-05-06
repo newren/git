@@ -460,6 +460,10 @@ static char *get_highest_rename_path(struct strmap *counts) {
 static void initialize_rename_guess_info(struct rename_guess_info *info,
 					 struct strmap *dirs_removed)
 {
+	/*
+	 * NOTE: This function relies on rename_dst being sorted, but that
+	 * was guaranteed by add_rename_dst().
+	 */
 	char *prev_old_dir = NULL, *old_dir, *new_dir;
 	char *best_newdir;
 	struct strmap counts;
@@ -468,8 +472,6 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	info->initialized = 1;
 	strmap_init(&info->idx_map, 0);
 	strmap_init(&info->dir_rename, 0);
-
-	// FIXME: Ensure rename_dst[] sorted by filename
 
 	strmap_init(&counts, 1);
 	for (i = 0; i < rename_dst_nr; ++i) {
