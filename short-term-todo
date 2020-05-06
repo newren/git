@@ -1,75 +1,40 @@
 Perf stuff:
-  * New style
-    * diffcore_rename_extended() also takes:
-      * relevant_sources: strmap (acting as set)
-      * relevant_targets: strmap (acting as set)
-      * dirs_removed:     strmap (acting as set)
-    * diffcore_rename() calls diffcore_rename_extended() with some NULLs
-    * collect_merge_info_callback():
-      * generate full set of pairs early
-      * avoid including path in relevant_sources by partial capitulation rules
-      * pass NULL for relevant_targets for now (useful later for --follow)
-      * record removed dirs in dirs_removed
-    * diffcore_rename_extended() changes:
-      * detect exact renames, as now
-      * detect basenames:
-        * limit to relevant_(sources|targets)
-        * continue only detecting if a one-to-one match
-	* if there are multiple renames (Makefile, .gitignore, hwmon.c), and
-	  if dirs_removed is not NULL, add a follow-up
-	* follow-up (new function?):
-	  * look through the exact renames of files that started in the exact
-	    same directory as the file source.  Generate mapping of
-	    olddir -> newdir, keeping counts of number of files that renamed
-	    directories in that fashion.  Keep track of the biggest.  Then
-	    take the one with the most renames, and try applying that dir
-	    rename to the path.  If you get a valid target path, check
-	    similarity.
-    * Note that optimization 4 (known renames from before):
-      * goes in merge-ort, not diffcore-rename
-      * records renames together with two side trees and target tree
-      * checks on next run if merge base is one of two side trees, and one of
-        two sides in the target tree.  Only applies in this case.
-      * automatically applies the renames on the given side, removing the
-        potential pairs before calling in to diffcore_rename[_extended]()
-      * may be able to use this optimization to allow more cases of trivial
-        tree merges.  (Can't resolve one side matches with trees if there
-        are any deletes anywhere normally, but if those deletes are all for
-        known renames and those renames target outside the given tree, then
-        we can do the trivial tree merge.)
-    * Unneeded:
-      * basename_same()
-      * record_rename()
-      * detect_exact_renames()
-      * diff_queue_path()??
-      * detect_renames_by_basename()
-    * Other notes:
-      * Can undo complication in collect_merge_info_callback() for side match
-        (No need to setup_path_info() for cases 1.A or 2.A anymore)
-      * mode check in collect_rename_info() isn't necessary anymore, but
-        find_basename_matches() should check for modes like
-	estimate_similarity() does
-      * generate_pairs() can probably be simplified
-      * merge_start() and reset_maps() can be simplified
+  * Do some actual measurements of where time is spent during fast-rebase
 
-  * partial capitulation
-    * rename steps
-      * if partial capitulation suggests no rename sources/dests, exit early
-      * otherwise, look in rename sources/dests for exact renames
-      * look in rename sources/dests for basename sets; use new get_diffpairs()
-      * if remaining rename sources and dests, call get_diffpairs()
-    * Extra data to gather
-      * - 3 sets of hash -> string mappings (for exact renames)
-      * - 4? sets of strmap->string_list mappings (for basenames->list of names)
-    * Other notes:
-      * get_diffpairs(); like current, but can work on a smaller set of paths.
-        In particular, turn off verbose feedback when called on set of 14
-	basenames.
+  * diffcore-rename:
+    * add_rename_dst is O(N), called O(N) times!  Ugh, quadratic!!
+    * register_rename_src has the same problem!
+    * redo this to use strmap()
+
+  * Optimization 4 (known renames from before):
+    * goes in merge-ort, not diffcore-rename
+    * records renames together with two side trees and target tree
+    * checks on next run if merge base is one of two side trees, and one of
+      two sides in the target tree.  Only applies in this case.
+    * automatically applies the renames on the given side, removing the
+      potential pairs before calling in to diffcore_rename[_extended]()
+    * may be able to use this optimization to allow more cases of trivial
+      tree merges.  (Can't resolve one side matches with trees if there
+      are any deletes anywhere normally, but if those deletes are all for
+      known renames and those renames target outside the given tree, then
+      we can do the trivial tree merge.)
+  * Optimization 4 extension:
+    * record all relevant_sources[side] which don't pair and resolve to a delete
+    * pass this in to the next cherry-pick, again with the relevant three trees
+      information
+    * for the relevant side, a saved delete means we auto-save it as a delete
+      and don't need to include it in rename detection.
+
   * Partial subtree elimination (already done when all-sides match, but also:)
     1. push one-sided tree-match cases onto a stack
     2. after all trees walked except one-sided tree-match cases:
-      2a. if no file deletions, resolve one-sided tree-match without recursing
+      2a. if no file deletions (on this side of history), resolve one-sided
+          tree-match on this side by taking the other side of history (i.e.
+	  deleting the tree or taking the new tree).
       2b. if file deletions, recurse into one-sided tree-match cases
+      2c. note that saved renames and saved deletes can allow us to ignore
+          deletes because we already know their pairing (although the saved
+	  renames means we do need to recurse into target tree path).
     3. do normal rename detection
 
 Perf command example:
