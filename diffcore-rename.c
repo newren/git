@@ -987,12 +987,19 @@ void diffcore_rename_extended(struct diff_options *options,
 
 #if 0
 	/* Debug spew */
-	printf("Rename stats:\n");
+	fflush(NULL);
+	printf("\nRename stats:\n");
 	printf("  Started with (%d x %d), %d relevant\n",
 	       rename_src_nr, rename_dst_nr,
 	       relevant_sources ? strmap_get_size(relevant_sources) : rename_src_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
 	printf("  Now have (%d x %d)\n", num_src, num_create);
+	if (num_src > 0)
+		printf("  Remaining sources:\n");
+	for (i = 0; i < num_src; i++)
+		printf("    %s\n", rename_src[i].p->one->path);
+	fflush(NULL);
+
 #else
 	(void)exact_count;
 #endif
