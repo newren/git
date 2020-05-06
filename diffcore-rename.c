@@ -467,7 +467,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 
 	info->initialized = 1;
 	strmap_init(&info->idx_map, 0);
-	strmap_init(&info->dir_rename, 1);
+	strmap_init(&info->dir_rename, 0);
 
 	// FIXME: Ensure rename_dst[] sorted by filename
 
@@ -495,13 +495,16 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 
 		new_dir = get_dirname(filename);
 
-		if (prev_old_dir && strcmp(old_dir, prev_old_dir)) {
+		if (!prev_old_dir) {
+			prev_old_dir = xstrdup(old_dir);
+		} else if (strcmp(old_dir, prev_old_dir)) {
 			best_newdir = get_highest_rename_path(&counts);
 			strmap_put(&info->dir_rename, prev_old_dir,
 				   xstrdup(best_newdir));
 			strintmap_clear(&counts);
-		}
-		prev_old_dir = xstrdup(old_dir);
+
+			prev_old_dir = xstrdup(old_dir);
+		} /* else leave prev_old_dir alone */
 
 		prev_count = strintmap_get(&counts, new_dir, 0);
 		strintmap_set(&counts, new_dir, prev_count + 1);
@@ -525,8 +528,8 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 	 * pretend we strdup()'ed them earlier so they'll be freed now.
 	 */
 	info->dir_rename.strdup_strings = 1;
-	strmap_clear(&info->dir_rename, 1);
-	strintmap_clear(&info->idx_map);
+	strmap_free(&info->dir_rename, 1);
+	strintmap_free(&info->idx_map);
 }
 
 static int idx_possible_rename(char *filename,
@@ -711,8 +714,8 @@ static int find_basename_matches(struct diff_options *options,
 		}
 	}
 
-	strintmap_clear(&sources);
-	strintmap_clear(&dests);
+	strintmap_free(&sources);
+	strintmap_free(&dests);
 	cleanup_rename_guess_info(&info);
 
 	return renames;

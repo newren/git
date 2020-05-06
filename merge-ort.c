@@ -1824,7 +1824,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		 * will free them for us.
 		 */
 		info->possible_new_dirs.strdup_strings = 1;
-		strmap_clear(&info->possible_new_dirs, 0);
+		strmap_free(&info->possible_new_dirs, 0);
 	}
 
 	for (i=0; i<to_remove.nr; ++i)
@@ -2562,6 +2562,7 @@ static void write_tree(struct object_id *result_oid,
 
 	/* Write this object file out, and record in result_oid */
 	write_object_file(buf.buf, buf.len, tree_type, result_oid);
+	strbuf_release(&buf);
 }
 
 static void record_entry_for_tree(struct directory_versions *dir_metadata,
@@ -2957,6 +2958,9 @@ static void process_entries(struct merge_options *opt,
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
 	write_tree(result_oid, &dir_metadata.versions, 0);
+	string_list_clear(&plist, 0);
+	string_list_clear(&dir_metadata.versions, 0);
+	string_list_clear(&dir_metadata.offsets, 0);
 }
 
 static int checkout(struct merge_options *opt,
@@ -3194,8 +3198,12 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	 * FIXME: Also need to free each diff_filepair in pairs.queue, and may
 	 * also need to free each pair's one->path and/or two->path.
 	 */
-	if (pairs.nr)
+	if (pairs.nr) {
+		int i;
+		for (i = 0; i < pairs.nr; i++)
+			diff_free_filepair(pairs.queue[i]);
 		free(pairs.queue);
+	}
 	*result = parse_tree_indirect(&working_tree_oid);
 	return clean;
 }
