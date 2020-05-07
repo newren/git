@@ -463,6 +463,13 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	/*
 	 * NOTE: This function relies on rename_dst being sorted, but that
 	 * was guaranteed by add_rename_dst().
+	 *
+	 * FIXME: Actually, it relies on all entries within the same
+	 *        immediate directory being adjacent to each other, which
+	 *        sorted order does not give us.  e.g.:
+	 *             foo.txt
+	 *             foo/bar
+	 *             fooey
 	 */
 	char *prev_old_dir = NULL, *old_dir, *new_dir;
 	char *best_newdir;
