@@ -3349,11 +3349,6 @@ static int merge_ort_internal(struct merge_options *opt,
 		reset_maps(opt, 1);
 	}
 
-	if (!opt->priv->call_depth && merge_bases != NULL) {
-		discard_index(opt->repo->index);
-		repo_read_index(opt->repo);
-	}
-
 	opt->ancestor = ancestor_name;
 	clean = merge_ort_nonrecursive_internal(opt,
 				     repo_get_commit_tree(opt->repo, h1),
@@ -3373,9 +3368,8 @@ static int merge_ort_internal(struct merge_options *opt,
 
 static int merge_start(struct merge_options *opt, struct tree *head)
 {
-	struct strbuf sb = STRBUF_INIT;
-
 	/* Sanity checks on opt */
+	trace2_region_enter("merge", "sanity checks", opt->repo);
 	assert(opt->repo);
 
 	assert(opt->branch1 && opt->branch2);
@@ -3398,21 +3392,17 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 
 	if (head)
 		assert(opt->priv == NULL);
-
-	/* Sanity check on repo state; index must match head */
-	if (head && repo_index_has_changes(opt->repo, head, &sb)) {
-		err(opt, _("Your local changes to the following files would be overwritten by merge:\n  %s"),
-		    sb.buf);
-		strbuf_release(&sb);
-		return -1;
-	}
+	trace2_region_leave("merge", "sanity checks", opt->repo);
 
 	if (opt->priv) {
+		trace2_region_enter("merge", "reset_maps", opt->repo);
 		reset_maps(opt, 1);
+		trace2_region_leave("merge", "reset_maps", opt->repo);
 	} else {
 		struct rename_info *renames;
 		int i;
 
+		trace2_region_enter("merge", "allocate/init", opt->repo);
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
@@ -3429,6 +3419,7 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		string_list_init(&opt->priv->paths_to_free, 0);
 		strmap_init(&opt->priv->paths, 0);
 		strmap_init(&opt->priv->unmerged, 0);
+		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
 
 	return 0;
@@ -3542,8 +3533,17 @@ int merge_ort_nonrecursive(struct merge_options *opt,
 {
 	int clean;
 	struct merge_result result;
+	struct strbuf sb = STRBUF_INIT;
 
 	assert(opt->ancestor != NULL);
+
+	/* Sanity check on repo state; index must match head */
+	if (head && repo_index_has_changes(opt->repo, head, &sb)) {
+		err(opt, _("Your local changes to the following files would be overwritten by merge:\n  %s"),
+		    sb.buf);
+		strbuf_release(&sb);
+		return -1;
+	}
 
 	if (merge_start(opt, head))
 		return -1;
@@ -3565,9 +3565,18 @@ int merge_ort_recursive(struct merge_options *opt,
 	int clean;
 	struct tree *head = repo_get_commit_tree(opt->repo, side1);
 	struct merge_result tmp;
+	struct strbuf sb = STRBUF_INIT;
 
 	assert(opt->ancestor == NULL ||
 	       !strcmp(opt->ancestor, "constructed merge base"));
+
+	/* Sanity check on repo state; index must match head */
+	if (head && repo_index_has_changes(opt->repo, head, &sb)) {
+		err(opt, _("Your local changes to the following files would be overwritten by merge:\n  %s"),
+		    sb.buf);
+		strbuf_release(&sb);
+		return -1;
+	}
 
 	if (merge_start(opt, head))
 		return -1;
