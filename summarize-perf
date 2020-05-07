@@ -1,0 +1,58 @@
+#!/usr/bin/env python
+
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+class Section:
+  def __init__(self):
+    self.sum = 0;
+    self.children = {}
+
+if len(sys.argv) == 1:
+  raise SystemExit(f"Usage: {sys.argv[0]} git $COMMAND $OPTIONS_AND_ARGS")
+
+(fh, filename) = tempfile.mkstemp()
+os.close(fh)
+envcopy = os.environ.copy()
+envcopy["GIT_TRACE2_PERF"] = filename
+before = time.time()
+subprocess.run(sys.argv[1:], env=envcopy)
+after = time.time()
+with open(filename, 'r') as f:
+  sections = []
+  current_section = Section()
+  for line in f:
+    fields = [x.strip() for x in line.split('|')]
+    line, depth, thread, event, repo, t_abs, t_rel, category, label = fields
+    if event == 'region_enter':
+      sections.append((label, current_section))
+      if label not in current_section.children:
+        current_section.children[label] = Section()
+      current_section = current_section.children[label]
+    if event == 'region_leave':
+      current_section.sum += float(t_rel)
+      label, current_section = sections.pop()
+    if event == 'atexit':
+      overall = float(t_abs)
+      current_section.sum = overall
+
+def show_subsection(section, depth):
+  spacing = "   "*depth
+  childsum = sum([c[1].sum for c in section.children.items()])
+  if section.sum > 0 and childsum > 0:
+    discrepancy = section.sum - childsum
+    relative = (discrepancy / section.sum) if section.sum > 0 else 1
+    print(f"{spacing}{discrepancy:6.3f} : <unmeasured> ({100*relative:4.1f}%)")
+  for label, subsection in sorted(section.children.items(),
+                                  key=lambda item: item[1].sum,
+                                  reverse=True):
+    print(f"{spacing}{subsection.sum:6.3f} : {label:20}")
+    show_subsection(subsection, depth+1)
+
+print("Accumulated times:")
+show_subsection(current_section, 1)
+os.remove(filename)
+print(f"Timing including forking: {after-before:6.3f} ({after-before-current_section.sum:.3f} additional seconds)")

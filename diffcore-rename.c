@@ -884,6 +884,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	int num_create, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
 
+	trace2_region_enter("diff", "setup", options->repo);
 	want_copies = (detect_rename == DIFF_DETECT_COPY);
 	if (want_copies && dirs_removed)
 		BUG("dirs_removed incompatible with copy detection");
@@ -933,9 +934,11 @@ void diffcore_rename_extended(struct diff_options *options,
 			register_rename_src(p);
 		}
 	}
+	trace2_region_leave("diff", "setup", options->repo);
 	if (rename_dst_nr == 0 || rename_src_nr == 0)
 		goto cleanup; /* nothing to do */
 
+	trace2_region_enter("diff", "exact renames", options->repo);
 	/*
 	 * We really want to cull the candidates list early
 	 * with cheap tests in order to avoid doing deltas.
@@ -947,6 +950,7 @@ void diffcore_rename_extended(struct diff_options *options,
 #ifdef SECTION_LABEL
 	printf("Done.\n");
 #endif
+	trace2_region_leave("diff", "exact renames", options->repo);
 
 	/* Did we only want exact renames? */
 	if (minimum_score == MAX_SCORE)
@@ -956,17 +960,21 @@ void diffcore_rename_extended(struct diff_options *options,
 
 	if (!want_copies) {
 		/* Cull sources used in exact renames */
+		trace2_region_enter("diff", "cull exact", options->repo);
 		num_src = remove_unneeded_paths_from_src(num_src, want_copies,
 							 NULL);
+		trace2_region_leave("diff", "cull exact", options->repo);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
 #endif
 		/* Cull the candidates list based on basename match. */
+		trace2_region_enter("diff", "basename matches", options->repo);
 		rename_count += find_basename_matches(options, minimum_score,
 						      num_src, relevant_sources,
 						      relevant_targets,
 						      dirs_removed);
+		trace2_region_leave("diff", "basename matches", options->repo);
 #ifdef SECTION_LABEL
 		printf("Done.\n");
 #endif
@@ -977,8 +985,10 @@ void diffcore_rename_extended(struct diff_options *options,
 	 *   - remove ones already involved in renames if we don't want copies
 	 *   - remove ones not found in relevant_sources (if it's not NULL)
 	 */
+	trace2_region_enter("diff", "cull basename", options->repo);
 	num_src = remove_unneeded_paths_from_src(num_src, want_copies,
 						 relevant_sources);
+	trace2_region_leave("diff", "cull basename", options->repo);
 
 	/*
 	 * Calculate how many rename targets are left
@@ -1024,6 +1034,7 @@ void diffcore_rename_extended(struct diff_options *options,
 #ifdef SECTION_LABEL
 	printf("Looking for inexact renames...\n");
 #endif
+	trace2_region_enter("diff", "inexact renames", options->repo);
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
 				_("Performing inexact rename detection"),
@@ -1094,6 +1105,7 @@ void diffcore_rename_extended(struct diff_options *options,
 #ifdef SECTION_LABEL
 	printf("Done.\n");
 #endif
+	trace2_region_leave("diff", "inexact renames", options->repo);
 
 	dump_unmatched(num_src);
 
@@ -1101,6 +1113,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	/* At this point, we have found some renames and copies and they
 	 * are recorded in rename_dst.  The original list is still in *q.
 	 */
+	trace2_region_enter("diff", "write back to queue", options->repo);
 	DIFF_QUEUE_CLEAR(&outq);
 	for (i = 0; i < q->nr; i++) {
 		struct diff_filepair *p = q->queue[i];
@@ -1185,6 +1198,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	rename_dst_nr = rename_dst_alloc = 0;
 	FREE_AND_NULL(rename_src);
 	rename_src_nr = rename_src_alloc = 0;
+	trace2_region_leave("diff", "write back to queue", options->repo);
 	return;
 }
 

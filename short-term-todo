@@ -1,5 +1,6 @@
 Perf stuff:
-  * Do some actual measurements of where time is spent during fast-rebase
+  * WOW! string_list_sort and/or string_list_df_name_compare is SLOW!
+  * OOPS!  I accidentally left repo_index_has_changes() in merge_start()!
 
   * diffcore-rename:
     * add_rename_dst is O(N), called O(N) times!  Ugh, quadratic!!
