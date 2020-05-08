@@ -460,83 +460,88 @@ static char *get_highest_rename_path(struct strmap *counts) {
 static void initialize_rename_guess_info(struct rename_guess_info *info,
 					 struct strmap *dirs_removed)
 {
-	/*
-	 * NOTE: This function relies on rename_dst being sorted, but that
-	 * was guaranteed by add_rename_dst().
-	 *
-	 * FIXME: Actually, it relies on all entries within the same
-	 *        immediate directory being adjacent to each other, which
-	 *        sorted order does not give us.  e.g.:
-	 *             foo.txt
-	 *             foo/bar
-	 *             fooey
-	 */
-	char *prev_old_dir = NULL, *old_dir, *new_dir;
-	char *best_newdir;
-	struct strmap counts;
+	struct strmap *counts;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
 	int i;
 
 	info->initialized = 1;
 	strmap_init(&info->idx_map, 0);
-	strmap_init(&info->dir_rename, 0);
+	strmap_init(&info->dir_rename, 1);
 
-	strmap_init(&counts, 1);
 	for (i = 0; i < rename_dst_nr; ++i) {
 		char *filename = rename_dst[i].two->path;
 		char *oldname;
-		int prev_count;
+		char *old_dir, *new_dir;
+		struct string_list_item *dir_rename_entry;
+		int value;
 
+		/*
+		 * For non-renamed files, make idx_map contain mapping of
+		 *   filename -> index (index within rename_dst, that is)
+		 */
 		if (!rename_dst[i].pair) {
 			strintmap_set(&info->idx_map, filename, i);
 			continue;
 		}
 
-		/* FIXME: Remove this assert once I verify it's sane. */
-		assert(rename_dst[i].pair->two->path ==
-		       rename_dst[i].two->path);
+		/*
+		 * For everything else (i.e. renamed files), make dir_rename
+		 * contain a map of a map:
+		 *   old_directory -> {new_directory -> count}
+		 * In other words, for every pair look at the directories for
+		 * the old filename and the new filename and count how many
+		 * times that pairing occurs.
+		 */
 
 		oldname = rename_dst[i].pair->one->path;
 		old_dir = get_dirname(oldname);
+
+		/* Skip if old_dir if its directory couldn't have been renamed */
 		if (!strmap_contains(dirs_removed, old_dir)) {
 			free(old_dir);
 			continue;
 		}
 
 		new_dir = get_dirname(filename);
-
-		if (!prev_old_dir) {
-			prev_old_dir = xstrdup(old_dir);
-		} else if (strcmp(old_dir, prev_old_dir)) {
-			best_newdir = get_highest_rename_path(&counts);
-			strmap_put(&info->dir_rename, prev_old_dir,
-				   xstrdup(best_newdir));
-			strintmap_clear(&counts);
-
-			prev_old_dir = xstrdup(old_dir);
-		} /* else leave prev_old_dir alone */
-
-		prev_count = strintmap_get(&counts, new_dir, 0);
-		strintmap_set(&counts, new_dir, prev_count + 1);
-
+		dir_rename_entry = strmap_get_item(&info->dir_rename, old_dir);
+		if (dir_rename_entry) {
+			counts = dir_rename_entry->util;
+		} else {
+			counts = xmalloc(sizeof(*counts));
+			strmap_init(counts, 1);
+			strmap_put(&info->dir_rename, old_dir, counts);
+		}
+		value = strintmap_get(counts, new_dir, 0);
+		strintmap_set(counts, new_dir, value + 1);
 		free(old_dir);
 		free(new_dir);
 	}
 
-	best_newdir = get_highest_rename_path(&counts);
-	strmap_put(&info->dir_rename, prev_old_dir, xstrdup(best_newdir));
-	strintmap_clear(&counts);
+	/*
+	 * Now we collapse
+	 *    dir_rename: old_directory -> {new_directory -> count}
+	 * down to
+	 *    dir_rename: old_directory -> best_new_directory
+	 * where best_new_directory is the one with the highest count.
+	 */
+	strmap_for_each_entry(&info->dir_rename, &iter, entry) {
+		/* entry->item.string is source_dir */
+		struct strmap *counts = entry->item.util;
+		char *best_newdir;
+
+		best_newdir = xstrdup(get_highest_rename_path(counts));
+
+		strintmap_free(counts);
+		free(counts);
+		entry->item.util = best_newdir;
+	}
 }
 
 static void cleanup_rename_guess_info(struct rename_guess_info *info)
 {
 	if (!info->initialized)
 		return;
-	/*
-	 * The strings placed into dir_rename were not strdup()'ed an extra
-	 * time, but they weren't used anywhere else and weren't free'd.  So,
-	 * pretend we strdup()'ed them earlier so they'll be freed now.
-	 */
-	info->dir_rename.strdup_strings = 1;
 	strmap_free(&info->dir_rename, 1);
 	strintmap_free(&info->idx_map);
 }
@@ -545,6 +550,44 @@ static int idx_possible_rename(char *filename,
 			       struct rename_guess_info *info,
 			       struct strmap *dirs_removed)
 {
+	/*
+	 * Our comparison of files with the same basename (see
+	 * find_basename_matches() below), is only helpful when we have
+	 * exactly one file with a given basename among the rename sources
+	 * and also only exactly one file with that basename among the
+	 * rename destinations.  When we have multiple files with the same
+	 * basename in either set, we do not know which to compare against.
+	 *
+	 * Multiple files on each side with the same basename most
+	 * frequently comes up when an entire directory is renamed, and
+	 * then common filenames (such as 'Makefile' or '.gitignore' or
+	 * 'build.gradle') that potentially exist within every single
+	 * subdirectory are part of the rename puzzle.  However, when an
+	 * entire directory is renamed (along with all subdirectories),
+	 * we have a couple things that can help us out:
+	 *   (a) we often have several files within that directory and
+	 *       subdirectories that are renamed without changes
+	 *   (b) the original directory disappeared giving us a hint
+	 *       about when we can apply an extra heuristic.
+	 * So, rules for a heuristic:
+	 *   (0) If there are basename matches but more than one
+	 *       (the condition under which this function is called) AND
+	 *   (1) the directory in which the file was found has disappeared THEN
+	 *   (2) use exact renames of files within the directory to determine
+	 *       where the directory is likely to have been renamed to.  IF
+	 *       there is at least one exact rename from within that directory,
+	 *       we can proceed.
+	 *   (3) If there are multiple places the directory could have been
+	 *       renamed to based on exact renames, ignore all but one of them.
+	 *       Just use the target with the most renames going to it.
+	 *   (4) Check if applying that directory rename to the original file
+	 *       would result in a target filename that is in the potential
+	 *       rename set.  If so, return the index of the target file
+	 *       (the index within rename_dst).
+	 *   NOTE: The caller will compare the original file and returned
+	 *         target file for similarity, and if they are sufficiently
+	 *         similar, will record the rename.
+	 */
 	char *old_dir, *new_dir, *new_path, *basename;
 	int idx;
 
