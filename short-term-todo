@@ -8,18 +8,7 @@ Perf stuff:
   * Things that wouldn't but could still be improved
     * 0.575 : ....label:directory renames
   * Things that would, but could be improved other than that advancement:
-    * 0.674 : ........label:basename matches
     * 0.580 : ........label:setup (diffcore)
-
-
-  * diffcore-rename, basename matches:
-    * Get a list of dirs_removed limited to direct parent of
-      relevant_sources.  Only do all the count stuff in
-      initialize_rename_guess_info() for those.  (Yes, it's an imperfect
-      directory rename rule to only look at direct parents, but it was already
-      imperfect directory rename by only looking at exact renames.  I don't
-      care about perfect, I just care about a guided guess at a possible match
-      which we will then verify with an estimate_similarity().)
 
   * diffcore-rename, setup:
     * add_rename_dst is O(N), called O(N) times!  Ugh, quadratic!!
