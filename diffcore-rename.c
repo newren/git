@@ -891,6 +891,21 @@ static int remove_unneeded_paths_from_src(int num_src,
 					  int detecting_copies,
 					  struct strmap *interesting)
 {
+	/*
+	 * Note on reasons why we cull unneeded sources but not targets:
+	 *   1) Pairings are stored in rename_dst (not rename_src), which we
+	 *      need to keep around.  So, we just can't cull rename_dst.
+	 *   2) There is a matrix pairwise comparison that follows the
+	 *      "Performing inexact rename detection" progress message.
+	 *      Iterating over the targets is done in the outer loop, hence
+	 *      we only iterate over each of those once.  Therefore, we can
+	 *      simply exit the outer loop early if
+	 *          !strmap_contains(relevant_targets, PATH)
+	 *      By contrast, the sources are iterated in the inner loop; we
+	 *      don't want to have to iterate over known-not-needed sources
+	 *      N times each since we already know we don't need them.  As
+	 *      such, we remove them here.
+	 */
 	int i, new_num_src;
 
 	if (detecting_copies && !interesting)
