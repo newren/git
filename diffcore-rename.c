@@ -431,6 +431,8 @@ static int find_exact_renames(struct diff_options *options)
 struct rename_guess_info {
 	struct strmap idx_map;
 	struct strmap dir_rename;
+	struct strmap *relevant_source_dirs;
+	struct strmap *relevant_target_dirs;
 	int initialized;
 };
 
@@ -458,6 +460,8 @@ static char *get_highest_rename_path(struct strmap *counts) {
 }
 
 static void initialize_rename_guess_info(struct rename_guess_info *info,
+					 struct strmap *relevant_sources,
+					 struct strmap *relevant_targets,
 					 struct strmap *dirs_removed)
 {
 	struct strmap *counts;
@@ -469,9 +473,47 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	strmap_init(&info->idx_map, 0);
 	strmap_init(&info->dir_rename, 1);
 
+	/* Setup info->relevant_target_dirs */
+	info->relevant_target_dirs = NULL;
+	if (relevant_targets) {
+		info->relevant_target_dirs = xmalloc(sizeof(struct strmap));
+		strmap_init(info->relevant_target_dirs, 1);
+		strmap_for_each_entry(relevant_targets, &iter, entry) {
+			char *dirname = get_dirname(entry->item.string);
+			strmap_put(info->relevant_target_dirs, dirname, NULL);
+			free(dirname);
+		}
+	}
+
+	/* Setup info->relevant_source_dirs */
+	info->relevant_source_dirs = NULL;
+	if (relevant_sources || dirs_removed) {
+		if (relevant_sources && dirs_removed &&
+		    strmap_get_size(relevant_sources) >
+		    strmap_get_size(dirs_removed)) {
+			info->relevant_source_dirs = dirs_removed;
+		} else if (!relevant_sources) {
+			info->relevant_source_dirs = dirs_removed;
+		} else {
+			info->relevant_source_dirs = xmalloc(sizeof(struct strmap));
+			strmap_init(info->relevant_source_dirs, 1);
+			strmap_for_each_entry(relevant_sources, &iter, entry) {
+				char *dirname = get_dirname(entry->item.string);
+				if (dirs_removed &&
+				    strmap_contains(dirs_removed, dirname))
+					strmap_put(info->relevant_source_dirs,
+						   dirname, NULL);
+				free(dirname);
+			}
+		}
+	}
+
+	/*
+	 * Loop setting up both info->idx_map, and doing inital setup of
+	 * info->dir_rename.
+	 */
 	for (i = 0; i < rename_dst_nr; ++i) {
-		char *filename = rename_dst[i].two->path;
-		char *oldname;
+		char *oldname, *newname;
 		char *old_dir, *new_dir;
 		struct string_list_item *dir_rename_entry;
 		int value;
@@ -481,6 +523,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		 *   filename -> index (index within rename_dst, that is)
 		 */
 		if (!rename_dst[i].pair) {
+			char *filename = rename_dst[i].two->path;
 			strintmap_set(&info->idx_map, filename, i);
 			continue;
 		}
@@ -495,15 +538,25 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		 */
 
 		oldname = rename_dst[i].pair->one->path;
-		old_dir = get_dirname(oldname);
+		newname = rename_dst[i].pair->two->path;
 
-		/* Skip if old_dir if its directory couldn't have been renamed */
-		if (!strmap_contains(dirs_removed, old_dir)) {
+		/* Get old_dir, skip if its directory isn't relevant. */
+		old_dir = get_dirname(oldname);
+		if (info->relevant_source_dirs &&
+		    !strmap_contains(info->relevant_source_dirs, old_dir)) {
 			free(old_dir);
 			continue;
 		}
 
-		new_dir = get_dirname(filename);
+		/* Get new_dir, skip if its directory isn't relevant. */
+		new_dir = get_dirname(newname);
+		if (info->relevant_target_dirs &&
+		    !strmap_contains(info->relevant_target_dirs, new_dir)) {
+			free(new_dir);
+			continue;
+		}
+
+		/* Get the {new_directories -> counts} mapping using old_dir */
 		dir_rename_entry = strmap_get_item(&info->dir_rename, old_dir);
 		if (dir_rename_entry) {
 			counts = dir_rename_entry->util;
@@ -512,8 +565,12 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 			strmap_init(counts, 1);
 			strmap_put(&info->dir_rename, old_dir, counts);
 		}
+
+		/* Increment the count for new_dir */
 		value = strintmap_get(counts, new_dir, 0);
 		strintmap_set(counts, new_dir, value + 1);
+
+		/* Free resources we don't need anymore */
 		free(old_dir);
 		free(new_dir);
 	}
@@ -536,6 +593,17 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		free(counts);
 		entry->item.util = best_newdir;
 	}
+
+	/* Free resources we don't need anymore */
+	if (info->relevant_source_dirs &&
+	    info->relevant_source_dirs != dirs_removed) {
+		strmap_free(info->relevant_source_dirs, 0);
+		FREE_AND_NULL(info->relevant_source_dirs);
+	}
+	if (info->relevant_target_dirs) {
+		strmap_free(info->relevant_target_dirs, 0);
+		FREE_AND_NULL(info->relevant_target_dirs);
+	}
 }
 
 static void cleanup_rename_guess_info(struct rename_guess_info *info)
@@ -548,6 +616,8 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 
 static int idx_possible_rename(char *filename,
 			       struct rename_guess_info *info,
+			       struct strmap *relevant_sources,
+			       struct strmap *relevant_targets,
 			       struct strmap *dirs_removed)
 {
 	/*
@@ -591,10 +661,11 @@ static int idx_possible_rename(char *filename,
 	char *old_dir, *new_dir, *new_path, *basename;
 	int idx;
 
-	if (!dirs_removed)
+	if (!dirs_removed && !relevant_sources && !relevant_targets)
 		return -1;
 	if (!info->initialized)
-		initialize_rename_guess_info(info, dirs_removed);
+		initialize_rename_guess_info(info, relevant_sources,
+					     relevant_targets, dirs_removed);
 
 	old_dir = get_dirname(filename);
 	new_dir = strmap_get(&info->dir_rename, old_dir);
@@ -723,6 +794,8 @@ static int find_basename_matches(struct diff_options *options,
 				src_index = i;
 				dst_index = idx_possible_rename(filename,
 								&info,
+								relevant_sources,
+								relevant_targets,
 								dirs_removed);
 			}
 			if (dst_index == -1)
