@@ -1,11 +1,17 @@
 Perf stuff:
-  * WOW! string_list_sort and/or string_list_df_name_compare is SLOW!
-  * OOPS!  I accidentally left repo_index_has_changes() in merge_start()!
+  * diffcore-rename, basename matches:
+    * Get a list of dirs_removed limited to direct parent of
+      relevant_sources.  Only do all the count stuff in
+      initialize_rename_guess_info() for those.  (Yes, it's an imperfect
+      directory rename rule to only look at direct parents, but it was already
+      imperfect directory rename by only looking at exact renames.  I don't
+      care about perfect, I just care about a guided guess at a possible match
+      which we will then verify with an estimate_similarity().)
 
-  * diffcore-rename:
+  * diffcore-rename, setup:
     * add_rename_dst is O(N), called O(N) times!  Ugh, quadratic!!
     * register_rename_src has the same problem!
-    * redo this to use strmap()
+    * redo both of the above two to use strmap()
 
   * Optimization 4 (known renames from before):
     * goes in merge-ort, not diffcore-rename
@@ -73,10 +79,6 @@ Path_conflict files:
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 * Stuff to not forget:
-  * Perf idea: exact matches in diffcore_rename() is quadratic!!  Whoops!
-  * Perf idea: make sure partial capitulation (source match) does not defeat
-    either exact renames or dimensionality reduction, since those two can
-    reduce the number of both potenial rename sources AND destinations.
   * Perf idea: can trivial tree merge (O matches A implies take B when all
     three are trees) if no parent trees differed outside of directory leading
     to this directory and sibling trees do not differ.  However, it means that
