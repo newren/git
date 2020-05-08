@@ -19,7 +19,7 @@ os.close(fh)
 envcopy = os.environ.copy()
 envcopy["GIT_TRACE2_PERF"] = filename
 before = time.time()
-subprocess.run(sys.argv[1:], env=envcopy)
+subprocess.run(sys.argv[1:], env=envcopy, check=True)
 after = time.time()
 with open(filename, 'r') as f:
   sections = []
