@@ -78,6 +78,8 @@ static struct commit *create_commit(struct tree *tree,
 		error(_("failed to write commit object"));
 		return NULL;
 	}
+	free(author);
+	strbuf_release(&msg);
 
 	obj = parse_object(the_repository, &ret);
 	return (struct commit *)obj;
@@ -158,6 +160,8 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 						base_tree,
 						&result);
 
+		free((char*)merge_opt.ancestor);
+		merge_opt.ancestor = NULL;
 		if (!result.clean)
 			die("Aborting: Hit a conflict and restarting is not implemented.");
 		last_picked_commit = commit;
@@ -188,12 +192,10 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		error(_("could not update %s"), argv[4]);
 		die("Failed to update %s", argv[4]);
 	}
-	strbuf_reset(&reflog_msg);
-	strbuf_addf(&reflog_msg, "finish rebase %s onto %s",
-		    oid_to_hex(&last_picked_commit->object.oid),
-		    oid_to_hex(&last_commit->object.oid));
 	if (create_symref("HEAD", branch_name.buf, reflog_msg.buf) < 0)
 		die(_("unable to update HEAD"));
+	strbuf_release(&reflog_msg);
+	strbuf_release(&branch_name);
 
 	prime_cache_tree(the_repository, the_repository->index,
 			 result.automerge_tree);

@@ -1771,9 +1771,12 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			continue;
 
 		if (!strmap_contains(&opt->priv->renames->dirs_removed[side],
-				     old_dir))
+				     old_dir)) {
 			/* old_dir still exists and can't be a dir rename */
+			free(old_dir);
+			free(new_dir);
 			continue;
+		}
 
 		info = strmap_get(dir_renames, old_dir);
 		if (info) {
@@ -2374,6 +2377,8 @@ static int collect_renames(struct merge_options *opt,
 	int i, clean = 1;
 	struct strmap collisions;
 	struct diff_queue_struct *side_pairs;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
 
 	side_pairs = &opt->priv->renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
@@ -2412,6 +2417,10 @@ static int collect_renames(struct merge_options *opt,
 		result->queue[result->nr++] = p;
 	}
 
+	strmap_for_each_entry(&collisions, &iter, entry) {
+		struct collision_info *info = entry->item.util;
+		string_list_clear(&info->source_files, 0);
+	}
 	/*
 	 * In compute_collisions(), we set collisions.strdup_strings to 0
 	 * so that we wouldn't have to make another copy of the new_path
@@ -2421,7 +2430,7 @@ static int collect_renames(struct merge_options *opt,
 	 * before the strmaps is cleared.
 	 */
 	collisions.strdup_strings = 1;
-	strmap_clear(&collisions, 1);
+	strmap_free(&collisions, 1);
 	return clean;
 }
 
@@ -2434,6 +2443,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	struct strmap *side1_dir_renames, *side2_dir_renames;
 	struct rename_info *renames = opt->priv->renames;
 	int need_dir_renames, clean = 1;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
 
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
@@ -2509,6 +2520,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	trace2_region_leave("merge", "process renames", opt->repo);
 
 	/*
+	 * Free memory for side[12]_dir_renames.
+	 *
 	 * In get_directory_renames(), we set side[12].strdup_strings to 0
 	 * so that we wouldn't have to make another copy of the old_path
 	 * allocated by get_renamed_dir_portion().  But now that we've used
@@ -2516,10 +2529,22 @@ static int detect_and_process_renames(struct merge_options *opt,
 	 * deallocate them, which we do by just setting strdup_string = 1
 	 * before the strmaps are cleared.
 	 */
+	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
+		struct dir_rename_info *info = entry->item.util;
+		strbuf_release(&info->new_dir);
+	}
+	strmap_for_each_entry(side2_dir_renames, &iter, entry) {
+		struct dir_rename_info *info = entry->item.util;
+		strbuf_release(&info->new_dir);
+	}
 	side1_dir_renames->strdup_strings = 1;
 	side2_dir_renames->strdup_strings = 1;
-	strmap_clear(side1_dir_renames, 1);
-	strmap_clear(side2_dir_renames, 1);
+	strmap_free(side1_dir_renames, 1);
+	strmap_free(side2_dir_renames, 1);
+	FREE_AND_NULL(side1_dir_renames);
+	FREE_AND_NULL(side2_dir_renames);
+
+	/* Free memory for renames->pairs[12] */
 	free(renames->pairs[1].queue);
 	DIFF_QUEUE_CLEAR(&renames->pairs[1]);
 	free(renames->pairs[2].queue);
@@ -3052,6 +3077,14 @@ static int checkout(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 	printf("after clear_unpack_trees_porcelain()\n");
 #endif
+	/*
+	 * FIXME: Why in the world doesn't clear_directory() free entries and
+	 * ignored?  That seems so stupid...
+	 */
+	free(unpack_opts.dir->entries);
+	free(unpack_opts.dir->ignored);
+	clear_directory(unpack_opts.dir);
+	FREE_AND_NULL(unpack_opts.dir);
 	return ret;
 }
 

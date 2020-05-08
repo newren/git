@@ -487,24 +487,22 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 
 	/* Setup info->relevant_source_dirs */
 	info->relevant_source_dirs = NULL;
-	if (relevant_sources || dirs_removed) {
-		if (relevant_sources && dirs_removed &&
-		    strmap_get_size(relevant_sources) >
-		    strmap_get_size(dirs_removed)) {
-			info->relevant_source_dirs = dirs_removed;
-		} else if (!relevant_sources) {
-			info->relevant_source_dirs = dirs_removed;
-		} else {
-			info->relevant_source_dirs = xmalloc(sizeof(struct strmap));
-			strmap_init(info->relevant_source_dirs, 1);
-			strmap_for_each_entry(relevant_sources, &iter, entry) {
-				char *dirname = get_dirname(entry->item.string);
-				if (dirs_removed &&
-				    strmap_contains(dirs_removed, dirname))
-					strmap_put(info->relevant_source_dirs,
-						   dirname, NULL);
-				free(dirname);
-			}
+	if (!relevant_sources) {
+		info->relevant_source_dirs = dirs_removed; /* might be NULL */
+	} else if (relevant_sources && dirs_removed &&
+		   strmap_get_size(relevant_sources) >
+		   strmap_get_size(dirs_removed)) {
+		info->relevant_source_dirs = dirs_removed;
+	} else {
+		info->relevant_source_dirs = xmalloc(sizeof(struct strmap));
+		strmap_init(info->relevant_source_dirs, 1);
+		strmap_for_each_entry(relevant_sources, &iter, entry) {
+			char *dirname = get_dirname(entry->item.string);
+			if (!dirs_removed ||
+			    strmap_contains(dirs_removed, dirname))
+				strmap_put(info->relevant_source_dirs,
+					   dirname, NULL);
+			free(dirname);
 		}
 	}
 
