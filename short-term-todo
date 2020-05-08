@@ -1,4 +1,17 @@
 Perf stuff:
+  * Things that would accelerate with remembered renames/deletes + trivial merge:
+    * 4.065 : ....label:regular renames
+    * 3.540 : ..label:process_entries
+    *   2.208 : ......label:plist sort
+    * 3.034 : ..label:collect_merge_info
+    * 1.919 : ....label:reset_maps
+  * Things that wouldn't but could still be improved
+    * 0.575 : ....label:directory renames
+  * Things that would, but could be improved other than that advancement:
+    * 0.674 : ........label:basename matches
+    * 0.580 : ........label:setup (diffcore)
+
+
   * diffcore-rename, basename matches:
     * Get a list of dirs_removed limited to direct parent of
       relevant_sources.  Only do all the count stuff in
