@@ -58,22 +58,24 @@ static struct diff_rename_dst *locate_rename_dst(struct diff_filespec *two)
  */
 static int add_rename_dst(struct diff_filespec *two)
 {
-	int first = find_rename_dst(two);
-
-	if (first >= 0)
+	int cmp = rename_dst_nr > 0 ?
+		strcmp(two->path, rename_dst[rename_dst_nr-1].two->path) : 1;
+	if (cmp < 0) {
+		fprintf(stderr, "\nrename_dst_nr: %d\n", rename_dst_nr);
+		fprintf(stderr, "  rename_dst[%d].two->path: %s\n",
+			rename_dst_nr-1, rename_dst[rename_dst_nr-1].two->path);
+		fprintf(stderr, "  two->path:                  %s\n", two->path);
+		BUG("diff_queue entries must be passed to diffcore_rename in sorted order");
+	}
+	else if (cmp == 0)
 		return -1;
-	first = -first - 1;
 
-	/* insert to make it at "first" */
 	ALLOC_GROW(rename_dst, rename_dst_nr + 1, rename_dst_alloc);
+	rename_dst[rename_dst_nr].two = alloc_filespec(two->path);
+	fill_filespec(rename_dst[rename_dst_nr].two,
+		      &two->oid, two->oid_valid, two->mode);
+	rename_dst[rename_dst_nr].pair = NULL;
 	rename_dst_nr++;
-	if (first < rename_dst_nr)
-		MOVE_ARRAY(rename_dst + first + 1, rename_dst + first,
-			   rename_dst_nr - first - 1);
-	rename_dst[first].two = alloc_filespec(two->path);
-	fill_filespec(rename_dst[first].two, &two->oid, two->oid_valid,
-		      two->mode);
-	rename_dst[first].pair = NULL;
 	return 0;
 }
 
