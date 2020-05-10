@@ -6558,8 +6558,21 @@ static int diffnamecmp(const void *a_, const void *b_)
 	const struct diff_filepair *b = *((const struct diff_filepair **)b_);
 	const char *name_a, *name_b;
 
+	/*
+	 * If a or b are a modify, add, or delete, they will have one name,
+	 * and we can just use it for comparing.
+	 *
+	 * If a or b are a rename or copy, it will have two names.  Regression
+	 * tests require that we consider the earlier of the two names for a,
+	 * and do the same for b.
+	 */
+
 	name_a = a->one ? a->one->path : a->two->path;
+	if (a->one && a->two && strcmp(a->one->path, a->two->path) < 0)
+		name_a = a->two->path;
 	name_b = b->one ? b->one->path : b->two->path;
+	if (b->one && b->two && strcmp(b->one->path, b->two->path) < 0)
+		name_b = b->two->path;
 	return strcmp(name_a, name_b);
 }
 
