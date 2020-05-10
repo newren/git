@@ -950,10 +950,8 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 			if (ignore_submodule_arg &&
 			    !strcmp(ignore_submodule_arg, "all"))
 				flags.ignore_submodules = 1;
-			fprintf(stderr, "*** Before:\n");
 			committable = index_differs_from(the_repository,
 							 parent, &flags, 1);
-			fprintf(stderr, "*** committable = %d\n", committable);
 		}
 	}
 	strbuf_release(&committer_ident);

@@ -1227,17 +1227,6 @@ void diffcore_rename_extended(struct diff_options *options,
 	 */
 	trace2_region_enter("diff", "write back to queue", options->repo);
 	DIFF_QUEUE_CLEAR(&outq);
-	diff_debug_queue("before", &outq);
-	fprintf(stderr, "rename_src:\n");
-	for (i = 0; i < rename_src_nr; i++) {
-		struct diff_filepair *p = rename_src[i].p;
-		diff_debug_filepair(p, i);
-	}
-	fprintf(stderr, "rename_dst:\n");
-	for (i = 0; i < rename_dst_nr; i++) {
-		struct diff_filepair *p = rename_dst[i].pair;
-		diff_debug_filepair(p, i);
-	}
 	for (i = 0; i < q->nr; i++) {
 		struct diff_filepair *p = q->queue[i];
 		struct diff_filepair *pair_to_free = NULL;
@@ -1308,11 +1297,11 @@ void diffcore_rename_extended(struct diff_options *options,
 		if (pair_to_free)
 			diff_free_filepair(pair_to_free);
 	}
-	diff_debug_queue("filled output queue", &outq);
+	diff_debug_queue("done copying original", &outq);
 
 	free(q->queue);
 	*q = outq;
-	diff_debug_queue("final", q);
+	diff_debug_queue("done collapsing", q);
 
 	for (i = 0; i < rename_dst_nr; i++)
 		free_filespec(rename_dst[i].two);
