@@ -7,13 +7,6 @@ Perf stuff:
     * 1.919 : ....label:reset_maps
   * Things that wouldn't but could still be improved
     * 0.575 : ....label:directory renames
-  * Things that would, but could be improved other than that advancement:
-    * 0.580 : ........label:setup (diffcore)
-
-  * diffcore-rename, setup:
-    * add_rename_dst is O(N), called O(N) times!  Ugh, quadratic!!
-    * register_rename_src has the same problem!
-    * redo both of the above two to use strmap()
 
   * Optimization 4 (known renames from before):
     * goes in merge-ort, not diffcore-rename
