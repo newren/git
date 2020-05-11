@@ -31,7 +31,6 @@ static struct strmap *break_idx = NULL;
 
 static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
 {
-	/* Lookup by p->ONE->path */
 	int idx = break_idx ? strintmap_get(break_idx, p->one->path, -1) : -1;
 	return (idx == -1) ? NULL : &rename_dst[idx];
 }
@@ -41,7 +40,6 @@ static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
  */
 static int add_rename_dst(struct diff_filepair *p)
 {
-	int idx;
 	/*
 	 * See t4058; trees might have duplicate entries. Since that test
 	 * for some reason wants to turn off rename detection (a lame
@@ -55,10 +53,6 @@ static int add_rename_dst(struct diff_filepair *p)
 	if (rename_dst_nr > 0 &&
 	    !strcmp(rename_dst[rename_dst_nr-1].p->two->path, p->two->path))
 		return -1;
-
-	/* Lookup break_idx by p->TWO->path */
-	idx = break_idx ? strintmap_get(break_idx, p->two->path, -1) : -1;
-	assert(idx == (p->broken_pair ? rename_dst_nr : -1));
 
 	ALLOC_GROW(rename_dst, rename_dst_nr + 1, rename_dst_alloc);
 	rename_dst[rename_dst_nr].p = p;
@@ -970,7 +964,6 @@ static int remove_unneeded_paths_from_src(int num_src,
 			continue;
 
 		if (new_num_src < i)
-			/* FIXME: Does this leak memory of what we overwrite? */
 			memcpy(&rename_src[new_num_src], &rename_src[i],
 			       sizeof(struct diff_rename_src));
 		new_num_src++;
@@ -1172,13 +1165,6 @@ void diffcore_rename_extended(struct diff_options *options,
 
 			assert(!one->rename_used ||
 			       detect_rename == DIFF_DETECT_COPY);
-			/*
-			 * FIXME: Can remove the below if condition based on the
-			 * assertion above.
-			 */
-			if (one->rename_used &&
-			    detect_rename != DIFF_DETECT_COPY)
-				continue;
 
 			if (skip_unmodified &&
 			    diff_unmodified_pair(rename_src[j].p))
@@ -1256,7 +1242,7 @@ void diffcore_rename_extended(struct diff_options *options,
 				/* broken delete */
 				struct diff_rename_dst *dst = locate_rename_dst(p);
 				assert(dst);
-				if (dst && dst->is_rename)
+				if (dst->is_rename)
 					/* counterpart is now rename/copy */
 					pair_to_free = p;
 			}
@@ -1273,7 +1259,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			/* all the usual ones need to be kept */
 			diff_q(&outq, p);
 		else
-			/* no need to keep unmodified pairs; FIXME: remove earlier? */
+			/* no need to keep unmodified pairs */
 			pair_to_free = p;
 
 		if (pair_to_free)
