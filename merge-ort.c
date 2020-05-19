@@ -1345,14 +1345,35 @@ static int process_renames(struct merge_options *opt,
 			printf("    pair->score: %d\n", pair->score);
 			printf("    other->score: %d\n", renames->queue[i+1]->score);
 #endif
-			handle_content_merge(opt, pair->one->path,
-					     &base->stages[0],
-					     &side1->stages[1],
-					     &side2->stages[2],
-					     pathnames, 1 + 2 * opt->priv->call_depth,
-					     &merged);
+			clean_merge = handle_content_merge(opt,
+							   pair->one->path,
+							   &base->stages[0],
+							   &side1->stages[1],
+							   &side2->stages[2],
+							   pathnames,
+							   1 + 2 * opt->priv->call_depth,
+							   &merged);
 			memcpy(&side1->stages[1], &merged, sizeof(merged));
+			if (!clean_merge &&
+			    merged.mode == side1->stages[1].mode &&
+			    oideq(&merged.oid, &side1->stages[1].oid)) {
+				/*
+				 * Getting here means we were attempting to
+				 * merge a binary blob.
+				 *
+				 * Since we can't merge binaries,
+				 * handle_content_merge() just takes one
+				 * side.  But we don't want to copy the
+				 * contents of one side to both paths.  We
+				 * used the contents of side1 above for
+				 * side1->stages, let's use the contents of
+				 * side2 for side2->stages below.
+				 */
+				oidcpy(&merged.oid, &side2->stages[2].oid);
+				merged.mode = side2->stages[2].mode;
+			}
 			memcpy(&side2->stages[2], &merged, sizeof(merged));
+
 			/* FIXME: Mark side1 & side2 as conflicted */
 			side1->path_conflict = 1;
 			side2->path_conflict = 1;
@@ -1361,7 +1382,7 @@ static int process_renames(struct merge_options *opt,
 			//base->merged.clean = 1;
 			base->path_conflict = 1;
 			/* FIXME: Do un-rename in recursive case */
-			i++; /* We handled both renames, so skip an extra */
+			i++; /* We handled both renames, i.e. i+1 handled */
 			continue;
 		}
 
