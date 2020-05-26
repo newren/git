@@ -138,7 +138,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	merge_opt.show_rename_progress = 1;
 	merge_opt.branch1 = "HEAD";
 	head_tree = get_commit_tree(onto);
-	result.automerge_tree = head_tree;
+	result.tree = head_tree;
 	last_commit = onto;
 	while ((commit = get_revision(&revs))) {
 		struct commit *base;
@@ -155,7 +155,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
 
 		merge_inmemory_nonrecursive(&merge_opt,
-					    result.automerge_tree,
+					    result.tree,
 					    next_tree,
 					    base_tree,
 					    &result);
@@ -165,8 +165,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		if (!result.clean)
 			die("Aborting: Hit a conflict and restarting is not implemented.");
 		last_picked_commit = commit;
-		last_commit = create_commit(result.automerge_tree, commit,
-					    last_commit);
+		last_commit = create_commit(result.tree, commit, last_commit);
 	}
 	fprintf(stderr, "\nDone.\n");
 
@@ -178,7 +177,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 #if 0
 	printf("last_commit obj: %s\n", oid_to_hex(&last_commit->object.oid));
 	printf("commit obj: %s\n", oid_to_hex(&last_picked_commit->object.oid));
-	printf("automerge_tree: %s\n", oid_to_hex(&result.automerge_tree->object.oid));
+	printf("result tree: %s\n", oid_to_hex(&result.tree->object.oid));
 #endif
 	strbuf_addf(&reflog_msg, "finish rebase %s onto %s",
 		    oid_to_hex(&last_picked_commit->object.oid),
@@ -195,8 +194,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	strbuf_release(&reflog_msg);
 	strbuf_release(&branch_name);
 
-	prime_cache_tree(the_repository, the_repository->index,
-			 result.automerge_tree);
+	prime_cache_tree(the_repository, the_repository->index, result.tree);
 	if (write_locked_index(&the_index, &lock,
 			       COMMIT_LOCK | SKIP_IF_UNCHANGED))
 		die(_("unable to write %s"), get_index_file());

@@ -3245,13 +3245,12 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 /*
  * Originally from merge_trees_internal(); heavily adapted, though.
  */
-static int merge_ort_nonrecursive_internal(struct merge_options *opt,
-					   struct tree *head,
-					   struct tree *merge,
-					   struct tree *merge_base,
-					   struct tree **result)
+static void merge_ort_nonrecursive_internal(struct merge_options *opt,
+					    struct tree *head,
+					    struct tree *merge,
+					    struct tree *merge_base,
+					    struct merge_result *result)
 {
-	int code, clean;
 	struct diff_queue_struct pairs;
 	struct object_id working_tree_oid;
 
@@ -3265,30 +3264,34 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	/* FIXME: Nuke this check...or move it into wrappers? */
 	if (oideq(&merge_base->object.oid, &merge->object.oid)) {
 		output(opt, 0, _("Already up to date!"));
-		*result = head;
-		return 1;
+		result->tree = head;
+		result->clean = 1;
+		return;
 	}
 
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
-	code = collect_merge_info(opt, merge_base, head, merge);
-	trace2_region_leave("merge", "collect_merge_info", opt->repo);
-	if (code != 0) {
+	if (collect_merge_info(opt, merge_base, head, merge) != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
 			err(opt, _("collecting merge info for trees %s and %s failed"),
 			    oid_to_hex(&head->object.oid),
 			    oid_to_hex(&merge->object.oid));
-		return -1;
+		result->clean = -1;
+		return;
 	}
+	trace2_region_leave("merge", "collect_merge_info", opt->repo);
 
 	trace2_region_enter("merge", "renames", opt->repo);
-	clean = detect_and_process_renames(opt, &pairs, merge_base, head, merge);
+	result->clean = detect_and_process_renames(opt, &pairs, merge_base,
+						   head, merge);
 	trace2_region_leave("merge", "renames", opt->repo);
 
 	trace2_region_enter("merge", "process_entries", opt->repo);
 	process_entries(opt, &working_tree_oid);
 	trace2_region_leave("merge", "process_entries", opt->repo);
+
 	trace2_region_enter("merge", "cleanup", opt->repo);
-	clean &= strmap_empty(&opt->priv->unmerged); /* unmerged entries => unclean */
+	/* unmerged entries => unclean */
+	result->clean &= strmap_empty(&opt->priv->unmerged);
 
 	if (pairs.nr) {
 		int i;
@@ -3296,29 +3299,23 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 			diff_free_filepair(pairs.queue[i]);
 		free(pairs.queue);
 	}
-	*result = parse_tree_indirect(&working_tree_oid);
+	result->tree = parse_tree_indirect(&working_tree_oid);
 	trace2_region_leave("merge", "cleanup", opt->repo);
-	return clean;
 }
 
 static void reset_maps(struct merge_options *opt, int reinitialize);
 
 /*
- * Drop-in replacement for merge_recursive_internal().
- * Currently, a near wholesale copy-paste of merge_recursive_internal(); only
- * the following modifications have been made:
- *   1) s/merge_recursive_internal/merge_ort_internal/
- *   2) s/merge_trees_internal/merge_ort_nonrecursive_internal/
+ * Originally from merge_recursive_internal(); somewhat adapted, though.
  */
-static int merge_ort_internal(struct merge_options *opt,
-			      struct commit *h1,
-			      struct commit *h2,
-			      struct commit_list *merge_bases,
-			      struct tree **result_tree)
+static void merge_ort_internal(struct merge_options *opt,
+			       struct commit *h1,
+			       struct commit *h2,
+			       struct commit_list *merge_bases,
+			       struct merge_result *result)
 {
 	struct commit_list *iter;
 	struct commit *merged_merge_bases;
-	int clean;
 	const char *ancestor_name;
 	struct strbuf merge_base_abbrev = STRBUF_INIT;
 
@@ -3379,15 +3376,15 @@ static int merge_ort_internal(struct merge_options *opt,
 		saved_b2 = opt->branch2;
 		opt->branch1 = "Temporary merge branch 1";
 		opt->branch2 = "Temporary merge branch 2";
-		if (merge_ort_internal(opt, prev, iter->item, NULL,
-				       result_tree) < 0)
-			return -1;
+		merge_ort_internal(opt, prev, iter->item, NULL, result);
+		if (result->clean < 0)
+			return;
 		opt->branch1 = saved_b1;
 		opt->branch2 = saved_b2;
 		opt->priv->call_depth--;
 
 		merged_merge_bases = make_virtual_commit(opt->repo,
-							 *result_tree,
+							 result->tree,
 							 "merged tree");
 		commit_list_insert(prev, &merged_merge_bases->parents);
 		commit_list_insert(iter->item,
@@ -3397,20 +3394,16 @@ static int merge_ort_internal(struct merge_options *opt,
 	}
 
 	opt->ancestor = ancestor_name;
-	clean = merge_ort_nonrecursive_internal(opt,
-				     repo_get_commit_tree(opt->repo, h1),
-				     repo_get_commit_tree(opt->repo, h2),
-				     repo_get_commit_tree(opt->repo,
-							  merged_merge_bases),
-				     result_tree);
+	merge_ort_nonrecursive_internal(opt,
+					repo_get_commit_tree(opt->repo, h1),
+					repo_get_commit_tree(opt->repo, h2),
+					repo_get_commit_tree(opt->repo,
+							     merged_merge_bases),
+					result);
 	strbuf_release(&merge_base_abbrev);
 	opt->ancestor = NULL;  /* avoid accidental re-use of opt->ancestor */
-	if (clean < 0) {
+	if (result->clean < 0)
 		flush_output(opt);
-		return clean;
-	}
-
-	return clean;
 }
 
 static int merge_start(struct merge_options *opt, struct tree *head)
@@ -3480,7 +3473,7 @@ void merge_switch_to_result(struct merge_options *opt,
 {
 	if (result->clean >= 0 && update_worktree_and_index) {
 		trace2_region_enter("merge", "checkout", opt->repo);
-		if (checkout(opt, head, result->automerge_tree)) {
+		if (checkout(opt, head, result->tree)) {
 			/* failure to function */
 			result->clean = -1;
 			return;
@@ -3572,8 +3565,6 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 				 struct tree *merge_base,
 				 struct merge_result *result)
 {
-	int clean;
-
 	trace2_region_enter("merge", "inmemory_nonrecursive", opt->repo);
 	assert(opt->ancestor != NULL);
 
@@ -3583,11 +3574,8 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 		return;
 	}
 	trace2_region_leave("merge", "merge_start", opt->repo);
-	clean = merge_ort_nonrecursive_internal(opt, side1, side2, merge_base,
-						&result->automerge_tree);
 
-	result->clean = clean;
-
+	merge_ort_nonrecursive_internal(opt, side1, side2, merge_base, result);
 	trace2_region_leave("merge", "inmemory_nonrecursive", opt->repo);
 }
 
@@ -3608,8 +3596,6 @@ void merge_inmemory_recursive(struct merge_options *opt,
 	}
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
-	result->clean = merge_ort_internal(opt, side1, side2, merge_bases,
-					   &result->automerge_tree);
-
+	merge_ort_internal(opt, side1, side2, merge_bases, result);
 	trace2_region_leave("merge", "inmemory_recursive", opt->repo);
 }

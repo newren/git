@@ -10,8 +10,8 @@ struct merge_result {
 	/* whether the merge is clean */
 	int clean;
 
-	/* automerge result.  If !clean, represents what would go in worktree */
-	struct tree *automerge_tree;
+	/* Result of merge.  If !clean, represents what would go in worktree */
+	struct tree *tree;
 
 	/* merge status messages (conflict notices, automerging files, etc.) */
 	struct strbuf *output; /* NULL means ignore output? */

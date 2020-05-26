@@ -48,7 +48,7 @@ int merge_ort_recursive(struct merge_options *opt,
 
 	merge_inmemory_recursive(opt, side1, side2, merge_bases, &tmp);
 	merge_switch_to_result(opt, head, &tmp, 1, 1);
-	*result = tmp.automerge_tree;
+	*result = tmp.tree;
 
 	return tmp.clean;
 }
