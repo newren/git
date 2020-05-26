@@ -3243,11 +3243,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 }
 
 /*
- * Drop-in replacement for merge_trees_internal().
- * Differences:
- *   1) s/merge_trees_internal/merge_ort_nonrecursive_internal/
- *   2) The handling of unmerged entries has been gutted and replaced with
- *      a BUG() call.  Will be handled later.
+ * Originally from merge_trees_internal(); heavily adapted, though.
  */
 static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					   struct tree *head,
@@ -3266,6 +3262,7 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 					       opt->subtree_shift);
 	}
 
+	/* FIXME: Nuke this check...or move it into wrappers? */
 	if (oideq(&merge_base->object.oid, &merge->object.oid)) {
 		output(opt, 0, _("Already up to date!"));
 		*result = head;
@@ -3293,10 +3290,6 @@ static int merge_ort_nonrecursive_internal(struct merge_options *opt,
 	trace2_region_enter("merge", "cleanup", opt->repo);
 	clean &= strmap_empty(&opt->priv->unmerged); /* unmerged entries => unclean */
 
-	/*
-	 * FIXME: Also need to free each diff_filepair in pairs.queue, and may
-	 * also need to free each pair's one->path and/or two->path.
-	 */
 	if (pairs.nr) {
 		int i;
 		for (i = 0; i < pairs.nr; i++)
@@ -3574,8 +3567,8 @@ static void reset_maps(struct merge_options *opt, int reinitialize)
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
-				 struct tree *head,
-				 struct tree *merge,
+				 struct tree *side1,
+				 struct tree *side2,
 				 struct tree *merge_base,
 				 struct merge_result *result)
 {
@@ -3590,7 +3583,7 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 		return;
 	}
 	trace2_region_leave("merge", "merge_start", opt->repo);
-	clean = merge_ort_nonrecursive_internal(opt, head, merge, merge_base,
+	clean = merge_ort_nonrecursive_internal(opt, side1, side2, merge_base,
 						&result->automerge_tree);
 
 	result->clean = clean;

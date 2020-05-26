@@ -32,8 +32,8 @@ void merge_inmemory_recursive(struct merge_options *opt,
 
 /* rename-detecting three-way merge with recursive ancestor consolidation. */
 void merge_inmemory_nonrecursive(struct merge_options *opt,
-				 struct tree *head,
-				 struct tree *merge,
+				 struct tree *side1,
+				 struct tree *side2,
 				 struct tree *merge_base,
 				 struct merge_result *result);
 
