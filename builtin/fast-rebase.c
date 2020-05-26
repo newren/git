@@ -154,11 +154,11 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		merge_opt.branch2 = short_commit_name(commit);
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
 
-		merge_ort_inmemory_nonrecursive(&merge_opt,
-						result.automerge_tree,
-						next_tree,
-						base_tree,
-						&result);
+		merge_inmemory_nonrecursive(&merge_opt,
+					    result.automerge_tree,
+					    next_tree,
+					    base_tree,
+					    &result);
 
 		free((char*)merge_opt.ancestor);
 		merge_opt.ancestor = NULL;
@@ -170,11 +170,9 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	}
 	fprintf(stderr, "\nDone.\n");
 
-	if (switch_to_merge_result(&merge_opt, head_tree, &result))
-		clean = -1;
-	merge_finalize(&merge_opt, &result);
+	merge_switch_to_result(&merge_opt, head_tree, &result, 1, 1);
 
-	if (clean < 0)
+	if (result.clean < 0)
 		exit(128);
 
 #if 0

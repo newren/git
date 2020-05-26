@@ -28,7 +28,7 @@
 #include "rerere.h"
 #include "help.h"
 #include "merge-recursive.h"
-#include "merge-ort.h"
+#include "merge-ort-wrappers.h"
 #include "resolve-undo.h"
 #include "remote.h"
 #include "fmt-merge-msg.h"
