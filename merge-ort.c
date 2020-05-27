@@ -884,7 +884,7 @@ static void add_flattened_path(struct strbuf *out, const char *s)
 			out->buf[i] = '_';
 }
 
-static char *unique_path(struct merge_options *opt,
+static char *unique_path(struct strmap *existing_paths,
 			 const char *path,
 			 const char *branch)
 {
@@ -896,7 +896,7 @@ static char *unique_path(struct merge_options *opt,
 	add_flattened_path(&newpath, branch);
 
 	base_len = newpath.len;
-	while (strmap_contains(&opt->priv->paths, newpath.buf)) {
+	while (strmap_contains(existing_paths, newpath.buf)) {
 		strbuf_setlen(&newpath, base_len);
 		strbuf_addf(&newpath, "_%d", suffix++);
 	}
@@ -2868,7 +2868,7 @@ static void process_entry(struct merge_options *opt,
 		 */
 		df_file_index = (ci->dirmask & (1 << 1)) ? 2 : 1;
 		branch = (df_file_index == 1) ? opt->branch1 : opt->branch2;
-		path = unique_path(opt, path, branch);
+		path = unique_path(&opt->priv->paths, path, branch);
 		strmap_put(&opt->priv->paths, path, new_ci);
 
 		/*
@@ -3109,16 +3109,18 @@ static int checkout(struct merge_options *opt,
 	return ret;
 }
 
-static int record_unmerged_index_entries(struct merge_options *opt)
+static int record_unmerged_index_entries(struct merge_options *opt,
+					 struct index_state *index,
+					 struct strmap *paths,
+					 struct strmap *unmerged)
 {
 	struct hashmap_iter iter;
 	struct str_entry *e;
 	struct checkout state = CHECKOUT_INIT;
-	struct index_state *index = opt->repo->index; /* for convenience */
 	int errs = 0;
 	int original_cache_nr;
 
-	if (strmap_empty(&opt->priv->unmerged))
+	if (strmap_empty(unmerged))
 		return 0;
 
 #ifdef VERBOSE_DEBUG
@@ -3143,7 +3145,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	original_cache_nr = index->cache_nr;
 
 	/* Put every entry from paths into plist, then sort */
-	strmap_for_each_entry(&opt->priv->unmerged, &iter, e) {
+	strmap_for_each_entry(unmerged, &iter, e) {
 		const char *path = e->item.string;
 		struct conflict_info *ci = e->item.util;
 		int pos;
@@ -3187,7 +3189,8 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 				struct stat st;
 
 				if (!lstat(path, &st)) {
-					char *new_name = unique_path(opt, path,
+					char *new_name = unique_path(paths,
+								     path,
 								     "cruft");
 
 					output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
@@ -3264,9 +3267,9 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 	/* FIXME: Nuke this check...or move it into wrappers? */
 	if (oideq(&merge_base->object.oid, &merge->object.oid)) {
 		output(opt, 0, _("Already up to date!"));
-		result->tree = head;
 		result->clean = 1;
-		return;
+		result->tree = head;
+		goto update_priv;
 	}
 
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
@@ -3289,6 +3292,10 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 	process_entries(opt, &working_tree_oid);
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
+	if (show(opt, 2))
+		diff_warn_rename_limit("merge.renamelimit",
+				       opt->priv->needed_rename_limit, 0);
+
 	trace2_region_enter("merge", "cleanup", opt->repo);
 	/* unmerged entries => unclean */
 	result->clean &= strmap_empty(&opt->priv->unmerged);
@@ -3299,11 +3306,18 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 			diff_free_filepair(pairs.queue[i]);
 		free(pairs.queue);
 	}
-	result->tree = parse_tree_indirect(&working_tree_oid);
 	trace2_region_leave("merge", "cleanup", opt->repo);
+
+	/* Set return values */
+	result->tree = parse_tree_indirect(&working_tree_oid);
+update_priv:
+	if (!opt->priv->call_depth) {
+		result->priv = opt->priv;
+		opt->priv = NULL;
+	}
 }
 
-static void reset_maps(struct merge_options *opt, int reinitialize);
+static void reset_maps(struct merge_options_internal *opt, int reinitialize);
 
 /*
  * Originally from merge_recursive_internal(); somewhat adapted, though.
@@ -3390,7 +3404,7 @@ static void merge_ort_internal(struct merge_options *opt,
 		commit_list_insert(iter->item,
 				   &merged_merge_bases->parents->next);
 
-		reset_maps(opt, 1);
+		reset_maps(opt->priv, 1);
 	}
 
 	opt->ancestor = ancestor_name;
@@ -3406,7 +3420,7 @@ static void merge_ort_internal(struct merge_options *opt,
 		flush_output(opt);
 }
 
-static int merge_start(struct merge_options *opt, struct tree *head)
+static void merge_start(struct merge_options *opt, struct merge_result *result)
 {
 	/* Sanity checks on opt */
 	trace2_region_enter("merge", "sanity checks", opt->repo);
@@ -3430,13 +3444,24 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 	assert(opt->buffer_output <= 2);
 	assert(opt->obuf.len == 0);
 
-	if (head)
-		assert(opt->priv == NULL);
+	assert(opt->priv == NULL);
+	if (result->priv) {
+		/*
+		 * result->priv non-NULL means results from previous run; do a
+		 * few sanity checks that user didn't just give us
+		 * uninitialized garbage.
+		 */
+		opt->priv = result->priv;
+		result->priv = NULL;
+		assert(opt->priv->call_depth == 0);
+		assert(!opt->priv->toplevel_dir ||
+		       0 == strlen(opt->priv->toplevel_dir));
+	}
 	trace2_region_leave("merge", "sanity checks", opt->repo);
 
 	if (opt->priv) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
-		reset_maps(opt, 1);
+		reset_maps(opt->priv, 1);
 		trace2_region_leave("merge", "reset_maps", opt->repo);
 	} else {
 		struct rename_info *renames;
@@ -3461,8 +3486,6 @@ static int merge_start(struct merge_options *opt, struct tree *head)
 		strmap_init(&opt->priv->unmerged, 0);
 		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
-
-	return 0;
 }
 
 void merge_switch_to_result(struct merge_options *opt,
@@ -3471,7 +3494,10 @@ void merge_switch_to_result(struct merge_options *opt,
 			    int update_worktree_and_index,
 			    int display_update_msgs)
 {
+	assert(opt->priv == NULL);
 	if (result->clean >= 0 && update_worktree_and_index) {
+		struct merge_options_internal *opti = result->priv;
+
 		trace2_region_enter("merge", "checkout", opt->repo);
 		if (checkout(opt, head, result->tree)) {
 			/* failure to function */
@@ -3481,7 +3507,9 @@ void merge_switch_to_result(struct merge_options *opt,
 		trace2_region_leave("merge", "checkout", opt->repo);
 
 		trace2_region_enter("merge", "record_unmerged", opt->repo);
-		if (record_unmerged_index_entries(opt)) {
+		if (record_unmerged_index_entries(opt, opt->repo->index,
+						  &opti->paths,
+						  &opti->unmerged)) {
 			/* failure to function */
 			result->clean = -1;
 			return;
@@ -3501,49 +3529,51 @@ void merge_switch_to_result(struct merge_options *opt,
 void merge_finalize(struct merge_options *opt,
 		    struct merge_result *result)
 {
-	flush_output(opt);
-	if (!opt->priv->call_depth && opt->buffer_output < 2)
-		strbuf_release(&opt->obuf);
-	if (show(opt, 2))
-		diff_warn_rename_limit("merge.renamelimit",
-				       opt->priv->needed_rename_limit, 0);
+	struct merge_options_internal *opti = result->priv;
 
-	reset_maps(opt, 0);
-	FREE_AND_NULL(opt->priv->renames);
-	FREE_AND_NULL(opt->priv);
+	assert(opt->priv == NULL);
+
+	flush_output(opt);
+
+	if (!opti->call_depth && opt->buffer_output < 2)
+		strbuf_release(&opt->obuf);
+
+	reset_maps(opti, 0);
+	FREE_AND_NULL(opti->renames);
+	FREE_AND_NULL(opti);
 }
 
-static void reset_maps(struct merge_options *opt, int reinitialize)
+static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 {
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = opti->renames;
 	int i;
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_clear : strmap_free;
 
 	/*
-	 * We marked opt->priv->paths with strdup_strings = 0, so that we
+	 * We marked opti->paths with strdup_strings = 0, so that we
 	 * wouldn't have to make another copy of the fullpath created by
 	 * make_traverse_path from setup_path_info().  But, now that we've
 	 * used it and have no other references to these strings, it is time
 	 * to deallocate them, which we do by just setting strdup_string = 1
 	 * before the strmaps are cleared.
 	 */
-	opt->priv->paths.strdup_strings = 1;
-	strmap_func(&opt->priv->paths, 1);
-	opt->priv->paths.strdup_strings = 0;
+	opti->paths.strdup_strings = 1;
+	strmap_func(&opti->paths, 1);
+	opti->paths.strdup_strings = 0;
 
-	/* opt->priv->paths_to_free is similar to opt->priv->paths. */
-	opt->priv->paths_to_free.strdup_strings = 1;
-	string_list_clear(&opt->priv->paths_to_free, 0);
-	opt->priv->paths_to_free.strdup_strings = 0;
+	/* opti->paths_to_free is similar to opti->paths. */
+	opti->paths_to_free.strdup_strings = 1;
+	string_list_clear(&opti->paths_to_free, 0);
+	opti->paths_to_free.strdup_strings = 0;
 
 	/*
-	 * All strings and util fields in opt->priv->unmerged are a subset
-	 * of those in opt->priv->paths.  We don't want to deallocate
+	 * All strings and util fields in opti->unmerged are a subset
+	 * of those in opti->paths.  We don't want to deallocate
 	 * anything twice, so we don't set strdup_strings and we pass 0 for
 	 * free_util.
 	 */
-	strmap_func(&opt->priv->unmerged, 0);
+	strmap_func(&opti->unmerged, 0);
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
@@ -3569,10 +3599,7 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	assert(opt->ancestor != NULL);
 
 	trace2_region_enter("merge", "merge_start", opt->repo);
-	if (merge_start(opt, NULL)) {
-		result->clean = -1;
-		return;
-	}
+	merge_start(opt, result);
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_nonrecursive_internal(opt, side1, side2, merge_base, result);
@@ -3590,10 +3617,7 @@ void merge_inmemory_recursive(struct merge_options *opt,
 	       !strcmp(opt->ancestor, "constructed merge base"));
 
 	trace2_region_enter("merge", "merge_start", opt->repo);
-	if (merge_start(opt, NULL)) {
-		result->clean = -1;
-		return;
-	}
+	merge_start(opt, result);
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_internal(opt, side1, side2, merge_bases, result);

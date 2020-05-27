@@ -28,6 +28,8 @@ int merge_ort_nonrecursive(struct merge_options *opt,
 
 	if (unclean(opt, head))
 		return -1;
+
+	memset(&result, 0, sizeof(result));
 	merge_inmemory_nonrecursive(opt, head, merge, merge_base, &result);
 	merge_switch_to_result(opt, head, &result, 1, 1);
 
@@ -46,6 +48,7 @@ int merge_ort_recursive(struct merge_options *opt,
 	if (unclean(opt, head))
 		return -1;
 
+	memset(&tmp, 0, sizeof(tmp));
 	merge_inmemory_recursive(opt, side1, side2, merge_bases, &tmp);
 	merge_switch_to_result(opt, head, &tmp, 1, 1);
 	*result = tmp.tree;
