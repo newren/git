@@ -47,11 +47,15 @@ Perf command example:
   X Write the talk
   X Directory renames
   / Implement basic perf ideas
-  * Additional Perf testing
+  / Additional Perf testing
   * Output
+    * write output to merge_result (in field named output, of course)
+    * don't need the flush_output() thing
   * Path conflict files
   * Check the "Stuff to not forget"
   / Make sure the API is clean/clear
+    * make merge-ort have its own options, maybe merge_inmemory_options?
+    * make repo part of merge_options_internal?
   * Cleanup of FIXMEs
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
