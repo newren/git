@@ -3114,6 +3114,7 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	struct hashmap_iter iter;
 	struct str_entry *e;
 	struct checkout state = CHECKOUT_INIT;
+	struct index_state *index = opt->repo->index; /* for convenience */
 	int errs = 0;
 	int original_cache_nr;
 
@@ -3121,15 +3122,15 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		return 0;
 
 #ifdef VERBOSE_DEBUG
-	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
+	for (int i=0; i<index->cache_nr; ++i) {
 		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
 		       i,
-		       opt->repo->index->cache[i]->name,
-		       oid_to_hex(&opt->repo->index->cache[i]->oid),
-		       opt->repo->index->cache[i]->ce_mode,
-		       ce_stage(opt->repo->index->cache[i]),
-		       opt->repo->index->cache[i]->ce_flags,
-		       opt->repo->index->cache[i]->index);
+		       index->cache[i]->name,
+		       oid_to_hex(&index->cache[i]->oid),
+		       index->cache[i]->ce_mode,
+		       ce_stage(index->cache[i]),
+		       index->cache[i]->ce_flags,
+		       index->cache[i]->index);
 	}
 	fprintf(stderr, "... AFTER ...\n");
 #endif
@@ -3138,8 +3139,8 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	state.force = 1;
 	state.quiet = 1;
 	state.refresh_cache = 1;
-	state.istate = opt->repo->index;
-	original_cache_nr = opt->repo->index->cache_nr;
+	state.istate = index;
+	original_cache_nr = index->cache_nr;
 
 	/* Put every entry from paths into plist, then sort */
 	strmap_for_each_entry(&opt->priv->unmerged, &iter, e) {
@@ -3163,19 +3164,19 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 		 * those appended cache entries, so do a temporary swap on
 		 * cache_nr to only look through entries of interest.
 		 */
-		SWAP(opt->repo->index->cache_nr, original_cache_nr);
-		pos = index_name_pos(opt->repo->index, path, strlen(path));
-		SWAP(opt->repo->index->cache_nr, original_cache_nr);
+		SWAP(index->cache_nr, original_cache_nr);
+		pos = index_name_pos(index, path, strlen(path));
+		SWAP(index->cache_nr, original_cache_nr);
 #ifdef VERBOSE_DEBUG
 		fprintf(stderr, "Found pos %d for %s\n", pos, path);
 #endif
 		if (pos < 0) {
 			if (ci->filemask == 1)
-				cache_tree_invalidate_path(opt->repo->index, path);
+				cache_tree_invalidate_path(index, path);
 			else
 				BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
 		} else {
-			ce = opt->repo->index->cache[pos];
+			ce = index->cache[pos];
 
 			/*
 			 * If this cache entry had the skip_worktree bit set,
@@ -3186,7 +3187,8 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 				struct stat st;
 
 				if (!lstat(path, &st)) {
-					char *new_name = unique_path(opt, path, "cruft");
+					char *new_name = unique_path(opt, path,
+								     "cruft");
 
 					output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
 					errs |= rename(path, new_name);
@@ -3211,10 +3213,9 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 			if (!(ci->filemask & (1ul << i)))
 				continue;
 			vi = &ci->stages[i];
-			ce = make_cache_entry(opt->repo->index, vi->mode,
-					      &vi->oid, path, i+1, 0);
-			add_index_entry(opt->repo->index, ce,
-					ADD_CACHE_JUST_APPEND);
+			ce = make_cache_entry(index, vi->mode, &vi->oid,
+					      path, i+1, 0);
+			add_index_entry(index, ce, ADD_CACHE_JUST_APPEND);
 		}
 	}
 
@@ -3223,19 +3224,18 @@ static int record_unmerged_index_entries(struct merge_options *opt)
 	 * cache-trees), then sort the index entries to get the unmerged
 	 * entries we added to the end into their right locations.
 	 */
-	remove_marked_cache_entries(opt->repo->index, 1);
-	QSORT(opt->repo->index->cache, opt->repo->index->cache_nr,
-	      cmp_cache_name_compare);
+	remove_marked_cache_entries(index, 1);
+	QSORT(index->cache, index->cache_nr, cmp_cache_name_compare);
 #ifdef VERBOSE_DEBUG
-	for (int i=0; i<opt->repo->index->cache_nr; ++i) {
+	for (int i=0; i<index->cache_nr; ++i) {
 		fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
 		       i,
-		       opt->repo->index->cache[i]->name,
-		       oid_to_hex(&opt->repo->index->cache[i]->oid),
-		       opt->repo->index->cache[i]->ce_mode,
-		       ce_stage(opt->repo->index->cache[i]),
-		       opt->repo->index->cache[i]->ce_flags,
-		       opt->repo->index->cache[i]->index);
+		       index->cache[i]->name,
+		       oid_to_hex(&index->cache[i]->oid),
+		       index->cache[i]->ce_mode,
+		       ce_stage(index->cache[i]),
+		       index->cache[i]->ce_flags,
+		       index->cache[i]->index);
 	}
 #endif
 
