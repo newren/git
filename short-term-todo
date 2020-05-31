@@ -86,6 +86,8 @@ Path_conflict files:
     then can use the trick.
   * Perf Idea: should be able to memoize values in check_dir_renamed()
   * Perf Idea: hashmap->khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
+  * Perf-Idea: default hash alloc = 2 * number of index entries
+  * Perf-Idea: special allocator (how much time does malloc take?)
   * Perf Idea: default check-upstream-for-sameness to off
 
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
