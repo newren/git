@@ -328,7 +328,7 @@ static struct traverse_trees_callback_data {
 	unsigned long mask;
 	unsigned long dirmask;
 	struct name_entry names[3];
-} *callback_data;
+} *callback_data; /* FIXME: global?!?  Why isn't this part of merge_options_internal? */
 static int callback_data_nr, callback_data_alloc;
 static char *callback_data_traverse_path;
 
