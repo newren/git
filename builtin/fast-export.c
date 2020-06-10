@@ -1266,6 +1266,7 @@ int cmd_fast_export(int argc, const char **argv, const char *prefix)
 {
 	struct rev_info revs;
 	struct object_array commits = OBJECT_ARRAY_INIT;
+	struct object_array notes = OBJECT_ARRAY_INIT;
 	struct commit *commit;
 	char *export_filename = NULL,
 	     *import_filename = NULL,
@@ -1367,13 +1368,19 @@ int cmd_fast_export(int argc, const char **argv, const char *prefix)
 	revs.diffopt.format_callback_data = &paths_of_changed_objects;
 	revs.diffopt.flags.recursive = 1;
 	while ((commit = get_revision(&revs))) {
+		const char *refname;
+
 		get_weak_commit_references(commit);
-		if (has_unshown_parent(commit))
+		refname = *revision_sources_at(&revision_sources, commit);
+		if (!strncmp(refname, "refs/notes/", 11))
+			add_object_array(&commit->object, NULL, &notes);
+		else if (has_unshown_parent(commit))
 			add_object_array(&commit->object, NULL, &commits);
 		else
 			handle_commit(commit, &revs, &paths_of_changed_objects);
 	}
 	handle_tail(&commits, &revs, &paths_of_changed_objects);
+	handle_tail(&notes, &revs, &paths_of_changed_objects);
 
 	handle_tags_and_duplicates(&extra_refs);
 	handle_tags_and_duplicates(&tag_refs);
