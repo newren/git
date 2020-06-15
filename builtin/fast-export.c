@@ -687,8 +687,8 @@ static void anonymize_ident_line(const char **beg, const char **end)
 	*end = out->buf + out->len;
 }
 
-static void handle_commit(struct commit *commit, struct rev_info *rev,
-			  struct string_list *paths_of_changed_objects)
+static void handle_commit_or_note(struct commit *commit, struct rev_info *rev,
+				  struct string_list *paths_of_changed_objects)
 {
 	int saved_output_format = rev->diffopt.output_format;
 	const char *commit_buffer;
@@ -733,12 +733,18 @@ static void handle_commit(struct commit *commit, struct rev_info *rev,
 		diff_root_tree_oid(get_commit_tree_oid(commit),
 				   "", &rev->diffopt);
 
-	/* Export the referenced blobs, and remember the marks. */
-	for (i = 0; i < diff_queued_diff.nr; i++)
-		if (!S_ISGITLINK(diff_queued_diff.queue[i]->two->mode))
-			export_blob(&diff_queued_diff.queue[i]->two->oid);
-
 	refname = *revision_sources_at(&revision_sources, commit);
+	do_export_as_note = 0;
+	if (special_notes_export && !strncmp(refname, "refs/notes/", 11)) {
+		do_export_as_note = 1;
+	}
+
+	/* Export the referenced blobs, and remember the marks. */
+	if (!do_export_as_note)
+		for (i = 0; i < diff_queued_diff.nr; i++)
+			if (!S_ISGITLINK(diff_queued_diff.queue[i]->two->mode))
+				export_blob(&diff_queued_diff.queue[i]->two->oid);
+
 	/*
 	 * FIXME: string_list_remove() below for each ref is overall
 	 * O(N^2).  Compared to a history walk and diffing trees, this is
@@ -786,6 +792,11 @@ static void handle_commit(struct commit *commit, struct rev_info *rev,
 	free(reencoded);
 	unuse_commit_buffer(commit, commit_buffer);
 
+	if (do_export_as_note)
+		for (i = 0; i < diff_queued_diff.nr; i++)
+			if (!S_ISGITLINK(diff_queued_diff.queue[i]->two->mode))
+				export_blob(&diff_queued_diff.queue[i]->two->oid);
+
 	for (i = 0, p = commit->parents; p; p = p->next) {
 		struct object *obj = &p->item->object;
 		int mark = get_object_mark(obj);
@@ -806,9 +817,11 @@ static void handle_commit(struct commit *commit, struct rev_info *rev,
 		i++;
 	}
 
-	if (full_tree)
-		printf("deleteall\n");
-	log_tree_diff_flush(rev);
+	if (!do_export_as_note) {
+		if (full_tree)
+			printf("deleteall\n");
+		log_tree_diff_flush(rev);
+	}
 	string_list_clear(paths_of_changed_objects, 0);
 	rev->diffopt.output_format = saved_output_format;
 
