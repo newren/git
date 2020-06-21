@@ -43,6 +43,7 @@ static int show_original_ids;
 static int mark_tags;
 static struct string_list extra_refs = STRING_LIST_INIT_NODUP;
 static struct string_list tag_refs = STRING_LIST_INIT_NODUP;
+static struct string_list commit_weak_parents = STRING_LIST_INIT_DUP;
 static struct refspec refspecs = REFSPEC_INIT_FETCH;
 static int anonymize;
 static struct hashmap anonymized_seeds;
@@ -108,14 +109,86 @@ static int parse_opt_reencode_mode(const struct option *opt,
 static struct decoration idnums;
 static uint32_t last_idnum;
 
+static void commit_list_append_if_ref(struct commit_list **clist,
+				      const char *hash_start, const char *hash_end)
+{
+	char hash[100];
+	struct commit *commit;
+	struct object_id oid;
+	size_t hash_len = hash_end - hash_start;
+
+	if (hash_end <= hash_start)
+		return;
+	if (100 < the_hash_algo->hexsz + 1)
+		BUG("hash array isn't big enough");
+	if (hash_len < 7 || hash_len > the_hash_algo->hexsz)
+		return;
+	strlcpy(hash, hash_start, hash_len+1);
+	if (get_oid_committish(hash, &oid))
+		return;
+	commit = lookup_commit_reference_gently(the_repository, &oid, 1);
+	if (!commit)
+		return;
+
+	commit_list_insert(commit, clist);
+}
+
+#define ishex(x) (isdigit((x)) || ((x) >= 'a' && (x) <= 'f'))
+
+static void get_weak_commit_references(struct commit *commit)
+{
+	const char *commit_buffer = get_commit_buffer(commit, NULL);
+	const char *orig_message = NULL;
+	struct commit_list *weak_parents = NULL;
+	const char *start = NULL;
+	char cur;
+
+	find_commit_subject(commit_buffer, &orig_message);
+	start = orig_message;
+	while ((cur = *orig_message++)) {
+		if (isspace(cur))
+			start = orig_message;
+		else if (ishex(cur))
+			continue;
+		else if (start) {
+			commit_list_append_if_ref(&weak_parents,
+						  start, orig_message-1);
+			start = NULL;
+		}
+	}
+	if (start)
+		commit_list_append_if_ref(&weak_parents,
+					  start, orig_message-1);
+	if (weak_parents) {
+		char *hash = oid_to_hex(&commit->object.oid);
+		string_list_insert(&commit_weak_parents, hash)->util = weak_parents;
+	}
+}
+
+static int get_object_mark(struct object *object);
+
 static int has_unshown_parent(struct commit *commit)
 {
 	struct commit_list *parent;
+	struct string_list_item *weak_refs;
 
 	for (parent = commit->parents; parent; parent = parent->next)
 		if (!(parent->item->object.flags & SHOWN) &&
 		    !(parent->item->object.flags & UNINTERESTING))
 			return 1;
+
+	weak_refs = string_list_lookup(&commit_weak_parents,
+				       oid_to_hex(&commit->object.oid));
+	if (!weak_refs)
+		return 0;
+	for (parent = weak_refs->util; parent; parent = parent->next) {
+		if (!(parent->item->object.flags & SHOWN) &&
+		    !(parent->item->object.flags & UNINTERESTING))
+			return 1;
+		if (!get_object_mark(&parent->item->object))
+			return 1;
+	}
+
 	return 0;
 }
 
@@ -629,6 +702,7 @@ static void handle_commit(struct commit *commit, struct rev_info *rev,
 
 	rev->diffopt.output_format = DIFF_FORMAT_CALLBACK;
 
+	assert(commit->object.parsed);
 	parse_commit_or_die(commit);
 	commit_buffer = get_commit_buffer(commit, NULL);
 	author = strstr(commit_buffer, "\nauthor ");
@@ -1293,6 +1367,7 @@ int cmd_fast_export(int argc, const char **argv, const char *prefix)
 	revs.diffopt.format_callback_data = &paths_of_changed_objects;
 	revs.diffopt.flags.recursive = 1;
 	while ((commit = get_revision(&revs))) {
+		get_weak_commit_references(commit);
 		if (has_unshown_parent(commit))
 			add_object_array(&commit->object, NULL, &commits);
 		else
