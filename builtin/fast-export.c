@@ -756,14 +756,20 @@ static void handle_tail(struct object_array *commits, struct rev_info *revs,
 			struct string_list *paths_of_changed_objects)
 {
 	struct commit *commit;
+	struct object_array deferred = OBJECT_ARRAY_INIT;
 	while (commits->nr) {
-		commit = (struct commit *)object_array_pop(commits);
-		if (has_unshown_parent(commit)) {
-			/* Queue again, to be handled later */
-			add_object_array(&commit->object, NULL, commits);
-			return;
+		while (commits->nr) {
+			commit = (struct commit *)object_array_pop(commits);
+			if (has_unshown_parent(commit))
+				add_object_array(&commit->object, NULL, &deferred);
+			else
+				handle_commit(commit, revs, paths_of_changed_objects);
 		}
-		handle_commit(commit, revs, paths_of_changed_objects);
+		if (deferred.nr) {
+			struct object_array temporary = *commits;
+			*commits = deferred;
+			deferred = temporary;
+		}
 	}
 }
 
@@ -1287,14 +1293,12 @@ int cmd_fast_export(int argc, const char **argv, const char *prefix)
 	revs.diffopt.format_callback_data = &paths_of_changed_objects;
 	revs.diffopt.flags.recursive = 1;
 	while ((commit = get_revision(&revs))) {
-		if (has_unshown_parent(commit)) {
+		if (has_unshown_parent(commit))
 			add_object_array(&commit->object, NULL, &commits);
-		}
-		else {
+		else
 			handle_commit(commit, &revs, &paths_of_changed_objects);
-			handle_tail(&commits, &revs, &paths_of_changed_objects);
-		}
 	}
+	handle_tail(&commits, &revs, &paths_of_changed_objects);
 
 	handle_tags_and_duplicates(&extra_refs);
 	handle_tags_and_duplicates(&tag_refs);
