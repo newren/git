@@ -3249,9 +3249,9 @@ static int record_unmerged_index_entries(struct merge_options *opt,
  * Originally from merge_trees_internal(); heavily adapted, though.
  */
 static void merge_ort_nonrecursive_internal(struct merge_options *opt,
+					    struct tree *merge_base,
 					    struct tree *head,
 					    struct tree *merge,
-					    struct tree *merge_base,
 					    struct merge_result *result)
 {
 	struct diff_queue_struct pairs;
@@ -3323,9 +3323,9 @@ static void reset_maps(struct merge_options_internal *opt, int reinitialize);
  * Originally from merge_recursive_internal(); somewhat adapted, though.
  */
 static void merge_ort_internal(struct merge_options *opt,
+			       struct commit_list *merge_bases,
 			       struct commit *h1,
 			       struct commit *h2,
-			       struct commit_list *merge_bases,
 			       struct merge_result *result)
 {
 	struct commit_list *iter;
@@ -3390,7 +3390,7 @@ static void merge_ort_internal(struct merge_options *opt,
 		saved_b2 = opt->branch2;
 		opt->branch1 = "Temporary merge branch 1";
 		opt->branch2 = "Temporary merge branch 2";
-		merge_ort_internal(opt, prev, iter->item, NULL, result);
+		merge_ort_internal(opt, NULL, prev, iter->item, result);
 		if (result->clean < 0)
 			return;
 		opt->branch1 = saved_b1;
@@ -3409,10 +3409,10 @@ static void merge_ort_internal(struct merge_options *opt,
 
 	opt->ancestor = ancestor_name;
 	merge_ort_nonrecursive_internal(opt,
-					repo_get_commit_tree(opt->repo, h1),
-					repo_get_commit_tree(opt->repo, h2),
 					repo_get_commit_tree(opt->repo,
 							     merged_merge_bases),
+					repo_get_commit_tree(opt->repo, h1),
+					repo_get_commit_tree(opt->repo, h2),
 					result);
 	strbuf_release(&merge_base_abbrev);
 	opt->ancestor = NULL;  /* avoid accidental re-use of opt->ancestor */
@@ -3590,9 +3590,9 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
+				 struct tree *merge_base,
 				 struct tree *side1,
 				 struct tree *side2,
-				 struct tree *merge_base,
 				 struct merge_result *result)
 {
 	trace2_region_enter("merge", "inmemory_nonrecursive", opt->repo);
@@ -3602,14 +3602,14 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	merge_start(opt, result);
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
-	merge_ort_nonrecursive_internal(opt, side1, side2, merge_base, result);
+	merge_ort_nonrecursive_internal(opt, merge_base, side1, side2, result);
 	trace2_region_leave("merge", "inmemory_nonrecursive", opt->repo);
 }
 
 void merge_inmemory_recursive(struct merge_options *opt,
+			      struct commit_list *merge_bases,
 			      struct commit *side1,
 			      struct commit *side2,
-			      struct commit_list *merge_bases,
 			      struct merge_result *result)
 {
 	trace2_region_enter("merge", "inmemory_recursive", opt->repo);
@@ -3620,6 +3620,6 @@ void merge_inmemory_recursive(struct merge_options *opt,
 	merge_start(opt, result);
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
-	merge_ort_internal(opt, side1, side2, merge_bases, result);
+	merge_ort_internal(opt, merge_bases, side1, side2, result);
 	trace2_region_leave("merge", "inmemory_recursive", opt->repo);
 }

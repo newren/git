@@ -155,9 +155,9 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
 
 		merge_inmemory_nonrecursive(&merge_opt,
+					    base_tree,
 					    result.tree,
 					    next_tree,
-					    base_tree,
 					    &result);
 
 		free((char*)merge_opt.ancestor);

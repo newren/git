@@ -25,16 +25,16 @@ struct merge_result {
 
 /* rename-detecting three-way merge, no recursion. */
 void merge_inmemory_recursive(struct merge_options *opt,
+			      struct commit_list *merge_bases,
 			      struct commit *side1,
 			      struct commit *side2,
-			      struct commit_list *merge_bases,
 			      struct merge_result *result);
 
 /* rename-detecting three-way merge with recursive ancestor consolidation. */
 void merge_inmemory_nonrecursive(struct merge_options *opt,
+				 struct tree *merge_base,
 				 struct tree *side1,
 				 struct tree *side2,
-				 struct tree *merge_base,
 				 struct merge_result *result);
 
 /* Update the working tree and index from head to result after inmemory merge */
