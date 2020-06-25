@@ -2287,7 +2287,8 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 static inline int possible_renames(struct rename_info *renames,
 				   unsigned side_index)
 {
-	return renames->pairs[side_index].nr > 0;
+	return renames->pairs[side_index].nr > 0 &&
+	       !strmap_empty(&renames->relevant_sources[side_index]);
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
