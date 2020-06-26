@@ -2469,16 +2469,26 @@ static int detect_and_process_renames(struct merge_options *opt,
 
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
-		return 1; /* clean */
-	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
-		return 1; /* clean */
+		return clean;
+	if (!possible_renames(renames, 1) && !possible_renames(renames, 2)) {
+		struct diff_queue_struct *side_pairs;
+		int side, i;
+		/*
+		 * Free now unneeded filepairs, which would have been handled
+		 * in collect_renames() normally but we're about to skip that
+		 * code...
+		 */
+		for (side = 1; side <= 2; side++) {
+			side_pairs = &opt->priv->renames->pairs[side];
+			for (i = 0; i < side_pairs->nr; ++i) {
+				struct diff_filepair *p = side_pairs->queue[i];
+				diff_free_filepair(p);
+			}
+		}
+		/* Jump to common cleanup */
+		goto cleanup;
+	}
 
-	/*
-	 * FIXME:
-	 *   (1) Free'ing of renames->pairs at end of func might
-	 *       need cleanup
-	 *   (2) Free'ing of combined by caller needs to be done
-	 */
 	trace2_region_enter("merge", "regular renames", opt->repo);
 	detect_regular_renames(opt, 1);
 	detect_regular_renames(opt, 2);
@@ -2565,7 +2575,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	FREE_AND_NULL(side1_dir_renames);
 	FREE_AND_NULL(side2_dir_renames);
 
-	/* Free memory for renames->pairs[12] */
+ cleanup:
+	/* Free memory for renames->pairs[] */
 	free(renames->pairs[1].queue);
 	DIFF_QUEUE_CLEAR(&renames->pairs[1]);
 	free(renames->pairs[2].queue);
