@@ -2462,33 +2462,17 @@ static int detect_and_process_renames(struct merge_options *opt,
 				      struct tree *side1,
 				      struct tree *side2)
 {
-	struct strmap *side1_dir_renames, *side2_dir_renames;
+	struct strmap *dir_renames[3]; /* Entry 0 unused */
 	struct rename_info *renames = opt->priv->renames;
-	int need_dir_renames, clean = 1;
+	int need_dir_renames, s, clean = 1;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
-		return clean;
-	if (!possible_renames(renames, 1) && !possible_renames(renames, 2)) {
-		struct diff_queue_struct *side_pairs;
-		int side, i;
-		/*
-		 * Free now unneeded filepairs, which would have been handled
-		 * in collect_renames() normally but we're about to skip that
-		 * code...
-		 */
-		for (side = 1; side <= 2; side++) {
-			side_pairs = &opt->priv->renames->pairs[side];
-			for (i = 0; i < side_pairs->nr; ++i) {
-				struct diff_filepair *p = side_pairs->queue[i];
-				diff_free_filepair(p);
-			}
-		}
-		/* Jump to common cleanup */
-		goto cleanup;
-	}
+		goto diff_filepair_cleanup;
+	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
+		goto diff_filepair_cleanup;
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
 	detect_regular_renames(opt, 1);
@@ -2507,40 +2491,36 @@ static int detect_and_process_renames(struct merge_options *opt,
 		struct str_entry *entry;
 #endif
 
-		side1_dir_renames = get_directory_renames(opt, 1, &clean);
-		side2_dir_renames = get_directory_renames(opt, 2, &clean);
+		for (s = 1; s <= 2; s++)
+			dir_renames[s] = get_directory_renames(opt, s, &clean);
 #ifdef VERBOSE_DEBUG
-		fprintf(stderr, "Side1 dir renames:\n");
-		strmap_for_each_entry(&renames->pairs[1], &iter, entry) {
-			struct dir_rename_info *info = entry->item.util;
-			fprintf(stderr, "    %s -> %s:\n",
-				entry->item.string, info->new_dir.buf);
-		}
-		fprintf(stderr, "Side2 dir renames:\n");
-		strmap_for_each_entry(&renames->pairs[2], &iter, entry) {
-			struct dir_rename_info *info = entry->item.util;
-			fprintf(stderr, "    %s -> %s:\n",
-				entry->item.string, info->new_dir.buf);
+		for (s = 1; s <= 2; s++) {
+			fprintf(stderr, "dir renames[%d]:\n", s);
+			strmap_for_each_entry(&renames->pairs[s], &iter, entry) {
+				struct dir_rename_info *info = entry->item.util;
+				fprintf(stderr, "    %s -> %s:\n",
+					entry->item.string, info->new_dir.buf);
+			}
 		}
 		fprintf(stderr, "Done.\n");
 #endif
-		handle_directory_level_conflicts(opt, side1_dir_renames,
-						 side2_dir_renames);
+		handle_directory_level_conflicts(opt, dir_renames[1],
+						 dir_renames[2]);
 
 	} else {
-		side1_dir_renames = xmalloc(sizeof(*side1_dir_renames));
-		side2_dir_renames = xmalloc(sizeof(*side2_dir_renames));
-		strmap_init(side1_dir_renames, 0);
-		strmap_init(side2_dir_renames, 0);
+		for (s = 1; s <= 2; s++) {
+			dir_renames[s] = xmalloc(sizeof(*dir_renames[s]));
+			strmap_init(dir_renames[s], 0);
+		}
 	}
 
 	ALLOC_GROW(combined->queue,
 		   renames->pairs[1].nr + renames->pairs[2].nr,
 		   combined->alloc);
 	clean &= collect_renames(opt, combined, 1,
-				 side2_dir_renames, side1_dir_renames);
+				 dir_renames[2], dir_renames[1]);
 	clean &= collect_renames(opt, combined, 2,
-				 side1_dir_renames, side2_dir_renames);
+				 dir_renames[1], dir_renames[2]);
 	QSORT(combined->queue, combined->nr, compare_pairs);
 	trace2_region_leave("merge", "directory renames", opt->repo);
 
@@ -2561,27 +2541,41 @@ static int detect_and_process_renames(struct merge_options *opt,
 	 * deallocate them, which we do by just setting strdup_string = 1
 	 * before the strmaps are cleared.
 	 */
-	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
-		struct dir_rename_info *info = entry->item.util;
-		strbuf_release(&info->new_dir);
+	for (s = 1; s <= 2; s++) {
+		strmap_for_each_entry(dir_renames[s], &iter, entry) {
+			struct dir_rename_info *info = entry->item.util;
+			strbuf_release(&info->new_dir);
+		}
+		dir_renames[s]->strdup_strings = 1;
+		strmap_free(dir_renames[s], 1);
+		FREE_AND_NULL(dir_renames[s]);
 	}
-	strmap_for_each_entry(side2_dir_renames, &iter, entry) {
-		struct dir_rename_info *info = entry->item.util;
-		strbuf_release(&info->new_dir);
-	}
-	side1_dir_renames->strdup_strings = 1;
-	side2_dir_renames->strdup_strings = 1;
-	strmap_free(side1_dir_renames, 1);
-	strmap_free(side2_dir_renames, 1);
-	FREE_AND_NULL(side1_dir_renames);
-	FREE_AND_NULL(side2_dir_renames);
 
+	goto cleanup; /* collect_renames() handles diff_filepair_cleanup */
+
+ diff_filepair_cleanup:
+	/*
+	 * Free now unneeded filepairs, which would have been handled
+	 * in collect_renames() normally but we're about to skip that
+	 * code...
+	 */
+	for (s = 1; s <= 2; s++) {
+		struct diff_queue_struct *side_pairs;
+		int i;
+
+		side_pairs = &opt->priv->renames->pairs[s];
+		for (i = 0; i < side_pairs->nr; ++i) {
+			struct diff_filepair *p = side_pairs->queue[i];
+			diff_free_filepair(p);
+		}
+	}
  cleanup:
 	/* Free memory for renames->pairs[] */
-	free(renames->pairs[1].queue);
-	DIFF_QUEUE_CLEAR(&renames->pairs[1]);
-	free(renames->pairs[2].queue);
-	DIFF_QUEUE_CLEAR(&renames->pairs[2]);
+	for (s = 1; s <= 2; s++) {
+		free(renames->pairs[s].queue);
+		DIFF_QUEUE_CLEAR(&renames->pairs[s]);
+	}
+
 	/*
 	 * We cannot deallocate combined yet; strings contained in it were
 	 * used inside opt->priv->paths, so we need to wait to deallocate it.
