@@ -40,7 +40,7 @@
 
 struct rename_info {
 	/* For the next three vars, the 0th entry is ignored and unused */
-	struct diff_queue_struct pairs[3];
+	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
 	struct strmap relevant_sources[3]; /* set of fullnames */
 	struct strmap dirs_removed[3];     /* set of full dirnames */
 	/*
@@ -50,6 +50,15 @@ struct rename_info {
 	 *   7: optimization forbidden; need rename source in case of dir rename
 	 */
 	unsigned dir_rename_mask:3;
+
+	/*
+	 * When doing repeated merges, we can re-use renaming information from
+	 * previous merges under special circumstances;
+	 */
+	struct tree *merge_trees[3];
+	int cached_pairs_valid_side;
+	struct strmap cached_pairs[3];   /* fullnames -> {rename_path or NULL} */
+	struct strmap cached_target_names[3]; /* set of target fullnames */
 };
 
 struct merge_options_internal {
@@ -457,18 +466,28 @@ static void setup_path_info(struct string_list_item *result,
 	result->util = path_info;
 }
 
-static void add_pair(struct diff_queue_struct *queue,
+static void add_pair(struct rename_info *renames,
 		     struct name_entry *names,
 		     const char *pathname,
-		     unsigned side)
+		     unsigned side,
+		     unsigned is_add /* if false, is_delete */)
 {
 	struct diff_filespec *one, *two;
+	struct strmap *cache = is_add ? &renames->cached_target_names[side] :
+					&renames->cached_pairs[side];
+	int names_idx = is_add ? side : 0;
+
+	if (!is_add)
+		strmap_put(&renames->relevant_sources[side], pathname, NULL);
+
+	if (strmap_contains(cache, pathname))
+		return;
 
 	one = alloc_filespec(pathname);
 	two = alloc_filespec(pathname);
-	fill_filespec((side == 0) ? one : two,
-		      &names[side].oid, 1, names[side].mode);
-	diff_queue(queue, one, two);
+	fill_filespec(is_add ? two : one,
+		      &names[names_idx].oid, 1, names[names_idx].mode);
+	diff_queue(&renames->pairs[side], one, two);
 }
 
 static void collect_rename_info(struct rename_info *renames,
@@ -540,15 +559,12 @@ static void collect_rename_info(struct rename_info *renames,
 
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
-			add_pair(&renames->pairs[side], names, fullname, 0);
-
-			strmap_put(&renames->relevant_sources[side],
-				   fullname, NULL);
+			add_pair(renames, names, fullname, side, 0 /* delete */);
 		}
 
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
-			add_pair(&renames->pairs[side], names, fullname, side);
+			add_pair(renames, names, fullname, side, 1 /* add */);
 		}
 	}
 }
@@ -2312,6 +2328,18 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 	}
 }
 
+static void prune_cached_from_relevant(struct rename_info *renames,
+				       unsigned side)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
+	/* Remove from relevant_sources all entries in cached_pairs[side] */
+	strmap_for_each_entry(&renames->cached_pairs[side], &iter, entry)
+		strmap_remove(&renames->relevant_sources[side],
+			      entry->item.string, 0);
+}
+
 /* Call diffcore_rename() to update deleted/added pairs into rename pairs */
 static void detect_regular_renames(struct merge_options *opt,
 				   unsigned side_index)
@@ -2319,6 +2347,7 @@ static void detect_regular_renames(struct merge_options *opt,
 	struct diff_options diff_opts;
 	struct rename_info *renames = opt->priv->renames;
 
+	prune_cached_from_relevant(renames, side_index);
 	if (!possible_renames(renames, side_index)) {
 		/*
 		 * No rename detection needed for this side, but we still need
@@ -2373,6 +2402,57 @@ static void detect_regular_renames(struct merge_options *opt,
 	diff_flush(&diff_opts);
 }
 
+static void use_cached_pairs(struct strmap *cached_pairs,
+			     struct diff_queue_struct *pairs)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
+	/* Add to side_pairs all entries from renames->cached_pairs[side_index] */
+	strmap_for_each_entry(cached_pairs, &iter, entry) {
+		struct diff_filespec *one, *two;
+		char *old_name = entry->item.string;
+		char *new_name = entry->item.util;
+		if (!new_name)
+			new_name = old_name;
+
+		/* We don't care about oid/mode, only filenames and status */
+		one = alloc_filespec(old_name);
+		two = alloc_filespec(new_name);
+		diff_queue(pairs, one, two);
+		pairs->queue[pairs->nr-1]->status = entry->item.util ? 'R' : 'D';
+	}
+}
+
+static void possibly_cache_new_pair(struct rename_info *renames,
+				    struct diff_filepair *p,
+				    unsigned side,
+				    char *new_path)
+{
+	char *old_value;
+
+	if (!new_path &&
+	    !strmap_contains(&renames->relevant_sources[side], p->one->path))
+		return;
+	if (p->status == 'D') {
+		/*
+		 * If we already had this delete, we'll just set it's value
+		 * to NULL again, so no harm.
+		 */
+		strmap_put(&renames->cached_pairs[side], p->one->path, NULL);
+	} else if (p->status == 'R') {
+		if (!new_path)
+			new_path = p->two->path;
+		old_value = strmap_put(&renames->cached_pairs[side],
+				       p->one->path, xstrdup(new_path));
+		free(old_value);
+	} else if (p->status == 'A' && new_path) {
+		old_value = strmap_put(&renames->cached_pairs[side],
+				       p->two->path, xstrdup(new_path));
+		assert(!old_value);
+	}
+}
+
 static int compare_pairs(const void *a_, const void *b_)
 {
 	const struct diff_filepair *a = *((const struct diff_filepair **)a_);
@@ -2401,8 +2481,9 @@ static int collect_renames(struct merge_options *opt,
 	struct diff_queue_struct *side_pairs;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
+	struct rename_info *renames = opt->priv->renames;
 
-	side_pairs = &opt->priv->renames->pairs[side_index];
+	side_pairs = &renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
 #ifdef VERBOSE_DEBUG
@@ -2415,6 +2496,7 @@ static int collect_renames(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 		fprintf(stderr, "  (%c, %s -> %s)\n", p->status, p->one->path, p->two->path);
 #endif
+		possibly_cache_new_pair(renames, p, side_index, NULL);
 		if (p->status != 'A' && p->status != 'R') {
 			diff_free_filepair(p);
 			continue;
@@ -2432,6 +2514,7 @@ static int collect_renames(struct merge_options *opt,
 			diff_free_filepair(p);
 			continue;
 		}
+		possibly_cache_new_pair(renames, p, side_index, new_path);
 		if (new_path)
 			apply_directory_rename_modifications(opt, p, new_path);
 
@@ -2477,6 +2560,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	trace2_region_enter("merge", "regular renames", opt->repo);
 	detect_regular_renames(opt, 1);
 	detect_regular_renames(opt, 2);
+	use_cached_pairs(&renames->cached_pairs[1], &renames->pairs[1]);
+	use_cached_pairs(&renames->cached_pairs[2], &renames->pairs[2]);
 	trace2_region_leave("merge", "regular renames", opt->repo);
 
 	trace2_region_enter("merge", "directory renames", opt->repo);
@@ -2496,7 +2581,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 		for (s = 1; s <= 2; s++) {
 			fprintf(stderr, "dir renames[%d]:\n", s);
-			strmap_for_each_entry(&renames->pairs[s], &iter, entry) {
+			strmap_for_each_entry(dir_renames[s], &iter, entry) {
 				struct dir_rename_info *info = entry->item.util;
 				fprintf(stderr, "    %s -> %s:\n",
 					entry->item.string, info->new_dir.buf);
@@ -3479,6 +3564,8 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		for (i=1; i<3; i++) {
 			strmap_init(&renames->relevant_sources[i], 0);
 			strmap_init(&renames->dirs_removed[i], 0);
+			strmap_init(&renames->cached_pairs[i], 1);
+			strmap_init(&renames->cached_target_names[i], 0);
 		}
 
 		/*
@@ -3583,16 +3670,60 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
-		/* FIXME: Clean up the pairs too? */
-
 		strmap_func(&renames->relevant_sources[i], 0);
 		strmap_func(&renames->dirs_removed[i], 0);
+		if (i != renames->cached_pairs_valid_side) {
+			strmap_func(&renames->cached_pairs[i], 1);
+			strmap_func(&renames->cached_target_names[i], 0);
+		}
 	}
+	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
 
 	/* Clean out callback_data as well. */
 	FREE_AND_NULL(callback_data);
 	callback_data_nr = callback_data_alloc = 0;
+}
+
+static void merge_check_renames_reusable(struct merge_options *opt,
+					 struct merge_result *result,
+					 struct tree *merge_base,
+					 struct tree *side1,
+					 struct tree *side2)
+{
+	struct rename_info *renames;
+	struct tree **merge_trees;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	int s;
+
+	if (!result->priv)
+		return;
+
+	renames = ((struct merge_options_internal *)result->priv)->renames;
+	merge_trees = renames->merge_trees;
+	/* merge_trees[0..2] will only be NULL if result->priv is */
+	assert(merge_trees[0] && merge_trees[1] && merge_trees[2]);
+
+	/* Check if we meet a condition for re-using cached_pairs */
+	if (     oideq(&merge_base->object.oid, &merge_trees[2]->object.oid) &&
+		 oideq(     &side1->object.oid, &result->tree->object.oid))
+		renames->cached_pairs_valid_side = 1;
+	else if (oideq(&merge_base->object.oid, &merge_trees[1]->object.oid) &&
+		 oideq(     &side2->object.oid, &result->tree->object.oid))
+		renames->cached_pairs_valid_side = 2;
+	else
+		renames->cached_pairs_valid_side = 0;
+
+	/* If we can't re-use the cache pairs, return now */
+	if (!renames->cached_pairs_valid_side)
+		return;
+
+	/* Populate cache_target_names from cached_pairs */
+	s = renames->cached_pairs_valid_side;
+	strmap_for_each_entry(&renames->cached_pairs[s], &iter, entry)
+		strmap_put(&renames->cached_target_names[s],
+			   entry->item.string, NULL);
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
@@ -3605,7 +3736,16 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	assert(opt->ancestor != NULL);
 
 	trace2_region_enter("merge", "merge_start", opt->repo);
+	merge_check_renames_reusable(opt, result, merge_base, side1, side2);
 	merge_start(opt, result);
+	/*
+	 * Record the trees used in this merge, so if there's a next merge in
+	 * a cherry-pick or rebase sequence it might be able to take advantage
+	 * of the cached_pairs in that next merge.
+	 */
+	opt->priv->renames->merge_trees[0] = merge_base;
+	opt->priv->renames->merge_trees[1] = side1;
+	opt->priv->renames->merge_trees[2] = side2;
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_nonrecursive_internal(opt, merge_base, side1, side2, result);
