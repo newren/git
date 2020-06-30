@@ -1,3 +1,26 @@
+cached_pairs -> rename or delete
+
+before diffcore_rename:
+  X foreach i in cached_pairs[cache_pairs_side], remove relevant_sources[i]
+after diffcore_rename:
+  old_nr = pairs[cached_pairs_side.nr]
+  S add info from cached_pairs[cached_pairs_side] to pairs[cached_pairs_side]
+     X when doing so:
+       X if delete, need to remove corresponding delete from pairs[cps]
+       X if rename, need to remove corresponding delete & add from pairs[cps]
+  add info from pairs[side].queue[0..old_nr-1] to cached_pairs[side]
+       * deletes: just copy over
+       * adds: IF dir renamed, copy over as rename
+       * rename:
+         * IF dir renamed, copy over old rename target -> dir renamed target
+	 * otherwise,      copy over old rename source -> rename target
+     <sadly, this has to be called from loop in collect_renames()>
+merge_check_renames_reusable
+  * set or clear cached_pairs_side
+  * cleanup cached_pairs_side[other_side(s)]
+  * remove strmap_func(&renames->cached_pairs[i]) from reset_maps
+  * setup cached_target_names
+
 Perf stuff:
   * Things that would accelerate with remembered renames/deletes + trivial merge:
     * 4.065 : ....label:regular renames
@@ -15,6 +38,7 @@ Perf stuff:
       two sides in the target tree.  Only applies in this case.
     * automatically applies the renames on the given side, removing the
       potential pairs before calling in to diffcore_rename[_extended]()
+      (*and* deletes!)
     * may be able to use this optimization to allow more cases of trivial
       tree merges.  (Can't resolve one side matches with trees if there
       are any deletes anywhere normally, but if those deletes are all for
@@ -86,7 +110,9 @@ Path_conflict files:
     then can use the trick.
   * Perf Idea: should be able to memoize values in check_dir_renamed()
   * Perf Idea: hashmap->khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
-  * Perf-Idea: default hash alloc = 2 * number of index entries
+  * Perf-Idea: default alloc
+     2 * number of index entries for path?
+     number of index entries for pairs & cached_pairs?
   * Perf-Idea: special allocator (how much time does malloc take?)
   * Perf Idea: default check-upstream-for-sameness to off
 
