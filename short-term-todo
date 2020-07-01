@@ -1,55 +1,23 @@
-cached_pairs -> rename or delete
-
-before diffcore_rename:
-  X foreach i in cached_pairs[cache_pairs_side], remove relevant_sources[i]
-after diffcore_rename:
-  old_nr = pairs[cached_pairs_side.nr]
-  S add info from cached_pairs[cached_pairs_side] to pairs[cached_pairs_side]
-     X when doing so:
-       X if delete, need to remove corresponding delete from pairs[cps]
-       X if rename, need to remove corresponding delete & add from pairs[cps]
-  add info from pairs[side].queue[0..old_nr-1] to cached_pairs[side]
-       * deletes: just copy over
-       * adds: IF dir renamed, copy over as rename
-       * rename:
-         * IF dir renamed, copy over old rename target -> dir renamed target
-	 * otherwise,      copy over old rename source -> rename target
-     <sadly, this has to be called from loop in collect_renames()>
-merge_check_renames_reusable
-  * set or clear cached_pairs_side
-  * cleanup cached_pairs_side[other_side(s)]
-  * remove strmap_func(&renames->cached_pairs[i]) from reset_maps
-  * setup cached_target_names
-
 Perf stuff:
-  * Things that would accelerate with remembered renames/deletes + trivial merge:
-    * 4.065 : ....label:regular renames
-    * 3.540 : ..label:process_entries
-    *   2.208 : ......label:plist sort
-    * 3.034 : ..label:collect_merge_info
-    * 1.919 : ....label:reset_maps
-  * Things that wouldn't but could still be improved
-    * 0.575 : ....label:directory renames
+  * Things that I think would accelerate with tree merges: (8.505s right now)
+     * 3.583 : ..label:process_entries
+     *    2.266 : ......label:plist sort
+     * 3.007 : ..label:collect_merge_info
+     * 1.915 : ....label:reset_maps
+  * Things that wouldn't, but might still be improvable: (0.533s right now)
+     * 0.533 : ....label:directory renames
+  * Times I'm stuck with: (1.314s)
+     * 1.019 : ..label:renames (minus the directory renames bit above)
+     * 0.095 : label:checkout
+     * 0.25  : <aggregate small stuff I omitted>
+
 
   * Optimization 4 (known renames from before):
-    * goes in merge-ort, not diffcore-rename
-    * records renames together with two side trees and target tree
-    * checks on next run if merge base is one of two side trees, and one of
-      two sides in the target tree.  Only applies in this case.
-    * automatically applies the renames on the given side, removing the
-      potential pairs before calling in to diffcore_rename[_extended]()
-      (*and* deletes!)
     * may be able to use this optimization to allow more cases of trivial
       tree merges.  (Can't resolve one side matches with trees if there
       are any deletes anywhere normally, but if those deletes are all for
       known renames and those renames target outside the given tree, then
       we can do the trivial tree merge.)
-  * Optimization 4 extension:
-    * record all relevant_sources[side] which don't pair and resolve to a delete
-    * pass this in to the next cherry-pick, again with the relevant three trees
-      information
-    * for the relevant side, a saved delete means we auto-save it as a delete
-      and don't need to include it in rename detection.
 
   * Partial subtree elimination (already done when all-sides match, but also:)
     1. push one-sided tree-match cases onto a stack
@@ -63,14 +31,11 @@ Perf stuff:
 	  renames means we do need to recurse into target tree path).
     3. do normal rename detection
 
-Perf command example:
-  * hyperfine --warmup 1 -c 'git reset --hard' 'git cherry-pick --no-commit 4413405f931e'
-
 * Overall plan
   X Renames
   X Write the talk
   X Directory renames
-  / Implement basic perf ideas
+  X Implement basic perf ideas
   / Additional Perf testing
   * Output
     * write output to merge_result (in field named output, of course)
@@ -115,6 +80,7 @@ Path_conflict files:
      number of index entries for pairs & cached_pairs?
   * Perf-Idea: special allocator (how much time does malloc take?)
   * Perf Idea: default check-upstream-for-sameness to off
+  * Perf Idea: turn off rename detection for large files
 
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
