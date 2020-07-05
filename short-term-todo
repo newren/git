@@ -1,3 +1,21 @@
+When going over directories, 4 states:
+  - might be okay to do optimization; cache it
+  - optimization definitely okay, just resolve immediately
+  - optimization definitely not okay, recurse inside
+  - need to recurse into _this_ directory to get cached rename target
+Extra data needed:
+  - strmap of directories to enter (taken from cached_pairs values & ancestors)
+  - string list of arguments to collect_merge_info_callback()
+    [happens to be of same data type as struct traverse_trees_callback_data]
+
+Perf note:
+  * CAN cache directory renames.  If some directory was renamed previously and
+    dirs_removed still includes that directory, then it's still a directory
+    rename.  If some directory was not renamed previously and cached_pairs does
+    not increase in size (i.e. no new renames or deletes), then the directory
+    is still not renamed.  Thus, just check if dirs_removed is the same as
+    the previous round AND cached_pairs does not increase in size.
+
 Perf stuff:
   * Things that I think would accelerate with tree merges: (8.505s right now)
      * 3.583 : ..label:process_entries
@@ -79,7 +97,6 @@ Path_conflict files:
      2 * number of index entries for path?
      number of index entries for pairs & cached_pairs?
   * Perf-Idea: special allocator (how much time does malloc take?)
-  * Perf Idea: default check-upstream-for-sameness to off
   * Perf Idea: turn off rename detection for large files
 
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
