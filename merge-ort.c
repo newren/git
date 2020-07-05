@@ -509,9 +509,8 @@ static void collect_rename_info(struct rename_info *renames,
 	 * has been moved, we still need the rename in order to detect the
 	 * directory rename.
 	 *
-	 * This mask has complicated complicated rules, based on how we can
-	 * know whether a directory might be involved in a directory
-	 * rename.  In particular:
+	 * This mask has complicated rules, based on how we can know whether a
+	 * directory might be involved in a directory rename.  In particular:
 	 *
 	 *   - If dir_rename_mask is 0x07, we already determined elsewhere
 	 *     that the ignore-rename-source optimization is unsafe for this
