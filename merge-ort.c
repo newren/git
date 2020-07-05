@@ -3354,14 +3354,6 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 					       opt->subtree_shift);
 	}
 
-	/* FIXME: Nuke this check...or move it into wrappers? */
-	if (oideq(&merge_base->object.oid, &merge->object.oid)) {
-		output(opt, 0, _("Already up to date!"));
-		result->clean = 1;
-		result->tree = head;
-		goto update_priv;
-	}
-
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
 	if (collect_merge_info(opt, merge_base, head, merge) != 0) {
 		if (show(opt, 4) || opt->priv->call_depth)
@@ -3400,7 +3392,6 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 
 	/* Set return values */
 	result->tree = parse_tree_indirect(&working_tree_oid);
-update_priv:
 	if (!opt->priv->call_depth) {
 		result->priv = opt->priv;
 		opt->priv = NULL;

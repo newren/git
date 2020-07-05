@@ -29,6 +29,11 @@ int merge_ort_nonrecursive(struct merge_options *opt,
 	if (unclean(opt, head))
 		return -1;
 
+	if (oideq(&merge_base->object.oid, &merge->object.oid)) {
+		printf(_("Already up to date!"));
+		return 1;
+	}
+
 	memset(&result, 0, sizeof(result));
 	merge_inmemory_nonrecursive(opt, merge_base, head, merge, &result);
 	merge_switch_to_result(opt, head, &result, 1, 1);
