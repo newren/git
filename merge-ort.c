@@ -61,7 +61,7 @@ struct rename_info {
 	struct strmap cached_target_names[3]; /* set of target fullnames */
 };
 
-struct traverse_trees_callback_data {
+struct traversal_callback_data {
 	unsigned long mask;
 	unsigned long dirmask;
 	struct name_entry names[3];
@@ -77,7 +77,7 @@ struct merge_options_internal {
 	int call_depth;
 	int needed_rename_limit;
 
-	struct traverse_trees_callback_data *callback_data;
+	struct traversal_callback_data *callback_data;
 	int callback_data_nr, callback_data_alloc;
 	char *callback_data_traverse_path;
 };
