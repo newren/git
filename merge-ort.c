@@ -61,6 +61,12 @@ struct rename_info {
 	struct strmap cached_target_names[3]; /* set of target fullnames */
 };
 
+struct traverse_trees_callback_data {
+	unsigned long mask;
+	unsigned long dirmask;
+	struct name_entry names[3];
+};
+
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
@@ -70,6 +76,10 @@ struct merge_options_internal {
 	char *toplevel_dir; /* see merge_info.directory_name comment */
 	int call_depth;
 	int needed_rename_limit;
+
+	struct traverse_trees_callback_data *callback_data;
+	int callback_data_nr, callback_data_alloc;
+	char *callback_data_traverse_path;
 };
 
 struct version_info {
@@ -333,14 +343,6 @@ static int sort_dirs_next_to_their_children(const void *a, const void *b)
 
 /***** End copy-paste static functions from merge-recursive.c *****/
 
-static struct traverse_trees_callback_data {
-	unsigned long mask;
-	unsigned long dirmask;
-	struct name_entry names[3];
-} *callback_data; /* FIXME: global?!?  Why isn't this part of merge_options_internal? */
-static int callback_data_nr, callback_data_alloc;
-static char *callback_data_traverse_path;
-
 static int traverse_trees_wrapper_callback(int n,
 					   unsigned long mask,
 					   unsigned long dirmask,
@@ -348,21 +350,24 @@ static int traverse_trees_wrapper_callback(int n,
 					   struct traverse_info *info)
 {
 	struct merge_options *opt = info->data;
+	struct merge_options_internal *opti = opt->priv;
 	unsigned filemask = mask & ~dirmask;
 
 	assert(n==3);
 
-	if (!callback_data_traverse_path)
-		callback_data_traverse_path = xstrdup(info->traverse_path);
+	if (!opti->callback_data_traverse_path)
+		opti->callback_data_traverse_path = xstrdup(info->traverse_path);
 
 	if (filemask == opt->priv->renames->dir_rename_mask)
 		opt->priv->renames->dir_rename_mask = 0x07;
 
-	ALLOC_GROW(callback_data, callback_data_nr + 1, callback_data_alloc);
-	callback_data[callback_data_nr].mask = mask;
-	callback_data[callback_data_nr].dirmask = dirmask;
-	memcpy(callback_data[callback_data_nr].names, names, 3*sizeof(*names));
-	callback_data_nr++;
+	ALLOC_GROW(opti->callback_data, opti->callback_data_nr + 1,
+		   opti->callback_data_alloc);
+	opti->callback_data[opti->callback_data_nr].mask = mask;
+	opti->callback_data[opti->callback_data_nr].dirmask = dirmask;
+	memcpy(opti->callback_data[opti->callback_data_nr].names, names,
+	       3*sizeof(*names));
+	opti->callback_data_nr++;
 
 	return mask;
 }
@@ -383,34 +388,35 @@ static int traverse_trees_wrapper(struct index_state *istate,
 	traverse_callback_t old_fn;
 	char *old_callback_data_traverse_path;
 	struct merge_options *opt = info->data;
+	struct merge_options_internal *opti = opt->priv;
 
 	assert(opt->priv->renames->dir_rename_mask == 2 ||
 	       opt->priv->renames->dir_rename_mask == 4);
 
-	old_callback_data_traverse_path = callback_data_traverse_path;
+	old_callback_data_traverse_path = opti->callback_data_traverse_path;
 	old_fn = info->fn;
-	old_offset = callback_data_nr;
+	old_offset = opti->callback_data_nr;
 
-	callback_data_traverse_path = NULL;
+	opti->callback_data_traverse_path = NULL;
 	info->fn = traverse_trees_wrapper_callback;
 	ret = traverse_trees(istate, n, t, info);
 	if (ret < 0)
 		return ret;
 
-	info->traverse_path = callback_data_traverse_path;
+	info->traverse_path = opti->callback_data_traverse_path;
 	info->fn = old_fn;
-	for (i = old_offset; i < callback_data_nr; ++i) {
+	for (i = old_offset; i < opti->callback_data_nr; ++i) {
 		info->fn(n,
-			 callback_data[i].mask,
-			 callback_data[i].dirmask,
-			 callback_data[i].names,
+			 opti->callback_data[i].mask,
+			 opti->callback_data[i].dirmask,
+			 opti->callback_data[i].names,
 			 info);
 
 	}
 
-	callback_data_nr = old_offset;
-	free(callback_data_traverse_path);
-	callback_data_traverse_path = old_callback_data_traverse_path;
+	opti->callback_data_nr = old_offset;
+	free(opti->callback_data_traverse_path);
+	opti->callback_data_traverse_path = old_callback_data_traverse_path;
 	info->traverse_path = NULL;
 	return 0;
 }
@@ -3671,8 +3677,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	renames->dir_rename_mask = 0;
 
 	/* Clean out callback_data as well. */
-	FREE_AND_NULL(callback_data);
-	callback_data_nr = callback_data_alloc = 0;
+	FREE_AND_NULL(opti->callback_data);
+	opti->callback_data_nr = opti->callback_data_alloc = 0;
 }
 
 static void merge_check_renames_reusable(struct merge_options *opt,
