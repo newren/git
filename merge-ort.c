@@ -811,7 +811,6 @@ static int collect_merge_info_callback(int n,
 		newinfo.prev = info;
 		newinfo.name = p->path;
 		newinfo.namelen = p->pathlen;
-		newinfo.mode = p->mode;
 		newinfo.pathlen = st_add3(newinfo.pathlen, p->pathlen, 1);
 		/*
 		 * If we did care about parent directories having a D/F
