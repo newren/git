@@ -832,7 +832,7 @@ static int collect_merge_info_callback(int n,
 				const struct object_id *oid = NULL;
 				if (dirmask & 1)
 					oid = &names[i].oid;
-				buf[i] = fill_tree_descriptor(the_repository,
+				buf[i] = fill_tree_descriptor(opt->repo,
 							      t + i, oid);
 			}
 		}
