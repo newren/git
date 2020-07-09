@@ -458,8 +458,6 @@ static void setup_path_info(struct string_list_item *result,
 
 		for (i = 0; i < 3; i++) {
 			path_info->pathnames[i] = fullpath;
-			if (!(filemask & (1ul << i)))
-				continue;
 			path_info->stages[i].mode = names[i].mode;
 			oidcpy(&path_info->stages[i].oid, &names[i].oid);
 		}
@@ -773,11 +771,11 @@ static int collect_merge_info_callback(int n,
 #endif
 	if (filemask) {
 		struct conflict_info *ci = pi.util;
-		if (side1_matches_mbase && !side1_is_tree)
+		if (side1_matches_mbase)
 			ci->match_mask = 3;
-		else if (side2_matches_mbase && !side2_is_tree)
+		else if (side2_matches_mbase)
 			ci->match_mask = 5;
-		else if (sides_match && !side1_is_tree)
+		else if (sides_match)
 			ci->match_mask = 6;
 		/* else ci->match_mask is already 0; no need to set it */
 #ifdef VERBOSE_DEBUG
@@ -2910,6 +2908,8 @@ static void process_entry(struct merge_options *opt,
 		return;
 	}
 	if (ci->df_conflict && ci->merged.result.mode == 0) {
+		int i;
+
 		/*
 		 * directory no longer in the way, but we do have a file we
 		 * need to place here so we need to clean away the "directory
@@ -2919,6 +2919,15 @@ static void process_entry(struct merge_options *opt,
 		assert(ci->filemask != 0);
 		ci->merged.clean = 0;
 		ci->merged.is_null = 0;
+		/* and we want to zero out any directory-related entries */
+		ci->match_mask = (ci->match_mask & ~ci->dirmask);
+		ci->dirmask = 0;
+		for (i=0; i<3; i++) {
+			if (ci->filemask & (1 << i))
+				continue;
+			ci->stages[i].mode = 0;
+			oidcpy(&ci->stages[i].oid, &null_oid);
+		}
 	} else if (ci->df_conflict && ci->merged.result.mode != 0) {
 		/*
 		 * This started out as a D/F conflict, and the entries in
@@ -2928,6 +2937,7 @@ static void process_entry(struct merge_options *opt,
 		 */
 		struct conflict_info *new_ci;
 		const char *branch;
+		int i;
 
 		assert(ci->merged.result.mode == S_IFDIR);
 
@@ -2949,10 +2959,20 @@ static void process_entry(struct merge_options *opt,
 		 */
 		new_ci = xcalloc(1, sizeof(*ci));
 		/* We don't really want new_ci->merged.result copied, but it'll
-		 * be overwritten below so it doesn't matter, and we do want
-		 * the rest of ci copied.
+		 * be overwritten below so it doesn't matter.  We also don't
+		 * want any directory mode/oid values copied, but we'll zero
+		 * those out immediately.  We do want the rest of ci copied.
 		 */
 		memcpy(new_ci, ci, sizeof(*ci));
+		new_ci->match_mask = (new_ci->match_mask & ~new_ci->dirmask);
+		new_ci->dirmask = 0;
+		for (i=0; i<3; i++) {
+			if (new_ci->filemask & (1 << i))
+				continue;
+			/* zero out any entries related to directories */
+			new_ci->stages[i].mode = 0;
+			oidcpy(&new_ci->stages[i].oid, &null_oid);
+		}
 
 		/*
 		 * Find out which side this file came from; note that we
