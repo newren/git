@@ -2899,7 +2899,7 @@ static void process_entry(struct merge_options *opt,
 #endif
 	assert(!ci->merged.clean && !ci->processed);
 	ci->processed = 1;
-	assert(ci->filemask >=0 && ci->filemask < 8);
+	assert(ci->filemask >= 0 && ci->filemask <= 7);
 	if (ci->filemask == 0) {
 		/*
 		 * This is a placeholder for directories that were recursed
@@ -3017,7 +3017,7 @@ static void process_entry(struct merge_options *opt,
 			oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 
 #ifdef VERBOSE_DEBUG
-			printf("ci->merged.result.mode: %d, is_null: %d\n",
+			printf("ci->merged.result.mode: %06o, is_null: %d\n",
 			       ci->merged.result.mode, ci->merged.is_null);
 #endif
 			assert(othermask == 2 || othermask == 4);
