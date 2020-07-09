@@ -39,10 +39,13 @@
 #endif
 
 struct rename_info {
-	/* For the next three vars, the 0th entry is ignored and unused */
+	/* For the next six vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
 	struct strmap relevant_sources[3]; /* set of fullnames */
 	struct strmap dirs_removed[3];     /* set of full dirnames */
+	struct strmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
+	struct strmap target_dirs[3];             /* set of directory paths */
+	unsigned trivial_merges_okay[3];          /* 0 = no, 1 = maybe */
 	/*
 	 * dir_rename_mask:
 	 *   0: optimization removing unmodified potential rename source okay
@@ -50,6 +53,15 @@ struct rename_info {
 	 *   7: optimization forbidden; need rename source in case of dir rename
 	 */
 	unsigned dir_rename_mask:3;
+
+	/*
+	 * dir_rename_mask needs to be coupled with a traversal through trees
+	 * that iterates over all files in a given tree before all immediate
+	 * subdirectories within that tree.  Since traverse_trees() doesn't do
+	 * that naturally, we have a traverse_trees_wrapper() that stores any
+	 * immediate subdirectories while traversing files, then traverses the
+	 * immediate subdirectories later.
+	 */
 	struct traversal_callback_data *callback_data;
 	int callback_data_nr, callback_data_alloc;
 	char *callback_data_traverse_path;
@@ -587,6 +599,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options_internal *opti = opt->priv;
 	struct rename_info *renames = opt->priv->renames;
 	struct string_list_item pi;  /* Path Info */
+	struct conflict_info *ci; /* pi.util when there's a conflict */
 	struct name_entry *p;
 	size_t len;
 	char *fullpath;
@@ -769,19 +782,17 @@ static int collect_merge_info_callback(int n,
 	       renames->dir_rename_mask);
 	printf("Stats:\n");
 #endif
-	if (filemask) {
-		struct conflict_info *ci = pi.util;
-		if (side1_matches_mbase)
-			ci->match_mask = 3;
-		else if (side2_matches_mbase)
-			ci->match_mask = 5;
-		else if (sides_match)
-			ci->match_mask = 6;
-		/* else ci->match_mask is already 0; no need to set it */
+	ci = pi.util;
+	if (side1_matches_mbase)
+		ci->match_mask = 3;
+	else if (side2_matches_mbase)
+		ci->match_mask = 5;
+	else if (sides_match)
+		ci->match_mask = 6;
+	/* else ci->match_mask is already 0; no need to set it */
 #ifdef VERBOSE_DEBUG
-		printf("  matchmask: %u\n", ci->match_mask);
+	printf("  matchmask: %u\n", ci->match_mask);
 #endif
-	}
 #ifdef VERBOSE_DEBUG
 	printf("  renames->dir_rename_mask: %u\n",
 	       renames->dir_rename_mask);
@@ -802,9 +813,27 @@ static int collect_merge_info_callback(int n,
 		struct tree_desc t[3];
 		void *buf[3] = {NULL,};
 		const char *original_dir_name;
-		int ret;
-		int i;
+		int i, ret, side;
 
+		/*
+		 * Check for whether we can avoid recursing due to one side
+		 * matching the merge base.  The side that does NOT match is
+		 * the one that might have a rename target we need.
+		 */
+		assert(!side1_matches_mbase || !side2_matches_mbase);
+		side = side1_matches_mbase ? 2 :
+			side2_matches_mbase ? 1 : 0;
+		if (renames->dir_rename_mask != 0x07 && side &&
+		    renames->trivial_merges_okay[side] &&
+		    !strmap_contains(&renames->target_dirs[side], pi.string)) {
+			strintmap_set(&renames->possible_trivial_merges[side],
+				      pi.string, renames->dir_rename_mask);
+			renames->dir_rename_mask = prev_dir_rename_mask;
+			return mask;
+		}
+
+		/* We need to recurse */
+		ci->match_mask &= filemask;
 		newinfo = *info;
 		newinfo.prev = info;
 		newinfo.name = p->path;
@@ -854,6 +883,165 @@ static int collect_merge_info_callback(int n,
 	return mask;
 }
 
+static void resolve_trivial_directory_merge(struct conflict_info *ci, int side)
+{
+	assert((side == 1 && ci->match_mask == 5) ||
+	       (side == 2 && ci->match_mask == 3));
+	oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
+	ci->merged.result.mode = ci->stages[side].mode;
+	ci->merged.is_null = is_null_oid(&ci->stages[side].oid);
+	ci->match_mask = 0;
+	ci->merged.clean = 1;
+	ci->processed = 1;
+}
+
+static int handle_deferred_entries(struct merge_options *opt,
+				   struct traverse_info *info)
+{
+	struct rename_info *renames = opt->priv->renames;
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+	int side, ret = 0;
+
+	for (side = 1; side <= 2; side++) {
+		unsigned optimization_okay = 1;
+		struct strmap copy;
+
+		/* Loop over the set of paths we need to know rename info for */
+		strmap_for_each_entry(&renames->relevant_sources[side],
+				      &iter, entry) {
+			char *rename_target, *dir, *dir_marker;
+			struct string_list_item *item;
+
+			/*
+			 * if we don't know delete/rename info for this path,
+			 * then we need to recurse into all trees to get all
+			 * adds to make sure we have it.
+			 */
+			item = strmap_get_item(&renames->cached_pairs[side],
+					       entry->item.string);
+			if (!item) {
+				optimization_okay = 0;
+				break;
+			}
+
+			/* If this is a delete, we have enough info already */
+			rename_target = item->util;
+			if (!rename_target)
+				continue;
+
+			/* If we already walked the rename target, we're good */
+			if (strmap_contains(&opt->priv->paths, rename_target))
+				continue;
+
+			/*
+			 * Otherwise, we need to get a list of directories that
+			 * will need to be recursed into to get this
+			 * rename_target.
+			 */
+			dir = xstrdup(rename_target);
+			while ((dir_marker = strrchr(dir, '/'))) {
+				*dir_marker = '\0';
+				if (strmap_contains(&renames->target_dirs[side],
+						    dir))
+					break;
+				strmap_put(&renames->target_dirs[side],
+					   dir, NULL);
+			}
+			free(dir);
+		}
+		renames->trivial_merges_okay[side] = optimization_okay;
+		/*
+		 * We need to recurse into any directories in
+		 * possible_trivial_merges[side] found in target_dirs[side].
+		 * But when we recurse, we may need to queue up some of the
+		 * subdirectories for possible_trivial_merges[side].  Since
+		 * we can't safely iterate through a hashmap while also adding
+		 * entries, move the entries into 'copy', iterate over 'copy',
+		 * and then we'll also iterate anything added into
+		 * possible_trivial_merges[side] once this loop is done.
+		 */
+		copy = renames->possible_trivial_merges[side];
+		strmap_init(&renames->possible_trivial_merges[side], 0);
+		strmap_for_each_entry(&copy, &iter, entry) {
+			char *path = entry->item.string;
+			unsigned dir_rename_mask = (intptr_t)entry->item.util;
+			struct conflict_info *ci;
+			unsigned dirmask;
+			struct tree_desc t[3];
+			void *buf[3] = {NULL,};
+			int i;
+
+			ci = strmap_get(&opt->priv->paths, path);
+			dirmask = ci->dirmask;
+
+			if (optimization_okay &&
+			    !strmap_contains(&renames->target_dirs[side],
+					     path)) {
+				resolve_trivial_directory_merge(ci, side);
+				continue;
+			}
+
+			info->name = path;
+			info->namelen = strlen(path);
+			info->pathlen = info->namelen + 1;
+#if 0
+			printf("dirmask:    %d\n", ci->dirmask);
+			printf("match_mask: %d\n", ci->match_mask);
+			printf("oid[0]: %s\n", oid_to_hex(&ci->stages[0].oid));
+			printf("oid[1]: %s\n", oid_to_hex(&ci->stages[1].oid));
+			printf("oid[2]: %s\n", oid_to_hex(&ci->stages[2].oid));
+			printf("info->prev: %p\n", info->prev);
+#endif
+
+			for (i = 0; i < 3; i++, dirmask >>= 1) {
+				if (i == 1 && ci->match_mask == 3)
+					t[1] = t[0];
+				else if (i == 2 && ci->match_mask == 5)
+					t[2] = t[0];
+				else if (i == 2 && ci->match_mask == 6)
+					t[2] = t[1];
+				else {
+					const struct object_id *oid = NULL;
+					if (dirmask & 1)
+						oid = &ci->stages[i].oid;
+					buf[i] = fill_tree_descriptor(opt->repo,
+								      t+i, oid);
+				}
+			}
+
+			ci->match_mask &= ci->filemask;
+			opt->priv->current_dir_name = path;
+			renames->dir_rename_mask = dir_rename_mask;
+			if (renames->dir_rename_mask == 0 ||
+			    renames->dir_rename_mask == 0x07)
+				ret = traverse_trees(NULL, 3, t, info);
+			else
+				ret = traverse_trees_wrapper(NULL, 3, t, info);
+
+			for (i = 0; i < 3; i++)
+				free(buf[i]);
+
+			if (ret < 0)
+				return ret;
+		}
+		strmap_free(&copy, 0);
+		strmap_for_each_entry(&renames->possible_trivial_merges[side],
+				      &iter, entry) {
+			char *path = entry->item.string;
+			struct conflict_info *ci;
+
+			ci = strmap_get(&opt->priv->paths, path);
+
+			assert(renames->trivial_merges_okay[side] &&
+			       !strmap_contains(&renames->target_dirs[side],
+						path));
+			resolve_trivial_directory_merge(ci, side);
+		}
+	}
+	return ret;
+}
+
 static int collect_merge_info(struct merge_options *opt,
 			      /* FIXME: We do NOT need the trees anymore */
 			      struct tree *merge_base,
@@ -886,6 +1074,8 @@ static int collect_merge_info(struct merge_options *opt,
 
 	trace_performance_enter();
 	ret = traverse_trees(NULL, 3, t, &info);
+	if (ret == 0)
+		ret = handle_deferred_entries(opt, &info);
 	trace_performance_leave("traverse_trees");
 
 	return ret;
@@ -3580,6 +3770,9 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 			strmap_init(&renames->dirs_removed[i], 0);
 			strmap_init(&renames->cached_pairs[i], 1);
 			strmap_init(&renames->cached_target_names[i], 0);
+			strmap_init(&renames->possible_trivial_merges[i], 0);
+			strmap_init(&renames->target_dirs[i], 1);
+			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
 		/*
@@ -3686,6 +3879,9 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	for (i=1; i<3; ++i) {
 		strmap_func(&renames->relevant_sources[i], 0);
 		strmap_func(&renames->dirs_removed[i], 0);
+		strmap_func(&renames->possible_trivial_merges[i], 0);
+		strmap_func(&renames->target_dirs[i], 0);
+		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		if (i != renames->cached_pairs_valid_side) {
 			strmap_func(&renames->cached_pairs[i], 1);
 			strmap_func(&renames->cached_target_names[i], 0);
