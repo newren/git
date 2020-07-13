@@ -823,6 +823,14 @@ static int collect_merge_info_callback(int n,
 		assert(!side1_matches_mbase || !side2_matches_mbase);
 		side = side1_matches_mbase ? 2 :
 			side2_matches_mbase ? 1 : 0;
+		if (filemask == 0 && (dirmask == 2 || dirmask == 4)) {
+			/*
+			 * Also defer recursing into new directories; set up a
+			 * few variables to let us do so.
+			 */
+			ci->match_mask = (7 - dirmask);
+			side = dirmask / 2;
+		}
 		if (renames->dir_rename_mask != 0x07 && side &&
 		    renames->trivial_merges_okay[side] &&
 		    !strmap_contains(&renames->target_dirs[side], pi.string)) {
