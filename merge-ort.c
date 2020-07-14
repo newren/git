@@ -3350,6 +3350,7 @@ static void process_entries(struct merge_options *opt,
 		       dir_metadata.offsets.nr);
 		printf("dir_metadata.offsets.items[0].util = %lu (should be 0)\n",
 		       (uintptr_t)dir_metadata.offsets.items[0].util);
+		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
 	write_tree(result_oid, &dir_metadata.versions, 0);
