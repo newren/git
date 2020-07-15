@@ -1,60 +1,10 @@
-When going over directories, 4 states:
-  - might be okay to do optimization; cache it
-  - optimization definitely okay, just resolve immediately
-  - optimization definitely not okay, recurse inside
-  - need to recurse into _this_ directory to get cached rename target
-Extra data needed:
-  - strmap of directories to enter (taken from cached_pairs values & ancestors)
-  - string list of arguments to collect_merge_info_callback()
-    [happens to be of same data type as struct traverse_trees_callback_data]
-
-Perf note:
-  * CAN cache directory renames.  If some directory was renamed previously and
-    dirs_removed still includes that directory, then it's still a directory
-    rename.  If some directory was not renamed previously and cached_pairs does
-    not increase in size (i.e. no new renames or deletes), then the directory
-    is still not renamed.  Thus, just check if dirs_removed is the same as
-    the previous round AND cached_pairs does not increase in size.
-
-Perf stuff:
-  * Things that I think would accelerate with tree merges: (8.505s right now)
-     * 3.583 : ..label:process_entries
-     *    2.266 : ......label:plist sort
-     * 3.007 : ..label:collect_merge_info
-     * 1.915 : ....label:reset_maps
-  * Things that wouldn't, but might still be improvable: (0.533s right now)
-     * 0.533 : ....label:directory renames
-  * Times I'm stuck with: (1.314s)
-     * 1.019 : ..label:renames (minus the directory renames bit above)
-     * 0.095 : label:checkout
-     * 0.25  : <aggregate small stuff I omitted>
-
-
-  * Optimization 4 (known renames from before):
-    * may be able to use this optimization to allow more cases of trivial
-      tree merges.  (Can't resolve one side matches with trees if there
-      are any deletes anywhere normally, but if those deletes are all for
-      known renames and those renames target outside the given tree, then
-      we can do the trivial tree merge.)
-
-  * Partial subtree elimination (already done when all-sides match, but also:)
-    1. push one-sided tree-match cases onto a stack
-    2. after all trees walked except one-sided tree-match cases:
-      2a. if no file deletions (on this side of history), resolve one-sided
-          tree-match on this side by taking the other side of history (i.e.
-	  deleting the tree or taking the new tree).
-      2b. if file deletions, recurse into one-sided tree-match cases
-      2c. note that saved renames and saved deletes can allow us to ignore
-          deletes because we already know their pairing (although the saved
-	  renames means we do need to recurse into target tree path).
-    3. do normal rename detection
-
 * Overall plan
   X Renames
   X Write the talk
   X Directory renames
   X Implement basic perf ideas
-  / Additional Perf testing
+  X Additional Perf testing
+  - Micro-optimizations
   * Output
     * write output to merge_result (in field named output, of course)
     * don't need the flush_output() thing
@@ -85,13 +35,18 @@ Path_conflict files:
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 * Stuff to not forget:
-  * Perf idea: can trivial tree merge (O matches A implies take B when all
-    three are trees) if no parent trees differed outside of directory leading
-    to this directory and sibling trees do not differ.  However, it means that
-    we can't recurse into entries as we go, we have to first check all the
-    tree entries for the toplevel directory, verify that only one differs,
-    then can use the trick.
-  * Perf Idea: should be able to memoize values in check_dir_renamed()
+  * Perf Idea: cache directory rename info (if dirs_removed[] is identical to
+      last picked commit and cached_pairs is same size, then re-use)
+
+      If some directory was renamed previously and dirs_removed still
+      includes that directory, then it's still a directory rename.  If
+      some directory was not renamed previously and cached_pairs does
+      not increase in size (i.e. no new renames or deletes), then the
+      directory is still not renamed.  Thus, just check if
+      dirs_removed is the same as the previous round AND cached_pairs
+      does not increase in size.
+  * Perf Idea: might be able to memoize values in check_dir_renamed()
+               (augment dir_renames with non-renames)
   * Perf Idea: hashmap->khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
   * Perf-Idea: default alloc
      2 * number of index entries for path?
