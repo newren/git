@@ -94,12 +94,15 @@ struct merge_options_internal {
 };
 
 struct version_info {
-	unsigned short mode;
 	struct object_id oid;
+	unsigned short mode;
 };
 
 struct merged_info {
 	struct version_info result;
+	unsigned is_null:1;
+	unsigned clean:1;
+	size_t basename_offset;
 	 /*
 	  * Containing directory name.  Note that we assume directory_name is
 	  * constructed such that
@@ -108,9 +111,6 @@ struct merged_info {
 	  * to hold, we have to be careful setting directory_name.
 	  */
 	const char *directory_name;
-	size_t basename_offset;
-	unsigned is_null:1;
-	unsigned clean:1;
 };
 
 #if 0
