@@ -16,6 +16,7 @@
 #include "cache-tree.h"
 #include "commit.h"
 #include "lockfile.h"
+#include "malloc.h"
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
@@ -198,5 +199,6 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	if (write_locked_index(&the_index, &lock,
 			       COMMIT_LOCK | SKIP_IF_UNCHANGED))
 		die(_("unable to write %s"), get_index_file());
+	print_malloc_stats();
 	return (clean == 0);
 }
