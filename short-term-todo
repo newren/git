@@ -35,24 +35,27 @@ Path_conflict files:
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 * Stuff to not forget:
-  * Perf Idea: cache directory rename info (if dirs_removed[] is identical to
-      last picked commit and cached_pairs is same size, then re-use)
+  * Generally applicable stuff
+    * Perf Idea: might be able to memoize values in check_dir_renamed()
+                 (augment dir_renames with non-renames)
+    * Perf Idea: add a hashmap_clear[_entries]() function
+    * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
+    * Perf-Idea: special allocator (how much time does malloc take?)
+    * Perf Idea: turn off rename detection for large files
+  * Stuff that'd only help the rebase case
+    * Perf Idea: cache directory rename info (if dirs_removed[] is identical to
+        last picked commit and cached_pairs is same size, then re-use)
 
-      If some directory was renamed previously and dirs_removed still
-      includes that directory, then it's still a directory rename.  If
-      some directory was not renamed previously and cached_pairs does
-      not increase in size (i.e. no new renames or deletes), then the
-      directory is still not renamed.  Thus, just check if
-      dirs_removed is the same as the previous round AND cached_pairs
-      does not increase in size.
-  * Perf Idea: might be able to memoize values in check_dir_renamed()
-               (augment dir_renames with non-renames)
-  * Perf Idea: hashmap->khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
-  * Perf-Idea: default alloc
-     2 * number of index entries for path?
-     number of index entries for pairs & cached_pairs?
-  * Perf-Idea: special allocator (how much time does malloc take?)
-  * Perf Idea: turn off rename detection for large files
+        If some directory was renamed previously and dirs_removed still
+        includes that directory, then it's still a directory rename.  If
+        some directory was not renamed previously and cached_pairs does
+        not increase in size (i.e. no new renames or deletes), then the
+        directory is still not renamed.  Thus, just check if
+        dirs_removed is the same as the previous round AND cached_pairs
+        does not increase in size.
+    * Perf-Idea: default alloc
+       2 * number of index entries for path?
+       number of index entries for pairs & cached_pairs?
 
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
