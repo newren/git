@@ -36,12 +36,20 @@ Path_conflict files:
 
 * Stuff to not forget:
   * Generally applicable stuff
+    * Perf Idea: after collect_merge_info() and detect_regular_renames(),
+                 record renames and deletes in cached_pairs(), then repeat
+		 collect_merge_info() [but it'll be faster because we don't
+		 have to descend into all trees], and then process_entries()
+		 will be a lot faster too.  Only do this if
+		 strmap_get_size(&opti->paths) changes by a factor of X
+		 after calling handle_deferred_entries(), where X is some
+		 large multiple of the number of relevant_sources on side.
     * Perf Idea: might be able to memoize values in check_dir_renamed()
                  (augment dir_renames with non-renames)
-    * Perf Idea: add a hashmap_clear[_entries]() function
     * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
     * Perf-Idea: special allocator (how much time does malloc take?)
     * Perf Idea: turn off rename detection for large files
+    * Perf Important: how much does histogram diff help/hurt?
   * Stuff that'd only help the rebase case
     * Perf Idea: cache directory rename info (if dirs_removed[] is identical to
         last picked commit and cached_pairs is same size, then re-use)
@@ -55,7 +63,7 @@ Path_conflict files:
         does not increase in size.
     * Perf-Idea: default alloc
        2 * number of index entries for path?
-       number of index entries for pairs & cached_pairs?
+       number of index entries for pairs?
 
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
