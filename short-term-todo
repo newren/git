@@ -36,14 +36,6 @@ Path_conflict files:
 
 * Stuff to not forget:
   * Generally applicable stuff
-    * Perf Idea: after collect_merge_info() and detect_regular_renames(),
-                 record renames and deletes in cached_pairs(), then repeat
-		 collect_merge_info() [but it'll be faster because we don't
-		 have to descend into all trees], and then process_entries()
-		 will be a lot faster too.  Only do this if
-		 strmap_get_size(&opti->paths) changes by a factor of X
-		 after calling handle_deferred_entries(), where X is some
-		 large multiple of the number of relevant_sources on side.
     * Perf Idea: might be able to memoize values in check_dir_renamed()
                  (augment dir_renames with non-renames)
     * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
