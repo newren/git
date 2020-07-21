@@ -3659,7 +3659,9 @@ redo:
 						   head, merge);
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
+		trace2_region_enter("merge", "reset_maps", opt->repo);
 		reset_maps(opt->priv, 1);
+		trace2_region_leave("merge", "reset_maps", opt->repo);
 		goto redo;
 	}
 
