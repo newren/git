@@ -2539,68 +2539,6 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 			      entry->item.string, 0);
 }
 
-/* Call diffcore_rename() to update deleted/added pairs into rename pairs */
-static void detect_regular_renames(struct merge_options *opt,
-				   unsigned side_index)
-{
-	struct diff_options diff_opts;
-	struct rename_info *renames = opt->priv->renames;
-
-	prune_cached_from_relevant(renames, side_index);
-	if (!possible_renames(renames, side_index)) {
-		/*
-		 * No rename detection needed for this side, but we still need
-		 * to make sure 'adds' are marked correctly in case the other
-		 * side had directory renames.
-		 */
-		resolve_diffpair_statuses(&renames->pairs[side_index]);
-		return;
-	}
-
-	repo_diff_setup(opt->repo, &diff_opts);
-	diff_opts.flags.recursive = 1;
-	diff_opts.flags.rename_empty = 0;
-	diff_opts.detect_rename = merge_detect_rename(opt);
-	/*
-	 * We do not have logic to handle the detection of copies.  In
-	 * fact, it may not even make sense to add such logic: would we
-	 * really want a change to a base file to be propagated through
-	 * multiple other files by a merge?
-	 */
-	if (diff_opts.detect_rename > DIFF_DETECT_RENAME)
-		diff_opts.detect_rename = DIFF_DETECT_RENAME;
-	diff_opts.rename_limit = opt->rename_limit;
-	if (opt->rename_limit <= 0)
-		diff_opts.rename_limit = 1000;
-	diff_opts.rename_score = opt->rename_score;
-	diff_opts.show_rename_progress = opt->show_rename_progress;
-	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
-	diff_setup_done(&diff_opts);
-
-	diff_queued_diff = renames->pairs[side_index];
-	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
-	trace2_region_enter("diff", "diffcore_rename", opt->repo);
-	diffcore_rename_extended(&diff_opts,
-				 &renames->relevant_sources[side_index],
-				 NULL,
-				 &renames->dirs_removed[side_index]);
-	trace2_region_leave("diff", "diffcore_rename", opt->repo);
-	resolve_diffpair_statuses(&diff_queued_diff);
-	dump_pairs(&diff_queued_diff, "After diffcore_rename");
-#ifdef VERBOSE_DEBUG
-	printf("Done.\n");
-#endif
-	if (diff_opts.needed_rename_limit > opt->priv->needed_rename_limit)
-		opt->priv->needed_rename_limit = diff_opts.needed_rename_limit;
-
-	renames->pairs[side_index] = diff_queued_diff;
-
-	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
-	diff_queued_diff.nr = 0;
-	diff_queued_diff.queue = NULL;
-	diff_flush(&diff_opts);
-}
-
 static void use_cached_pairs(struct strmap *cached_pairs,
 			     struct diff_queue_struct *pairs)
 {
@@ -2661,6 +2599,68 @@ static int compare_pairs(const void *a_, const void *b_)
 	if (cmp)
 		return cmp;
 	return a->score - b->score;
+}
+
+/* Call diffcore_rename() to update deleted/added pairs into rename pairs */
+static void detect_regular_renames(struct merge_options *opt,
+				   unsigned side_index)
+{
+	struct diff_options diff_opts;
+	struct rename_info *renames = opt->priv->renames;
+
+	prune_cached_from_relevant(renames, side_index);
+	if (!possible_renames(renames, side_index)) {
+		/*
+		 * No rename detection needed for this side, but we still need
+		 * to make sure 'adds' are marked correctly in case the other
+		 * side had directory renames.
+		 */
+		resolve_diffpair_statuses(&renames->pairs[side_index]);
+		return;
+	}
+
+	repo_diff_setup(opt->repo, &diff_opts);
+	diff_opts.flags.recursive = 1;
+	diff_opts.flags.rename_empty = 0;
+	diff_opts.detect_rename = merge_detect_rename(opt);
+	/*
+	 * We do not have logic to handle the detection of copies.  In
+	 * fact, it may not even make sense to add such logic: would we
+	 * really want a change to a base file to be propagated through
+	 * multiple other files by a merge?
+	 */
+	if (diff_opts.detect_rename > DIFF_DETECT_RENAME)
+		diff_opts.detect_rename = DIFF_DETECT_RENAME;
+	diff_opts.rename_limit = opt->rename_limit;
+	if (opt->rename_limit <= 0)
+		diff_opts.rename_limit = 1000;
+	diff_opts.rename_score = opt->rename_score;
+	diff_opts.show_rename_progress = opt->show_rename_progress;
+	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_setup_done(&diff_opts);
+
+	diff_queued_diff = renames->pairs[side_index];
+	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
+	trace2_region_enter("diff", "diffcore_rename", opt->repo);
+	diffcore_rename_extended(&diff_opts,
+				 &renames->relevant_sources[side_index],
+				 NULL,
+				 &renames->dirs_removed[side_index]);
+	trace2_region_leave("diff", "diffcore_rename", opt->repo);
+	resolve_diffpair_statuses(&diff_queued_diff);
+	dump_pairs(&diff_queued_diff, "After diffcore_rename");
+#ifdef VERBOSE_DEBUG
+	printf("Done.\n");
+#endif
+	if (diff_opts.needed_rename_limit > opt->priv->needed_rename_limit)
+		opt->priv->needed_rename_limit = diff_opts.needed_rename_limit;
+
+	renames->pairs[side_index] = diff_queued_diff;
+
+	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
+	diff_queued_diff.nr = 0;
+	diff_queued_diff.queue = NULL;
+	diff_flush(&diff_opts);
 }
 
 /*
