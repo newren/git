@@ -149,6 +149,28 @@ struct oidmap_string_list_entry {
 	struct string_list fullpaths;
 };
 
+extern int strmap_put_calls,
+	alloc_filespec_calls,
+	path_info_calls,
+	fullpath_mallocs,
+	skipped_calls;
+extern int malloc_calls, calloc_calls, realloc_calls;
+int old_malloc_calls, old_calloc_calls, old_realloc_calls;
+static void compute_skipped_calls(int after)
+{
+	if (!after) {
+		old_malloc_calls = malloc_calls;
+		old_calloc_calls = calloc_calls;
+		old_realloc_calls = realloc_calls;
+	} else {
+		skipped_calls +=
+			(malloc_calls - old_malloc_calls) +
+			(calloc_calls - old_calloc_calls) +
+			(realloc_calls - old_realloc_calls);
+	}
+}
+
+
 /***** Copy-paste static functions from merge-recursive.c *****/
 
 /*
@@ -458,6 +480,7 @@ static void setup_path_info(struct string_list_item *result,
 
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
 					  sizeof(struct conflict_info));
+	++path_info_calls;
 	path_info->merged.directory_name = current_dir_name;
 	path_info->merged.basename_offset = current_dir_name_len;
 	path_info->merged.clean = !!resolved;
@@ -506,6 +529,7 @@ static void add_pair(struct rename_info *renames,
 
 	one = alloc_filespec(pathname);
 	two = alloc_filespec(pathname);
+	alloc_filespec_calls += 2;
 	fill_filespec(is_add ? two : one,
 		      &names[names_idx].oid, 1, names[names_idx].mode);
 	diff_queue(&renames->pairs[side], one, two);
@@ -667,6 +691,7 @@ static int collect_merge_info_callback(int n,
 	len = traverse_path_len(info, p->pathlen);
 	/* +1 in both of the following lines to include the NUL byte */
 	fullpath = xmalloc(len+1);
+	++fullpath_mallocs;
 	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
 
 	/*
@@ -1106,6 +1131,7 @@ static int collect_merge_info(struct merge_options *opt,
 	struct tree_desc t[3];
 	struct traverse_info info;
 
+	compute_skipped_calls(0);
 	opt->priv->toplevel_dir = "";
 	opt->priv->current_dir_name = opt->priv->toplevel_dir;
 	setup_traverse_info(&info, opt->priv->toplevel_dir);
@@ -1132,6 +1158,7 @@ static int collect_merge_info(struct merge_options *opt,
 		ret = handle_deferred_entries(opt, &info);
 	trace_performance_leave("traverse_trees");
 
+	compute_skipped_calls(1);
 	return ret;
 }
 
@@ -2602,6 +2629,7 @@ static void use_cached_pairs(struct strmap *cached_pairs,
 		/* We don't care about oid/mode, only filenames and status */
 		one = alloc_filespec(old_name);
 		two = alloc_filespec(new_name);
+		alloc_filespec_calls += 2;
 		diff_queue(pairs, one, two);
 		pairs->queue[pairs->nr-1]->status = entry->item.util ? 'R' : 'D';
 	}
@@ -2816,8 +2844,10 @@ static int detect_and_process_renames(struct merge_options *opt,
 		goto diff_filepair_cleanup;
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
+	//compute_skipped_calls(0);
 	detection_run |= detect_regular_renames(opt, 1);
 	detection_run |= detect_regular_renames(opt, 2);
+	//compute_skipped_calls(1);
 	if (renames->redo_after_renames && detection_run) {
 		trace2_region_leave("merge", "regular renames", opt->repo);
 		goto diff_filepair_cleanup;

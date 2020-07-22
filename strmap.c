@@ -104,10 +104,13 @@ static struct strmap_entry *create_entry(struct strmap *map,
 	return entry;
 }
 
+extern int strmap_put_calls;
+
 void *strmap_put(struct strmap *map, const char *str, void *data)
 {
 	struct strmap_entry *entry = find_strmap_entry(map, str);
 
+	++strmap_put_calls;
 	if (entry) {
 		void *old = entry->value;
 		entry->value = data;
