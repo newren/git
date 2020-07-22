@@ -5,8 +5,6 @@
 #include "tree.h"
 #include "pathspec.h"
 
-extern int traverse_path_strdups;
-
 static const char *get_mode(const char *str, unsigned int *modep)
 {
 	unsigned char c;
@@ -220,7 +218,6 @@ void strbuf_make_traverse_path(struct strbuf *out,
 {
 	size_t len = traverse_path_len(info, namelen);
 
-	++traverse_path_strdups;
 	strbuf_grow(out, len);
 	make_traverse_path(out->buf + out->len, out->alloc - out->len,
 			   info, name, namelen);
@@ -435,7 +432,6 @@ int traverse_trees(struct index_state *istate,
 	} else {
 		traverse_path = xstrndup(info->name, info->pathlen);
 	}
-	++traverse_path_strdups;
 	info->traverse_path = traverse_path;
 	for (;;) {
 		int trees_used;
