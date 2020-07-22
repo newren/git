@@ -34,6 +34,8 @@
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
 
+#define USE_MEMORY_POOL 1 /* faster, but obscures memory leak hunting */
+
 #if 0
 #define VERBOSE_DEBUG
 #endif
@@ -91,7 +93,11 @@ struct traversal_callback_data {
 struct merge_options_internal {
 	struct strmap paths;    /* maps path -> (merged|conflict)_info */
 	struct strmap unmerged; /* maps path -> conflict_info */
+#if USE_MEMORY_POOL
+	struct mem_pool pool;
+#else
 	struct string_list paths_to_free; /* list of strings to free */
+#endif
 	struct rename_info *renames;
 	const char *current_dir_name;
 	char *toplevel_dir; /* see merge_info.directory_name comment */
@@ -666,7 +672,11 @@ static int collect_merge_info_callback(int n,
 		p++;
 	len = traverse_path_len(info, p->pathlen);
 	/* +1 in both of the following lines to include the NUL byte */
+#if USE_MEMORY_POOL
+	fullpath = mem_pool_alloc(&opt->priv->pool, len+1);
+#else
 	fullpath = xmalloc(len+1);
+#endif
 	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
 
 	/*
@@ -978,7 +988,12 @@ static int handle_deferred_entries(struct merge_options *opt,
 		 * possible_trivial_merges[side] once this loop is done.
 		 */
 		copy = renames->possible_trivial_merges[side];
+#if USE_MEMORY_POOL
+		strmap_init_with_mem_pool(&renames->possible_trivial_merges[side],
+					  &opt->priv->pool, 0);
+#else
 		strmap_init(&renames->possible_trivial_merges[side], 0);
+#endif
 		strmap_for_each_entry(&copy, &iter, entry) {
 			char *path = entry->item.string;
 			unsigned dir_rename_mask = (intptr_t)entry->item.util;
@@ -2425,12 +2440,24 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	dump_conflict_info(ci, old_path);
 
 	/* Find parent directories missing from opt->priv->paths */
+#if USE_MEMORY_POOL
+	cur_path = mem_pool_strdup(&opt->priv->pool, new_path);
+	free(new_path);
+	new_path = cur_path;
+#else
 	cur_path = new_path;
+#endif
 	while (1) {
 		/* Find the parent directory of cur_path */
 		char *last_slash = strrchr(cur_path, '/');
 		if (last_slash)
+#if USE_MEMORY_POOL
+			parent_name = mem_pool_strndup(&opt->priv->pool,
+						       cur_path,
+						       last_slash - cur_path);
+#else
 			parent_name = xstrndup(cur_path, last_slash - cur_path);
+#endif
 		else {
 			parent_name = opt->priv->toplevel_dir;
 			break;
@@ -2439,7 +2466,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		/* Look it up in opt->priv->paths */
 		item = strmap_get_item(&opt->priv->paths, parent_name);
 		if (item) {
+#if !USE_MEMORY_POOL
 			free(parent_name);
+#endif
 			parent_name = item->string; /* reuse known pointer */
 			break;
 		}
@@ -2471,7 +2500,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	 * eventually need to be freed, but it may still be used by e.g.
 	 * ci->pathnames.  So, store it in another string-list for now.
 	 */
+#if !USE_MEMORY_POOL
 	string_list_append(&opt->priv->paths_to_free, old_path);
+#endif
 #ifdef VERBOSE_DEBUG
 	printf("Removing %s from opt->priv->paths!\n", old_path);
 #endif
@@ -3842,20 +3873,44 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	} else {
 		struct rename_info *renames;
 		int i;
+#if USE_MEMORY_POOL
+		struct mem_pool *pool;
+#endif
 
 		trace2_region_enter("merge", "allocate/init", opt->repo);
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
+#if USE_MEMORY_POOL
+		pool = &opt->priv->pool;
+		mem_pool_init(pool, 0);
+#endif
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
+#if USE_MEMORY_POOL
+			strmap_init_with_mem_pool(&renames->relevant_sources[i],
+						  pool, 0);
+			strmap_init_with_mem_pool(&renames->dirs_removed[i],
+						  pool, 0);
+			strmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
+						  pool, 0);
+			strmap_init_with_mem_pool(&renames->target_dirs[i],
+						  pool, 1);
+#else
 			strmap_init(&renames->relevant_sources[i], 0);
 			strmap_init(&renames->dirs_removed[i], 0);
-			strmap_init(&renames->cached_pairs[i], 1);
-			strmap_init(&renames->cached_target_names[i], 0);
 			strmap_init(&renames->possible_trivial_merges[i], 0);
 			strmap_init(&renames->target_dirs[i], 1);
+#endif
+			strmap_init(&renames->cached_pairs[i], 1);
+			strmap_init(&renames->cached_target_names[i], 0);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
+#if USE_MEMORY_POOL
+		strmap_init_with_mem_pool(&opt->priv->paths, pool, 0);
+		strmap_init_with_mem_pool(&opt->priv->unmerged, pool, 0);
+#else
+		strmap_init(&opt->priv->paths, 0);
+		strmap_init(&opt->priv->unmerged, 0);
 		/*
 		 * Although we initialize opt->priv->paths_to_free and
 		 * opt->priv->paths with strdup_strings = 0, that's just to
@@ -3863,8 +3918,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		 * of these store strings that we will later need to free.
 		 */
 		string_list_init(&opt->priv->paths_to_free, 0);
-		strmap_init(&opt->priv->paths, 0);
-		strmap_init(&opt->priv->unmerged, 0);
+#endif
 		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
 }
@@ -3943,10 +3997,12 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	strmap_func(&opti->paths, 1);
 	opti->paths.strdup_strings = 0;
 
+#if !USE_MEMORY_POOL
 	/* opti->paths_to_free is similar to opti->paths. */
 	opti->paths_to_free.strdup_strings = 1;
 	string_list_clear(&opti->paths_to_free, 0);
 	opti->paths_to_free.strdup_strings = 0;
+#endif
 
 	/*
 	 * All strings and util fields in opti->unmerged are a subset
@@ -3971,6 +4027,10 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
+
+#if USE_MEMORY_POOL
+	mem_pool_discard(&opti->pool, 0);
+#endif
 
 	/* Clean out callback_data as well. */
 	FREE_AND_NULL(renames->callback_data);
