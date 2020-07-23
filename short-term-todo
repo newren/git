@@ -50,7 +50,15 @@ Path_conflict files:
         * path_info_calls:          568236   (path_info = xcalloc...)
         * fullpath_mallocs:         568236   (fullpath = xmalloc...)
         * diffcore-rename has another 433990 or so
-	* rest (~900K) are in almost solely deep within traverse_trees()
+        * rest (~900K) are in almost solely deep within traverse_trees()
+
+      * diffcore_rename_extended: 433324
+        * basename matches:    226724
+        * exact renames:       163542 (163536 in insert_file_table)
+        * estimate_similarity:  42724
+        * setup:                  192
+        * start_delayed_progress:  36  (?!?)
+        * write back to queue:    102
     * Perf Idea: turn off rename detection for large files
     * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
     * Perf Important: how much does histogram diff help/hurt?
@@ -98,7 +106,7 @@ Path_conflict files:
     * traverse_tree/read_tree_recursive count:
       * merge-recursive:
         * unpack_trees (1), diff-for-renames (2), get_files_dirs (2),
-	  get_tree_entry_if_blob (3 * 2 * unmerged entries)
+          get_tree_entry_if_blob (3 * 2 * unmerged entries)
       * merge-ort:
         * direct call (1), unpack_trees (1)
     * computing of mode/oid null, and which sides match.  merge-recursive
@@ -150,9 +158,9 @@ Path_conflict files:
       * Mark source path as resolved/unused (is_null)
       * If only 1 stage source side:
         * Copy base stage from source to dest
-	* Add this rename to a *map* (by source name) for later post-processing
+        * Add this rename to a *map* (by source name) for later post-processing
       * If two stages source side, and one stage dest side:
         * Copy stages from source side to dest side
       * If two stages source side, and two stages dest side:
         * Three-way content merge two source stages with appropriate dest stage
-	* Replace appropriate dest stage with three-way merged content
+        * Replace appropriate dest stage with three-way merged content
