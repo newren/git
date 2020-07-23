@@ -126,6 +126,7 @@ struct diff_filepair {
 #define DIFF_PAIR_MODE_CHANGED(p) ((p)->one->mode != (p)->two->mode)
 
 void diff_free_filepair(struct diff_filepair *);
+void diff_free_filepair_data(struct diff_filepair *);
 
 int diff_unmodified_pair(struct diff_filepair *);
 
@@ -163,6 +164,7 @@ void diff_q(struct diff_queue_struct *, struct diff_filepair *);
 void diffcore_break(struct repository *, int);
 void diffcore_rename(struct diff_options *);
 void diffcore_rename_extended(struct diff_options *options,
+			      struct mem_pool *pool,
 			      struct strmap *relevant_sources,
 			      struct strmap *relevant_targets,
 			      struct strmap *dirs_removed);

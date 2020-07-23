@@ -493,13 +493,47 @@ static void setup_path_info(struct string_list_item *result,
 	result->util = path_info;
 }
 
-static void add_pair(struct rename_info *renames,
+#if USE_MEMORY_POOL
+static struct diff_filespec *mempool_alloc_filespec(struct mem_pool *pool,
+						    const char *path)
+{
+	struct diff_filespec *spec;
+	size_t len = strlen(path);
+
+	spec = mem_pool_calloc(pool, 1, st_add3(sizeof(*spec), len, 1));
+	memcpy(spec+1, path, len);
+	spec->path = (void*)(spec+1);
+
+	spec->count = 1;
+	spec->is_binary = -1;
+	return spec;
+}
+
+static struct diff_filepair *mempool_diff_queue(struct mem_pool *pool,
+						struct diff_queue_struct *queue,
+						struct diff_filespec *one,
+						struct diff_filespec *two)
+{
+	struct diff_filepair *dp = mem_pool_calloc(pool, 1, sizeof(*dp));
+	dp->one = one;
+	dp->two = two;
+	if (queue)
+		diff_q(queue, dp);
+	return dp;
+}
+#endif
+
+static void add_pair(struct merge_options *opt,
 		     struct name_entry *names,
 		     const char *pathname,
 		     unsigned side,
 		     unsigned is_add /* if false, is_delete */)
 {
 	struct diff_filespec *one, *two;
+#if USE_MEMORY_POOL
+	struct mem_pool *pool = &opt->priv->pool;
+#endif
+	struct rename_info *renames = opt->priv->renames;
 	struct strmap *cache = is_add ? &renames->cached_target_names[side] :
 					&renames->cached_pairs[side];
 	int names_idx = is_add ? side : 0;
@@ -510,19 +544,29 @@ static void add_pair(struct rename_info *renames,
 	if (strmap_contains(cache, pathname))
 		return;
 
+#if USE_MEMORY_POOL
+	one = mempool_alloc_filespec(pool, pathname);
+	two = mempool_alloc_filespec(pool, pathname);
+#else
 	one = alloc_filespec(pathname);
 	two = alloc_filespec(pathname);
+#endif
 	fill_filespec(is_add ? two : one,
 		      &names[names_idx].oid, 1, names[names_idx].mode);
+#if USE_MEMORY_POOL
+	mempool_diff_queue(pool, &renames->pairs[side], one, two);
+#else
 	diff_queue(&renames->pairs[side], one, two);
+#endif
 }
 
-static void collect_rename_info(struct rename_info *renames,
+static void collect_rename_info(struct merge_options *opt,
 				struct name_entry *names,
 				const char *fullname,
 				unsigned filemask,
 				unsigned dirmask)
 {
+	struct rename_info *renames = opt->priv->renames;
 	unsigned side;
 
 	/*
@@ -585,12 +629,12 @@ static void collect_rename_info(struct rename_info *renames,
 
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
-			add_pair(renames, names, fullname, side, 0 /* delete */);
+			add_pair(opt, names, fullname, side, 0 /* delete */);
 		}
 
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
-			add_pair(renames, names, fullname, side, 1 /* add */);
+			add_pair(opt, names, fullname, side, 1 /* add */);
 		}
 	}
 }
@@ -719,8 +763,7 @@ static int collect_merge_info_callback(int n,
 	 * a source and destination path.  We'll cull the unneeded sources
 	 * later.
 	 */
-	collect_rename_info(opt->priv->renames, names, fullpath,
-			    filemask, dirmask);
+	collect_rename_info(opt, names, fullpath, filemask, dirmask);
 
 	/*
 	 * If side1 matches mbase, then we have some simplifications.  In
@@ -2616,11 +2659,15 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 			      entry->item.string, 0);
 }
 
-static void use_cached_pairs(struct strmap *cached_pairs,
+static void use_cached_pairs(struct merge_options *opt,
+			     struct strmap *cached_pairs,
 			     struct diff_queue_struct *pairs)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
+#if USE_MEMORY_POOL
+	struct mem_pool *pool = &opt->priv->pool;
+#endif
 
 	/* Add to side_pairs all entries from renames->cached_pairs[side_index] */
 	strmap_for_each_entry(cached_pairs, &iter, entry) {
@@ -2631,9 +2678,15 @@ static void use_cached_pairs(struct strmap *cached_pairs,
 			new_name = old_name;
 
 		/* We don't care about oid/mode, only filenames and status */
+#if USE_MEMORY_POOL
+		one = mempool_alloc_filespec(pool, old_name);
+		two = mempool_alloc_filespec(pool, new_name);
+		mempool_diff_queue(pool, pairs, one, two);
+#else
 		one = alloc_filespec(old_name);
 		two = alloc_filespec(new_name);
 		diff_queue(pairs, one, two);
+#endif
 		pairs->queue[pairs->nr-1]->status = entry->item.util ? 'R' : 'D';
 	}
 }
@@ -2720,6 +2773,11 @@ static int detect_regular_renames(struct merge_options *opt,
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
 	trace2_region_enter("diff", "diffcore_rename", opt->repo);
 	diffcore_rename_extended(&diff_opts,
+#if USE_MEMORY_POOL
+				 &opt->priv->pool,
+#else
+				 NULL,
+#endif
 				 &renames->relevant_sources[side_index],
 				 NULL,
 				 &renames->dirs_removed[side_index]);
@@ -2786,7 +2844,11 @@ static int collect_renames(struct merge_options *opt,
 #endif
 		possibly_cache_new_pair(renames, p, side_index, NULL);
 		if (p->status != 'A' && p->status != 'R') {
+#if USE_MEMORY_POOL
+			diff_free_filepair_data(p);
+#else
 			diff_free_filepair(p);
+#endif
 			continue;
 		}
 		new_path = check_for_directory_rename(opt, p->two->path,
@@ -2799,7 +2861,11 @@ static int collect_renames(struct merge_options *opt,
 		fprintf(stderr, "    new_path: %s\n", new_path);
 #endif
 		if (p->status != 'R' && !new_path) {
+#if USE_MEMORY_POOL
+			diff_free_filepair_data(p);
+#else
 			diff_free_filepair(p);
+#endif
 			continue;
 		}
 		possibly_cache_new_pair(renames, p, side_index, new_path);
@@ -2853,8 +2919,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 		trace2_region_leave("merge", "regular renames", opt->repo);
 		goto diff_filepair_cleanup;
 	}
-	use_cached_pairs(&renames->cached_pairs[1], &renames->pairs[1]);
-	use_cached_pairs(&renames->cached_pairs[2], &renames->pairs[2]);
+	use_cached_pairs(opt, &renames->cached_pairs[1], &renames->pairs[1]);
+	use_cached_pairs(opt, &renames->cached_pairs[2], &renames->pairs[2]);
 	trace2_region_leave("merge", "regular renames", opt->repo);
 
 	trace2_region_enter("merge", "directory renames", opt->repo);
@@ -2944,7 +3010,11 @@ static int detect_and_process_renames(struct merge_options *opt,
 		side_pairs = &opt->priv->renames->pairs[s];
 		for (i = 0; i < side_pairs->nr; ++i) {
 			struct diff_filepair *p = side_pairs->queue[i];
+#if USE_MEMORY_POOL
+			diff_free_filepair_data(p);
+#else
 			diff_free_filepair(p);
+#endif
 		}
 	}
  cleanup:
@@ -3713,7 +3783,11 @@ redo:
 	if (pairs.nr) {
 		int i;
 		for (i = 0; i < pairs.nr; i++)
+#if USE_MEMORY_POOL
+			diff_free_filepair_data(pairs.queue[i]);
+#else
 			diff_free_filepair(pairs.queue[i]);
+#endif
 		free(pairs.queue);
 	}
 	trace2_region_leave("merge", "cleanup", opt->repo);

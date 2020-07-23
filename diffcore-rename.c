@@ -972,7 +972,25 @@ static int remove_unneeded_paths_from_src(int num_src,
 	return new_num_src;
 }
 
+static void free_filespec_data(struct diff_filespec *spec)
+{
+	if (!--spec->count)
+		diff_free_filespec_data(spec);
+}
+
+/*
+ * Like diff_free_filepair(), but only frees the data from the filespecs; not
+ * the filespecs or the filepair.
+ */
+
+void diff_free_filepair_data(struct diff_filepair *p)
+{
+	free_filespec_data(p->one);
+	free_filespec_data(p->two);
+}
+
 void diffcore_rename_extended(struct diff_options *options,
+			      struct mem_pool *pool,
 			      struct strmap *relevant_sources,
 			      struct strmap *relevant_targets,
 			      struct strmap *dirs_removed)
@@ -1262,8 +1280,12 @@ void diffcore_rename_extended(struct diff_options *options,
 			/* no need to keep unmodified pairs */
 			pair_to_free = p;
 
-		if (pair_to_free)
-			diff_free_filepair(pair_to_free);
+		if (pair_to_free) {
+			if (pool)
+				diff_free_filepair_data(pair_to_free);
+			else
+				diff_free_filepair(pair_to_free);
+		}
 	}
 	diff_debug_queue("done copying original", &outq);
 
@@ -1271,9 +1293,15 @@ void diffcore_rename_extended(struct diff_options *options,
 	*q = outq;
 	diff_debug_queue("done collapsing", q);
 
-	for (i = 0; i < rename_dst_nr; i++)
-		if (rename_dst[i].filespec_to_free)
-			free_filespec(rename_dst[i].filespec_to_free);
+	if (pool) {
+		for (i = 0; i < rename_dst_nr; i++)
+			if (rename_dst[i].filespec_to_free)
+				free_filespec_data(rename_dst[i].filespec_to_free);
+	} else {
+		for (i = 0; i < rename_dst_nr; i++)
+			if (rename_dst[i].filespec_to_free)
+				free_filespec(rename_dst[i].filespec_to_free);
+	}
 
 	FREE_AND_NULL(rename_dst);
 	rename_dst_nr = rename_dst_alloc = 0;
@@ -1289,5 +1317,5 @@ void diffcore_rename_extended(struct diff_options *options,
 
 void diffcore_rename(struct diff_options *options)
 {
-	diffcore_rename_extended(options, NULL, NULL, NULL);
+	diffcore_rename_extended(options, NULL, NULL, NULL, NULL);
 }
