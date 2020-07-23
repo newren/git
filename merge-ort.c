@@ -444,7 +444,8 @@ static int traverse_trees_wrapper(struct index_state *istate,
 	return 0;
 }
 
-static void setup_path_info(struct string_list_item *result,
+static void setup_path_info(struct merge_options *opt,
+			    struct string_list_item *result,
 			    const char *current_dir_name,
 			    int current_dir_name_len,
 			    char *fullpath, /* we'll take over ownership */
@@ -462,8 +463,14 @@ static void setup_path_info(struct string_list_item *result,
 	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
 	assert(resolved == (merged_version != NULL));
 
+#if USE_MEMORY_POOL
+	path_info = mem_pool_calloc(&opt->priv->pool, 1,
+				    resolved ? sizeof(struct merged_info) :
+					       sizeof(struct conflict_info));
+#else
 	path_info = xcalloc(1, resolved ? sizeof(struct merged_info) :
 					  sizeof(struct conflict_info));
+#endif
 	path_info->merged.directory_name = current_dir_name;
 	path_info->merged.basename_offset = current_dir_name_len;
 	path_info->merged.clean = !!resolved;
@@ -730,8 +737,9 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
-		setup_path_info(&pi, dirname, info->pathlen, fullpath, names,
-				names+0, mbase_null, 0, filemask, dirmask, 1);
+		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
+				names, names+0, mbase_null, 0,
+				filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path -1 for %s\n", pi.string);
 #endif
@@ -746,7 +754,7 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (filemask == 7 && sides_match) {
 		/* use side1 (== side2) version as resolution */
-		setup_path_info(&pi, dirname, info->pathlen, fullpath,
+		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
 				names, names+1, 0, 0, filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 		printf("Path 0 for %s\n", pi.string);
@@ -789,9 +797,9 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, dirname, info->pathlen, fullpath,
-					names, names+2, side2_null, 0, filemask,
-					dirmask, 1);
+			setup_path_info(opt, &pi, dirname, info->pathlen,
+					fullpath, names, names+2, side2_null, 0,
+					filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 			printf("Path 1.C for %s\n", pi.string);
 #endif
@@ -817,9 +825,9 @@ static int collect_merge_info_callback(int n,
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
-			setup_path_info(&pi, dirname, info->pathlen, fullpath,
-					names, names+1, side1_null, 0, filemask,
-					dirmask, 1);
+			setup_path_info(opt, &pi, dirname, info->pathlen,
+					fullpath, names, names+1, side1_null, 0,
+					filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
 			printf("Path 2.C for %s\n", pi.string);
 #endif
@@ -834,7 +842,7 @@ static int collect_merge_info_callback(int n,
 	 * unconflict some more cases, but that comes later so all we can
 	 * do now is record the different non-null file hashes.)
 	 */
-	setup_path_info(&pi, dirname, info->pathlen, fullpath,
+	setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
 			names, NULL, 0, df_conflict, filemask, dirmask, 0);
 #ifdef VERBOSE_DEBUG
 	printf("Path 3 for %s, iprd = %u\n", pi.string,
@@ -2588,7 +2596,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		new_ci->stages[index].mode = ci->stages[index].mode;
 		oidcpy(&new_ci->stages[index].oid, &ci->stages[index].oid);
 
+#if !USE_MEMORY_POOL
 		free(ci);
+#endif
 	}
 
 #if 0
@@ -4068,7 +4078,11 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	 * before the strmaps are cleared.
 	 */
 	opti->paths.strdup_strings = 1;
+#if USE_MEMORY_POOL
+	strmap_func(&opti->paths, 0);
+#else
 	strmap_func(&opti->paths, 1);
+#endif
 	opti->paths.strdup_strings = 0;
 
 #if !USE_MEMORY_POOL
