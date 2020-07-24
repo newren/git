@@ -36,30 +36,6 @@ Path_conflict files:
 
 * Stuff to not forget:
   * Generally applicable stuff
-    * Perf-Idea: special allocator (how much time does malloc take?)
-      * running under jemalloc.sh drops time used by 12-16%
-      * mem-pool.[ch]
-      * alloc/free Counts:
-        * malloc_calls:    1908354
-        * calloc_calls:    1602970
-        * realloc_calls:     70324
-        * free_calls:      4277412
-      * Counts by pieces I have easy control into
-        * strmap_put_calls:         855948   (only xmalloc in strmap.c)
-        * alloc_filespec_calls:     670950   (alloc_filespec() calls)
-        * path_info_calls:          568236   (path_info = xcalloc...)
-        * fullpath_mallocs:         568236   (fullpath = xmalloc...)
-        * diffcore-rename has another 433990 or so
-        * rest (~900K) are in almost solely deep within traverse_trees()
-
-      * diffcore_rename_extended: 433324
-        * basename matches:    226724
-        * exact renames:       163542 (163536 in insert_file_table)
-        * estimate_similarity:  42724
-        * setup:                  192
-        * start_delayed_progress:  36  (?!?)
-        * write back to queue:    102
-    * Perf Idea: turn off rename detection for large files
     * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
     * Perf Important: how much does histogram diff help/hurt?
     * Perf Idea: might be able to memoize values in check_dir_renamed()
