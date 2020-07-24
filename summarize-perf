@@ -8,8 +8,10 @@ import time
 
 class Section:
   def __init__(self):
-    self.sum = 0;
+    self.sum = 0
+    self.count = 0
     self.children = {}
+total_count = 0
 
 if len(sys.argv) == 1:
   raise SystemExit(f"Usage: {sys.argv[0]} git $COMMAND $OPTIONS_AND_ARGS")
@@ -34,10 +36,13 @@ with open(filename, 'r') as f:
       current_section = current_section.children[label]
     if event == 'region_leave':
       current_section.sum += float(t_rel)
+      current_section.count += 1
+      total_count += 1
       label, current_section = sections.pop()
     if event == 'atexit':
       overall = float(t_abs)
       current_section.sum = overall
+      current_section.count += 1
 
 def show_subsection(section, depth):
   spacing = "   "*depth
@@ -49,10 +54,13 @@ def show_subsection(section, depth):
   for label, subsection in sorted(section.children.items(),
                                   key=lambda item: item[1].sum,
                                   reverse=True):
-    print(f"{spacing}{subsection.sum:6.3f} : {label:20}")
+    print(f"{spacing}{subsection.sum:6.3f} : {subsection.count} : {label:20}")
     show_subsection(subsection, depth+1)
 
 print("Accumulated times:")
 show_subsection(current_section, 1)
 os.remove(filename)
+print(f"Estimated measurement overhead (.010 ms/region-measure * {total_count}): {.000010*total_count}")
+# Warning: measurement overhead for region_enter/region_leave pair goes up
+# if you have trace2.* variables set in your global or local config.
 print(f"Timing including forking: {after-before:6.3f} ({after-before-current_section.sum:.3f} additional seconds)")
