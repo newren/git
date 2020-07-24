@@ -3388,6 +3388,7 @@ static void process_entries(struct merge_options *opt,
 	dir_metadata.last_directory = NULL;
 	dir_metadata.last_directory_len = 0;
 	trace2_region_leave("merge", "process_entries setup", opt->repo);
+	trace2_region_enter("merge", "processing", opt->repo);
 	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
 		/*
 		 * WARNING: If ci->merged.clean is true, then ci does not
@@ -3406,6 +3407,7 @@ static void process_entries(struct merge_options *opt,
 		else
 			process_entry(opt, entry, &dir_metadata);
 	}
+	trace2_region_leave("merge", "processing", opt->repo);
 	trace2_region_enter("merge", "finalize", opt->repo);
 	if (dir_metadata.offsets.nr != 1 ||
 	    (uintptr_t)dir_metadata.offsets.items[0].util != 0) {
