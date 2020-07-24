@@ -3963,8 +3963,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		if (i != renames->cached_pairs_valid_side &&
 		    -1 != renames->cached_pairs_valid_side) {
-			strmap_func(&renames->cached_pairs[i], 1);
 			strmap_func(&renames->cached_target_names[i], 0);
+			strmap_func(&renames->cached_pairs[i], 1);
 		}
 	}
 	renames->cached_pairs_valid_side = 0;
@@ -4012,8 +4012,9 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	/* Populate cache_target_names from cached_pairs */
 	s = renames->cached_pairs_valid_side;
 	strmap_for_each_entry(&renames->cached_pairs[s], &iter, entry)
-		strmap_put(&renames->cached_target_names[s],
-			   entry->item.string, NULL);
+		if (entry->item.util)
+			strmap_put(&renames->cached_target_names[s],
+				   entry->item.util, NULL);
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
