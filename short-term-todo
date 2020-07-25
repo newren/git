@@ -1,3 +1,10 @@
+* mem_pool fixups:
+  X apply_directory_rename_modifications leaks w/ pools
+  X share mem_pool in diffcore-rename -- check perf difference: better
+  X check the stash
+  * clean up the extremely messy history
+  * re-measure without any diffcore-rename mem_pool stuff: um...dunno
+
 * Overall plan
   X Renames
   X Write the talk
@@ -8,6 +15,7 @@
   * Output
     * write output to merge_result (in field named output, of course)
     * don't need the flush_output() thing
+    * use strmap; path -> strbuf, for each path that has a message.
   * Path conflict files
   * Check the "Stuff to not forget"
   / Make sure the API is clean/clear
