@@ -352,10 +352,11 @@ static int find_identical_files(struct hashmap *srcs,
 }
 
 static void insert_file_table(struct repository *r,
+			      struct mem_pool *pool,
 			      struct hashmap *table, int index,
 			      struct diff_filespec *filespec)
 {
-	struct file_similarity *entry = xmalloc(sizeof(*entry));
+	struct file_similarity *entry = mem_pool_alloc(pool, sizeof(*entry));
 
 	entry->index = index;
 	entry->filespec = filespec;
@@ -371,7 +372,8 @@ static void insert_file_table(struct repository *r,
  * and then during the second round we try to match
  * cache-dirty entries as well.
  */
-static int find_exact_renames(struct diff_options *options)
+static int find_exact_renames(struct diff_options *options,
+			      struct mem_pool *pool)
 {
 	int i, renames = 0;
 	struct hashmap file_table;
@@ -381,7 +383,7 @@ static int find_exact_renames(struct diff_options *options)
 	 */
 	hashmap_init(&file_table, NULL, NULL, rename_src_nr);
 	for (i = rename_src_nr-1; i >= 0; i--)
-		insert_file_table(options->repo,
+		insert_file_table(options->repo, pool,
 				  &file_table, i,
 				  rename_src[i].p->one);
 
@@ -390,7 +392,7 @@ static int find_exact_renames(struct diff_options *options)
 		renames += find_identical_files(&file_table, i, options);
 
 	/* Free the hash data structure and entries */
-	hashmap_clear_and_free(&file_table, struct file_similarity, entry);
+	hashmap_clear(&file_table);
 
 	return renames;
 }
@@ -1003,6 +1005,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	int i, j, exact_count, rename_count, skip_unmodified = 0;
 	int num_create, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
+	struct mem_pool local_pool;
 
 	trace2_region_enter("diff", "setup", options->repo);
 	want_copies = (detect_rename == DIFF_DETECT_COPY);
@@ -1059,6 +1062,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		goto cleanup; /* nothing to do */
 
 	trace2_region_enter("diff", "exact renames", options->repo);
+	mem_pool_init(&local_pool, 32*1024);
 	/*
 	 * We really want to cull the candidates list early
 	 * with cheap tests in order to avoid doing deltas.
@@ -1066,10 +1070,16 @@ void diffcore_rename_extended(struct diff_options *options,
 #ifdef SECTION_LABEL
 	printf("Looking for exact renames...\n");
 #endif
-	exact_count = rename_count = find_exact_renames(options);
+	exact_count = rename_count = find_exact_renames(options, &local_pool);
 #ifdef SECTION_LABEL
 	printf("Done.\n");
 #endif
+	/*
+	 * Discard local_pool immediately instead of at "cleanup:" in order
+	 * to reduce maximum memory usage; inexact rename detection uses up
+	 * a fair amount of memory, and mem_pools can too.
+	 */
+	mem_pool_discard(&local_pool, 0);
 	trace2_region_leave("diff", "exact renames", options->repo);
 
 	/* Did we only want exact renames? */
