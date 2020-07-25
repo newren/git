@@ -1,0 +1,247 @@
+[newren@tiger linux-stable (5.4-rename)]$ time ../git/summarize-perf git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+Rebasing fd8bdb23b91876ac1e624337bb88dc1dcc21d67e...
+Done.
+Accumulated times:
+    0.027 : <unmeasured> ( 1.8%)
+    1.353 : 35 : label:inmemory_nonrecursive
+       0.004 : <unmeasured> ( 0.3%)
+       0.775 : 41 : ..label:renames     
+          0.019 : <unmeasured> ( 2.4%)
+          0.751 : 37 : ....label:regular renames
+             0.041 : <unmeasured> ( 5.4%)
+             0.711 : 6 : ......label:diffcore_rename
+                0.001 : <unmeasured> ( 0.1%)
+                0.541 : 1 : ........label:inexact renames
+                   0.002 : <unmeasured> ( 0.3%)
+                   0.539 : 1 : ..........label:Performing inexact rename detection
+                0.072 : 6 : ........label:basename matches
+                0.050 : 6 : ........label:exact renames
+                0.020 : 6 : ........label:write back to queue
+                0.017 : 6 : ........label:setup 
+                0.006 : 6 : ........label:cull basename
+                0.003 : 6 : ........label:cull exact
+          0.004 : 31 : ....label:directory renames
+          0.001 : 31 : ....label:process renames
+       0.507 : 41 : ..label:collect_merge_info
+       0.057 : 35 : ..label:process_entries
+          0.001 : <unmeasured> ( 1.8%)
+          0.039 : 35 : ....label:processing
+          0.012 : 35 : ....label:process_entries setup
+             0.001 : <unmeasured> ( 7.3%)
+             0.007 : 35 : ......label:plist sort
+             0.003 : 35 : ......label:plist copy
+             0.000 : 35 : ......label:plist grow
+          0.006 : 35 : ....label:finalize  
+       0.006 : 6 : ..label:reset_maps  
+       0.003 : 35 : ..label:merge_start 
+          0.002 : <unmeasured> (50.8%)
+          0.001 : 34 : ....label:reset_maps
+          0.000 : 35 : ....label:sanity checks
+          0.000 : 1 : ....label:allocate/init
+       0.000 : 35 : ..label:cleanup     
+    0.073 : 1 : label:checkout      
+       0.073 : <unmeasured> (99.9%)
+       0.000 : 1 : ..label:Filtering content
+    0.034 : 1 : label:do_write_index /home/newren/floss/linux-stable/.git/index.lock
+    0.010 : 1 : label:do_read_index .git/index
+    0.000 : 1 : label:record_unmerged
+Estimated measurement overhead (.010 ms/region-measure * 656): 0.006560000000000001
+Timing including forking:  1.510 (0.012 additional seconds)
+
+
+
+[newren@tiger linux-stable (5.4-rename)]$ ../git/summarize-perf git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+Rebasing fd8bdb23b91876ac1e624337bb88dc1dcc21d67e...
+Done.
+Accumulated times:
+    0.031 : <unmeasured> ( 1.6%)
+    1.856 : label:inmemory_nonrecursive
+       0.014 : <unmeasured> ( 0.7%)
+       0.909 : ..label:renames     
+          0.061 : <unmeasured> ( 6.7%)
+          0.841 : ....label:regular renames
+             0.046 : <unmeasured> ( 5.5%)
+             0.795 : ......label:diffcore_rename
+                0.004 : <unmeasured> ( 0.5%)
+                0.549 : ........label:inexact renames
+                   0.002 : <unmeasured> ( 0.3%)
+                   0.547 : ..........label:Performing inexact rename detection
+                0.093 : ........label:basename matches
+                0.072 : ........label:exact renames
+                0.047 : ........label:write back to queue
+                0.019 : ........label:setup 
+                0.007 : ........label:cull basename
+                0.003 : ........label:cull exact
+          0.006 : ....label:directory renames
+          0.001 : ....label:process renames
+       0.583 : ..label:collect_merge_info
+       0.266 : ..label:reset_maps  
+       0.067 : ..label:process_entries
+          0.048 : <unmeasured> (71.7%)
+          0.013 : ....label:process_entries setup
+             0.001 : <unmeasured> ( 7.5%)
+             0.008 : ......label:plist sort
+             0.003 : ......label:plist copy
+             0.000 : ......label:plist grow
+          0.006 : ....label:finalize  
+       0.016 : ..label:merge_start 
+          0.003 : <unmeasured> (19.6%)
+          0.012 : ....label:reset_maps
+          0.000 : ....label:sanity checks
+          0.000 : ....label:allocate/init
+       0.001 : ..label:cleanup     
+    0.086 : label:checkout      
+       0.085 : <unmeasured> (99.9%)
+       0.000 : ..label:Filtering content
+    0.034 : label:do_write_index /home/newren/floss/linux-stable/.git/index.lock
+    0.009 : label:do_read_index .git/index
+    0.000 : label:record_unmerged
+Timing including forking:  2.035 (0.019 additional seconds)
+
+
+
+
+[newren@tiger linux-stable (5.4-rename)]$ time ../git/summarize-perf git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+Rebasing fd8bdb23b91876ac1e624337bb88dc1dcc21d67e...
+Done.
+Accumulated times:
+    0.036 : <unmeasured> ( 1.3%)
+    2.592 : label:inmemory_nonrecursive
+       0.018 : <unmeasured> ( 0.7%)
+       1.012 : ..label:renames     
+          0.005 : <unmeasured> ( 0.4%)
+          0.793 : ....label:regular renames
+             0.012 : <unmeasured> ( 1.5%)
+             0.781 : ......label:diffcore_rename
+                0.003 : <unmeasured> ( 0.4%)
+                0.540 : ........label:inexact renames
+                   0.002 : <unmeasured> ( 0.4%)
+                   0.538 : ..........label:Performing inexact rename detection
+                0.091 : ........label:basename matches
+                0.071 : ........label:exact renames
+                0.046 : ........label:write back to queue
+                0.020 : ........label:setup 
+                0.007 : ........label:cull basename
+                0.003 : ........label:cull exact
+          0.154 : ....label:directory renames
+          0.061 : ....label:process renames
+       0.621 : ..label:process_entries
+          0.213 : <unmeasured> (34.3%)
+          0.407 : ....label:process_entries setup
+             0.001 : <unmeasured> ( 0.3%)
+             0.380 : ......label:plist sort
+             0.025 : ......label:plist copy
+             0.000 : ......label:plist grow
+          0.001 : ....label:finalize  
+       0.562 : ..label:collect_merge_info
+       0.336 : ..label:merge_start 
+          0.003 : <unmeasured> ( 0.8%)
+          0.333 : ....label:reset_maps
+          0.000 : ....label:sanity checks
+          0.000 : ....label:allocate/init
+       0.043 : ..label:cleanup     
+    0.087 : label:checkout      
+       0.087 : <unmeasured> (99.9%)
+       0.000 : ..label:Filtering content
+    0.034 : label:do_write_index /home/newren/floss/linux-stable/.git/index.lock
+    0.009 : label:do_read_index .git/index
+    0.000 : label:record_unmerged
+Timing including forking:  2.776 (0.019 additional seconds)
+
+
+
+[newren@tiger linux-stable (5.4-rename)]$ time ../git/summarize-perf git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+Rebasing fd8bdb23b91876ac1e624337bb88dc1dcc21d67e...
+Done.
+Accumulated times:
+    0.052 : <unmeasured> ( 1.0%)
+    4.920 : label:inmemory_nonrecursive
+       0.028 : <unmeasured> ( 0.6%)
+       1.564 : ..label:process_entries
+          0.636 : <unmeasured> (40.7%)
+          0.926 : ....label:process_entries setup
+             0.003 : <unmeasured> ( 0.3%)
+             0.864 : ......label:plist sort
+             0.059 : ......label:plist copy
+             0.001 : ......label:plist grow
+          0.002 : ....label:finalize  
+       1.305 : ..label:renames     
+          0.046 : <unmeasured> ( 3.5%)
+          0.813 : ....label:regular renames
+             0.028 : <unmeasured> ( 3.5%)
+             0.785 : ......label:diffcore_rename
+                0.004 : <unmeasured> ( 0.5%)
+                0.541 : ........label:inexact renames
+                   0.002 : <unmeasured> ( 0.4%)
+                   0.539 : ..........label:Performing inexact rename detection
+                0.092 : ........label:basename matches
+                0.071 : ........label:exact renames
+                0.047 : ........label:write back to queue
+                0.020 : ........label:setup 
+                0.007 : ........label:cull basename
+                0.003 : ........label:cull exact
+          0.374 : ....label:directory renames
+          0.072 : ....label:process renames
+       1.253 : ..label:collect_merge_info
+       0.727 : ..label:merge_start 
+          0.004 : <unmeasured> ( 0.5%)
+          0.723 : ....label:reset_maps
+          0.000 : ....label:sanity checks
+          0.000 : ....label:allocate/init
+       0.044 : ..label:cleanup     
+    0.087 : label:checkout      
+       0.087 : <unmeasured> (99.9%)
+       0.000 : ..label:Filtering content
+    0.034 : label:do_write_index /home/newren/floss/linux-stable/.git/index.lock
+    0.008 : label:do_read_index .git/index
+    0.000 : label:record_unmerged
+Timing including forking:  5.119 (0.017 additional seconds)
+
+
+
+[newren@tiger linux-stable (5.4-rename)]$ ../git/summarize-perf git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+Rebasing fd8bdb23b91876ac1e624337bb88dc1dcc21d67e...
+Done.
+Accumulated times:
+    0.109 : <unmeasured> ( 1.0%)
+   10.141 : label:inmemory_nonrecursive
+       0.038 : <unmeasured> ( 0.4%)
+       3.583 : ..label:process_entries
+          1.170 : <unmeasured> (32.7%)
+          2.411 : ....label:process_entries setup
+             0.005 : <unmeasured> ( 0.2%)
+             2.266 : ......label:plist sort
+             0.139 : ......label:plist copy
+             0.001 : ......label:plist grow
+          0.002 : ....label:finalize  
+       3.007 : ..label:collect_merge_info
+       1.920 : ..label:merge_start 
+          0.004 : <unmeasured> ( 0.2%)
+          1.915 : ....label:reset_maps
+          0.000 : ....label:sanity checks
+          0.000 : ....label:allocate/init
+       1.552 : ..label:renames     
+          0.081 : <unmeasured> ( 5.2%)
+          0.864 : ....label:regular renames
+             0.046 : <unmeasured> ( 5.3%)
+             0.818 : ......label:diffcore_rename
+                0.003 : <unmeasured> ( 0.4%)
+                0.566 : ........label:inexact renames
+                   0.002 : <unmeasured> ( 0.3%)
+                   0.564 : ..........label:Performing inexact rename detection
+                0.095 : ........label:basename matches
+                0.076 : ........label:exact renames
+                0.049 : ........label:write back to queue
+                0.020 : ........label:setup 
+                0.007 : ........label:cull basename
+                0.003 : ........label:cull exact
+          0.533 : ....label:directory renames
+          0.075 : ....label:process renames
+       0.041 : ..label:cleanup     
+    0.095 : label:checkout      
+       0.094 : <unmeasured> (99.9%)
+       0.000 : ..label:Filtering content
+    0.035 : label:do_write_index /home/newren/floss/linux-stable/.git/index.lock
+    0.010 : label:do_read_index .git/index
+    0.000 : label:record_unmerged
+Timing including forking: 10.393 (0.004 additional seconds)

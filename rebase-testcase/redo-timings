@@ -1,0 +1,137 @@
+#!/bin/bash
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+time_run() {
+  suite=$1
+  scheme=$2
+  base=5.4-rename
+  branch=hwmon-updates
+  cmd="rebase --$scheme"
+  extra_args=""
+  echo "======== $suite $scheme ========"
+
+  [[ $suite = "no-renames" || $suite = "renames-1" || $suite = "renames" ]] || die "Invalid suite: $suite"
+  [[ $scheme = "merge" || $scheme = "apply" || $scheme = "fast-rebase" ]] || die "Invalid scheme: $scheme"
+  test -z "$(git ls-files -o)" || die "Working directory not clean"
+  test -z "$(ps -ef | grep chrome | grep -v grep)" || die "Chrome is running"
+  test -z "$(ps -ef | grep geoclue | grep -v grep)" || die "geoclue is running"
+  test -z "$(ps -ef | grep keybase | grep -v grep)" || die "keybase is running"
+  test -z "$(git config --list | grep ^trace2\.)" || die "extra trace2 settings"
+  test 0 -eq "$(grep ^SwapCached /proc/meminfo | awk {print\$2})" || die "swap"
+  ping -c 1 google.com >&/dev/null && die "network isn't off yet"
+
+  if [ $suite = "no-renames" ]; then
+    base=v5.4
+  fi
+  if [ $suite = "renames-1" ]; then
+    branch=hwmon-just-one
+  fi
+  if [[ $suite = "renames" && $scheme = "merge" ]]; then
+    extra_args="--runs 3"
+  fi
+  if [[ $scheme = "fast-rebase" ]]; then
+    cmd="fast-rebase"
+    git fast-rebase --help 2>/dev/null
+    test $? -eq 16 || die "Wrong git version"
+  else
+    test "$(git --version)" = "git version 2.27.0.dirty" || die "Wrong git version"
+  fi
+
+  git checkout -q $base
+  git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34
+  git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e
+  git reflog expire --all --expire=now
+  git prune
+  #find .git/objects/ -type f | grep -v pack | xargs rm # hacky fast `git prune`
+  git log --no-renames -p fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~35..fd8bdb23b91876ac1e624337bb88dc1dcc21d67e >/dev/null
+  git diff --no-renames 5.4-rename fd8bdb23b91876ac1e624337bb88dc1dcc21d67e >/dev/null
+  git count-objects -v >/dev/null
+
+  hyperfine --warmup 1 $extra_args -p "git checkout -q $base; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34" "git $cmd --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e $branch"
+}
+
+#time_run no-renames fast-rebase
+#time_run renames fast-rebase
+
+#exit 1
+
+time_run no-renames fast-rebase
+time_run renames fast-rebase
+time_run renames-1 fast-rebase
+
+exit 1
+
+time_run no-renames apply
+time_run renames-1 apply
+time_run renames apply
+
+time_run no-renames merge
+time_run renames-1 merge
+
+exit 1
+
+time_run renames merge
+
+
+exit 1
+
+time_run renames merge
+
+git checkout -q 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+../git/summarize-perf git rebase --merge --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates
+
+exit 1
+
+##### No-renames, merge-backend
+time git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --merge --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'
+
+##### No-renames, apply-backend
+time git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --apply --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'
+
+##### Just one, merge backend
+time git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --merge --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-just-one'
+
+##### Just one, apply backend
+time git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --apply --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-just-one'
+
+##### Big renames, merge backend
+time git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 --runs 3 -p 'git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --merge --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'
+
+##### Big renames, apply backend
+time git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 --runs 3 -p 'git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git rebase --apply --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'
+
+
+
+####################### fast-rebase #######################
+
+##### No-renames, fast-rebase
+time git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout v5.4; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'
+
+##### Just one, fast-rebase
+time git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout 5.4-rename; git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-just-one'
+
+##### Big renames, fast-rebase
+time git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates; git reflog expire --all --expire=now; git prune; git count-objects -v
+
+time hyperfine --warmup 1 -p 'git checkout 5.4-rename; git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e; git rev-list --count 4703d9119972bf586d2cca76ec6438f819ffa30e..hwmon-updates' 'git fast-rebase --onto HEAD 4703d9119972bf586d2cca76ec6438f819ffa30e hwmon-updates'

@@ -1,0 +1,21 @@
+=== perf ===
+
+perf record -e cpu-cycles $CMD
+            --call-graph dwarf
+	    
+perf report [--show-nr-samples] [--no-children] [-G]
+
+etc., etc.
+
+=== ltrace ===
+
+ltrace -f -o git.ltrace -e malloc+free ../git/git $GITCMD
+
+=== pahole ===
+
+pahole -C $(grep -h ^struct merge-ort.c diffcore-rename.c | awk '{print $2 ","}' | tr -d '\n') git
+
+=== malloc ===
+
+wrote a tiny malloc replacement that tracked info, but called into glibc malloc
+  (using __libc_malloc(), __libc_calloc(), __libc_realloc(), __libc_free())
