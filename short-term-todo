@@ -1,17 +1,10 @@
-* mem_pool fixups:
-  X apply_directory_rename_modifications leaks w/ pools
-  X share mem_pool in diffcore-rename -- check perf difference: better
-  X check the stash
-  * clean up the extremely messy history
-  * re-measure without any diffcore-rename mem_pool stuff: um...dunno
-
 * Overall plan
   X Renames
   X Write the talk
   X Directory renames
   X Implement basic perf ideas
   X Additional Perf testing
-  - Micro-optimizations
+  X Micro-optimizations
   * Output
     * write output to merge_result (in field named output, of course)
     * don't need the flush_output() thing
@@ -44,8 +37,8 @@ Path_conflict files:
 
 * Stuff to not forget:
   * Generally applicable stuff
-    * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
     * Perf Important: how much does histogram diff help/hurt?
+    * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
     * Perf Idea: might be able to memoize values in check_dir_renamed()
                  (augment dir_renames with non-renames)
   * Stuff that'd only help the rebase case
