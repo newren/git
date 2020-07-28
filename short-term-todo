@@ -36,26 +36,6 @@ Path_conflict files:
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
 
 * Stuff to not forget:
-  * Generally applicable stuff
-    * Perf Important: how much does histogram diff help/hurt?
-    * Perf Idea: use khash (see 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
-    * Perf Idea: might be able to memoize values in check_dir_renamed()
-                 (augment dir_renames with non-renames)
-  * Stuff that'd only help the rebase case
-    * Perf Idea: cache directory rename info (if dirs_removed[] is identical to
-        last picked commit and cached_pairs is same size, then re-use)
-
-        If some directory was renamed previously and dirs_removed still
-        includes that directory, then it's still a directory rename.  If
-        some directory was not renamed previously and cached_pairs does
-        not increase in size (i.e. no new renames or deletes), then the
-        directory is still not renamed.  Thus, just check if
-        dirs_removed is the same as the previous round AND cached_pairs
-        does not increase in size.
-    * Perf-Idea: default alloc
-       2 * number of index entries for path?
-       number of index entries for pairs?
-
   * Path conflict files; also, multiple auxiliary files to add (e.g. for
     mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
     D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
