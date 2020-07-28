@@ -3927,6 +3927,8 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	assert(opt->rename_score >= 0 && opt->rename_score <= MAX_SCORE);
 	assert(opt->show_rename_progress >= 0 && opt->show_rename_progress <= 1);
 
+	/* FIXME: This is a super hacky way to "default" to histogram diff */
+	opt->xdl_opts = DIFF_WITH_ALG(opt, HISTOGRAM_DIFF);
 	assert(opt->xdl_opts >= 0);
 	assert(opt->recursive_variant >= MERGE_VARIANT_NORMAL &&
 	       opt->recursive_variant <= MERGE_VARIANT_THEIRS);
