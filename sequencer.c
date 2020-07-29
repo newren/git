@@ -14,7 +14,7 @@
 #include "diff.h"
 #include "revision.h"
 #include "rerere.h"
-#include "merge-ort-wrappers.h"
+#include "merge-ort.h"
 #include "refs.h"
 #include "strvec.h"
 #include "quote.h"
@@ -595,8 +595,9 @@ static int do_recursive_merge(struct repository *r,
 			      struct replay_opts *opts)
 {
 	struct merge_options o;
+	struct merge_result result;
 	struct tree *next_tree, *base_tree, *head_tree;
-	int clean;
+	int clean, show_output;
 	int i;
 	struct lock_file index_lock = LOCK_INIT;
 
@@ -620,12 +621,12 @@ static int do_recursive_merge(struct repository *r,
 	for (i = 0; i < opts->xopts_nr; i++)
 		parse_merge_opt(&o, opts->xopts[i]);
 
-	clean = merge_ort_nonrecursive(&o,
-				       head_tree,
-				       next_tree, base_tree);
-	if (is_rebase_i(opts) && clean <= 0)
-		fputs(o.obuf.buf, stdout);
-	strbuf_release(&o.obuf);
+	memset(&result, 0, sizeof(result));
+	merge_inmemory_nonrecursive(&o, base_tree, head_tree, next_tree,
+				    &result);
+	show_output = !is_rebase_i(opts) || !result.clean;
+	merge_switch_to_result(&o, head_tree, &result, 1, show_output);
+	clean = result.clean;
 	if (clean < 0) {
 		rollback_lock_file(&index_lock);
 		return clean;

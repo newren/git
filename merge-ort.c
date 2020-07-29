@@ -99,6 +99,7 @@ struct merge_options_internal {
 	struct string_list paths_to_free; /* list of strings to free */
 #endif
 	struct rename_info *renames;
+	struct strmap output;  /* maps path -> conflict messages */
 	const char *current_dir_name;
 	char *toplevel_dir; /* see merge_info.directory_name comment */
 	int call_depth;
@@ -202,96 +203,60 @@ static struct commit *make_virtual_commit(struct repository *repo,
 	return commit;
 }
 
-static int show(struct merge_options *opt, int v)
-{
-	return (!opt->priv->call_depth && opt->verbosity >= v) ||
-		opt->verbosity >= 5;
-}
-
-static void flush_output(struct merge_options *opt)
-{
-	if (opt->buffer_output < 2 && opt->obuf.len) {
-		fputs(opt->obuf.buf, stdout);
-		strbuf_reset(&opt->obuf);
-	}
-}
-
-__attribute__((format (printf, 3, 4)))
-static void output(struct merge_options *opt, int v, const char *fmt, ...)
-{
-	va_list ap;
-
-	if (!show(opt, v))
-		return;
-
-	strbuf_addchars(&opt->obuf, ' ', opt->priv->call_depth * 2);
-
-	va_start(ap, fmt);
-	strbuf_vaddf(&opt->obuf, fmt, ap);
-	va_end(ap);
-
-	strbuf_addch(&opt->obuf, '\n');
-	if (!opt->buffer_output)
-		flush_output(opt);
-}
-
 static int err(struct merge_options *opt, const char *err, ...)
 {
 	va_list params;
+	struct strbuf sb = STRBUF_INIT;
 
-	if (opt->buffer_output < 2)
-		flush_output(opt);
-	else {
-		strbuf_complete(&opt->obuf, '\n');
-		strbuf_addstr(&opt->obuf, "error: ");
-	}
+	strbuf_addf(&sb, "error: ");
 	va_start(params, err);
-	strbuf_vaddf(&opt->obuf, err, params);
+	strbuf_vaddf(&sb, err, params);
 	va_end(params);
-	if (opt->buffer_output > 1)
-		strbuf_addch(&opt->obuf, '\n');
-	else {
-		error("%s", opt->obuf.buf);
-		strbuf_reset(&opt->obuf);
-	}
+
+	error("%s", sb.buf);
+	strbuf_release(&sb);
 
 	return -1;
 }
 
-static void output_commit_title(struct merge_options *opt, struct commit *commit)
+static void format_commit(struct strbuf *sb,
+			  int indent,
+			  struct commit *commit)
 {
 	struct merge_remote_desc *desc;
+	struct pretty_print_context ctx = {0};
+	ctx.abbrev = DEFAULT_ABBREV;
 
-	strbuf_addchars(&opt->obuf, ' ', opt->priv->call_depth * 2);
+	strbuf_addchars(sb, ' ', indent);
 	desc = merge_remote_util(commit);
-	if (desc)
-		strbuf_addf(&opt->obuf, "virtual %s\n", desc->name);
-	else {
-		strbuf_add_unique_abbrev(&opt->obuf, &commit->object.oid,
-					 DEFAULT_ABBREV);
-		strbuf_addch(&opt->obuf, ' ');
-		if (parse_commit(commit) != 0)
-			strbuf_addstr(&opt->obuf, _("(bad commit)\n"));
-		else {
-			const char *title;
-			const char *msg = get_commit_buffer(commit, NULL);
-			int len = find_commit_subject(msg, &title);
-			if (len)
-				strbuf_addf(&opt->obuf, "%.*s\n", len, title);
-			unuse_commit_buffer(commit, msg);
-		}
+	if (desc) {
+		strbuf_addf(sb, "virtual %s\n", desc->name);
+		return;
 	}
-	flush_output(opt);
+
+	format_commit_message(commit, "%h %s", sb, &ctx);
+	strbuf_addch(sb, '\n');
 }
 
-static void print_commit(struct commit *commit)
+__attribute__((format (printf, 4, 5)))
+static void path_msg(struct merge_options *opt,
+		     const char *path,
+		     int is_hint, /* hints can be omitted */
+		     const char *fmt, ...)
 {
-	struct strbuf sb = STRBUF_INIT;
-	struct pretty_print_context ctx = {0};
-	ctx.date_mode.type = DATE_NORMAL;
-	format_commit_message(commit, " %h: %m %s", &sb, &ctx);
-	fprintf(stderr, "%s\n", sb.buf);
-	strbuf_release(&sb);
+	va_list ap;
+	struct strbuf *sb = strmap_get(&opt->priv->output, path);
+	if (!sb) {
+		sb = xmalloc(sizeof(*sb));
+		strbuf_init(sb, 0);
+		strmap_put(&opt->priv->output, path, sb);
+	}
+
+	va_start(ap, fmt);
+	strbuf_vaddf(sb, fmt, ap);
+	va_end(ap);
+
+	strbuf_addch(sb, '\n');
 }
 
 static inline int merge_detect_rename(struct merge_options *opt)
@@ -1304,6 +1269,7 @@ static int merge_submodule(struct merge_options *opt,
 	struct commit *commit_o, *commit_a, *commit_b;
 	int parent_count;
 	struct object_array merges;
+	struct strbuf sb = STRBUF_INIT;
 
 	int i;
 	int search = !opt->priv->call_depth;
@@ -1325,47 +1291,44 @@ static int merge_submodule(struct merge_options *opt,
 		return 0;
 
 	if (add_submodule_odb(path)) {
-		output(opt, 1, _("Failed to merge submodule %s (not checked out)"), path);
+		path_msg(opt, path, 0,
+			 _("Failed to merge submodule %s (not checked out)"),
+			 path);
 		return 0;
 	}
 
 	if (!(commit_o = lookup_commit_reference(opt->repo, o)) ||
 	    !(commit_a = lookup_commit_reference(opt->repo, a)) ||
 	    !(commit_b = lookup_commit_reference(opt->repo, b))) {
-		output(opt, 1, _("Failed to merge submodule %s (commits not present)"), path);
+		path_msg(opt, path, 0,
+			 _("Failed to merge submodule %s (commits not present)"),
+			 path);
 		return 0;
 	}
 
 	/* check whether both changes are forward */
 	if (!in_merge_bases(commit_o, commit_a) ||
 	    !in_merge_bases(commit_o, commit_b)) {
-		output(opt, 1, _("Failed to merge submodule %s (commits don't follow merge-base)"), path);
+		path_msg(opt, path, 0,
+			 _("Failed to merge submodule %s "
+			   "(commits don't follow merge-base)"),
+			 path);
 		return 0;
 	}
 
 	/* Case #1: a is contained in b or vice versa */
 	if (in_merge_bases(commit_a, commit_b)) {
 		oidcpy(result, b);
-		if (show(opt, 3)) {
-			output(opt, 3, _("Fast-forwarding submodule %s to the following commit:"), path);
-			output_commit_title(opt, commit_b);
-		} else if (show(opt, 2))
-			output(opt, 2, _("Fast-forwarding submodule %s"), path);
-		else
-			; /* no output */
-
+		path_msg(opt, path, 1,
+			 _("Note: Fast-forwarding submodule %s to %s"),
+			 path, oid_to_hex(b));
 		return 1;
 	}
 	if (in_merge_bases(commit_b, commit_a)) {
 		oidcpy(result, a);
-		if (show(opt, 3)) {
-			output(opt, 3, _("Fast-forwarding submodule %s to the following commit:"), path);
-			output_commit_title(opt, commit_a);
-		} else if (show(opt, 2))
-			output(opt, 2, _("Fast-forwarding submodule %s"), path);
-		else
-			; /* no output */
-
+		path_msg(opt, path, 1,
+			 _("Note: Fast-forwarding submodule %s to %s"),
+			 path, oid_to_hex(a));
 		return 1;
 	}
 
@@ -1385,26 +1348,33 @@ static int merge_submodule(struct merge_options *opt,
 					 &merges);
 	switch (parent_count) {
 	case 0:
-		output(opt, 1, _("Failed to merge submodule %s (merge following commits not found)"), path);
+		path_msg(opt, path, 0, _("Failed to merge submodule %s"), path);
 		break;
 
 	case 1:
-		output(opt, 1, _("Failed to merge submodule %s (not fast-forward)"), path);
-		output(opt, 2, _("Found a possible merge resolution for the submodule:\n"));
-		print_commit((struct commit *) merges.objects[0].item);
-		output(opt, 2, _(
-		       "If this is correct simply add it to the index "
-		       "for example\n"
-		       "by using:\n\n"
-		       "  git update-index --cacheinfo 160000 %s \"%s\"\n\n"
-		       "which will accept this suggestion.\n"),
-		       oid_to_hex(&merges.objects[0].item->oid), path);
+		format_commit(&sb, 4,
+			      (struct commit *)merges.objects[0].item);
+		path_msg(opt, path, 0,
+			 _("Failed to merge submodule %s, but a possible merge "
+			   "resolution exists:\n%s\n"),
+			 path, sb.buf);
+		path_msg(opt, path, 1,
+			 _("If this is correct simply add it to the index "
+			   "for example\n"
+			   "by using:\n\n"
+			   "  git update-index --cacheinfo 160000 %s \"%s\"\n\n"
+			   "which will accept this suggestion.\n"),
+			 oid_to_hex(&merges.objects[0].item->oid), path);
+		strbuf_release(&sb);
 		break;
-
 	default:
-		output(opt, 1, _("Failed to merge submodule %s (multiple merges found)"), path);
 		for (i = 0; i < merges.nr; i++)
-			print_commit((struct commit *) merges.objects[i].item);
+			format_commit(&sb, 4,
+				      (struct commit *)merges.objects[i].item);
+		path_msg(opt, path, 0,
+			 _("Failed to merge submodule %s, but multiple "
+			   "possible merges exist:\n%s"), path, sb.buf);
+		strbuf_release(&sb);
 	}
 
 	object_array_clear(&merges);
@@ -1680,6 +1650,7 @@ static int process_renames(struct merge_options *opt,
 							   pathnames,
 							   1 + 2 * opt->priv->call_depth,
 							   &merged);
+			/* FIXME: path_msg() depending on results? */
 			memcpy(&side1->stages[1], &merged, sizeof(merged));
 			if (!clean_merge &&
 			    merged.mode == side1->stages[1].mode &&
@@ -1759,6 +1730,7 @@ static int process_renames(struct merge_options *opt,
 					     &side2->stages[2],
 					     pathnames, 1 + 2 * opt->priv->call_depth,
 					     &merged);
+			/* FIXME: path_msg() depending on results? */
 
 #ifdef VERBOSE_DEBUG
 			printf("--> Rename/add:\n");
@@ -2041,19 +2013,20 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 		c_info->reported_already = 1;
 		strbuf_add_separated_string_list(&collision_paths, ", ",
 						 &c_info->source_files);
-		output(opt, 1, _("CONFLICT (implicit dir rename): Existing "
-			       "file/dir at %s in the way of implicit "
-			       "directory rename(s) putting the following "
-			       "path(s) there: %s."),
+		path_msg(opt, new_path, 0,
+			 _("CONFLICT (implicit dir rename): Existing file/dir "
+			   "at %s in the way of implicit directory rename(s) "
+			   "putting the following path(s) there: %s."),
 		       new_path, collision_paths.buf);
 		clean = 0;
 	} else if (c_info->source_files.nr > 1) {
 		c_info->reported_already = 1;
 		strbuf_add_separated_string_list(&collision_paths, ", ",
 						 &c_info->source_files);
-		output(opt, 1, _("CONFLICT (implicit dir rename): Cannot map "
-			       "more than one path to %s; implicit directory "
-			       "renames tried to put these paths there: %s"),
+		path_msg(opt, new_path, 0,
+			 _("CONFLICT (implicit dir rename): Cannot map more "
+			   "than one path to %s; implicit directory renames "
+			   "tried to put these paths there: %s"),
 		       new_path, collision_paths.buf);
 		clean = 0;
 	}
@@ -2171,11 +2144,12 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		}
 		if (bad_max == max) {
 			string_list_append(&to_remove, entry->item.string);
-			output(opt, 1,
+			path_msg(opt, entry->item.string, 0,
 			       _("CONFLICT (directory rename split): "
-			       "Unclear where to rename %s to; it was renamed "
-			       "to multiple other directories, with no "
-			       "destination getting a majority of the files."),
+				 "Unclear where to rename %s to; it was "
+				 "renamed to multiple other directories, with "
+				 "no destination getting a majority of the "
+				 "files."),
 			       entry->item.string);
 			*clean &= 0;
 		} else {
@@ -2380,11 +2354,11 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	otherinfo = strmap_get_item(dir_rename_exclusions,
 				    rename_dir_info->new_dir.buf);
 	if (otherinfo) {
-		output(opt, 1,
-		       _("WARNING: Avoiding applying %s -> %s rename "
-			 "to %s, because %s itself was renamed."),
-		       rename_info->string, rename_dir_info->new_dir.buf,
-		       path, rename_dir_info->new_dir.buf);
+		path_msg(opt, rename_info->string, 1,
+			 _("WARNING: Avoiding applying %s -> %s rename "
+			   "to %s, because %s itself was renamed."),
+			 rename_info->string, rename_dir_info->new_dir.buf,
+			 path, rename_dir_info->new_dir.buf);
 		return NULL;
 	}
 
@@ -3420,20 +3394,20 @@ static void process_entry(struct merge_options *opt,
 			ci->stages[df_file_index].mode = merged_file.mode;
 			oidcpy(&ci->stages[df_file_index].oid, &merged_file.oid);
 		}
-		/* Handle output stuff...
-		if (!clean_merge) {
-			if (S_ISREG(a->mode) && S_ISREG(b->mode)) {
-				output(opt, 2, _("Auto-merging %s"), filename);
-			}
+		if (clean_merge) {
+			if (S_ISREG(a->mode) && S_ISREG(b->mode))
+				path_msg(opt, path, 1,
+					 _("Auto-merging %s"), path);
+		} else {
 			const char *reason = _("content");
-			if (!is_valid(o))
+			if (ci->filemask == 6)
 				reason = _("add/add");
-			if (S_ISGITLINK(mfi->blob.mode))
+			if (S_ISGITLINK(merged_file.mode))
 				reason = _("submodule");
-			output(opt, 1, _("CONFLICT (%s): Merge conflict in %s"),
-			       reason, path);
+			path_msg(opt, path, 0,
+				 _("CONFLICT (%s): Merge conflict in %s"),
+				 reason, path);
 		}
-		*/
 	} else if (ci->filemask == 3 || ci->filemask == 5) {
 		/* Modify/delete */
 		int side = (ci->filemask == 5) ? 2 : 1;
@@ -3682,7 +3656,9 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 								     path,
 								     "cruft");
 
-					output(opt, 2, _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"), path, new_name);
+					path_msg(opt, path, 1,
+						 _("Note: %s not up to date and in way of checking out conflicted version; old copy renamed to %s"),
+						 path, new_name);
 					errs |= rename(path, new_name);
 					free(new_name);
 				}
@@ -3758,10 +3734,9 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 redo:
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
 	if (collect_merge_info(opt, merge_base, head, merge) != 0) {
-		if (show(opt, 4) || opt->priv->call_depth)
-			err(opt, _("collecting merge info for trees %s and %s failed"),
-			    oid_to_hex(&head->object.oid),
-			    oid_to_hex(&merge->object.oid));
+		err(opt, _("collecting merge info for trees %s and %s failed"),
+		    oid_to_hex(&head->object.oid),
+		    oid_to_hex(&merge->object.oid));
 		result->clean = -1;
 		return;
 	}
@@ -3782,9 +3757,9 @@ redo:
 	process_entries(opt, &working_tree_oid);
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
-	if (show(opt, 2))
-		diff_warn_rename_limit("merge.renamelimit",
-				       opt->priv->needed_rename_limit, 0);
+	/* FIXME: Only show this if showing hints, and only after other output */
+	diff_warn_rename_limit("merge.renamelimit",
+			       opt->priv->needed_rename_limit, 0);
 
 	trace2_region_enter("merge", "cleanup", opt->repo);
 	/* unmerged entries => unclean */
@@ -3823,26 +3798,34 @@ static void merge_ort_internal(struct merge_options *opt,
 	struct commit *merged_merge_bases;
 	const char *ancestor_name;
 	struct strbuf merge_base_abbrev = STRBUF_INIT;
+#ifdef VERBOSE_DEBUG
+	struct strbuf sb;
+	unsigned cnt;
+#endif
 
-	if (show(opt, 4)) {
-		output(opt, 4, _("Merging:"));
-		output_commit_title(opt, h1);
-		output_commit_title(opt, h2);
-	}
+#ifdef VERBOSE_DEBUG
+	strbuf_addstr(&sb, _("Merging:"));
+	format_commit(&sb, 2 * opt->priv->call_depth, h1);
+	format_commit(&sb, 2 * opt->priv->call_depth, h2);
+	printf("%s", sb.buf);
+	strbuf_reset(&sb);
+#endif
 
 	if (!merge_bases) {
 		merge_bases = get_merge_bases(h1, h2);
 		merge_bases = reverse_commit_list(merge_bases);
 	}
 
-	if (show(opt, 5)) {
-		unsigned cnt = commit_list_count(merge_bases);
-
-		output(opt, 5, Q_("found %u common ancestor:",
-				"found %u common ancestors:", cnt), cnt);
-		for (iter = merge_bases; iter; iter = iter->next)
-			output_commit_title(opt, iter->item);
-	}
+#ifdef VERBOSE_DEBUG
+	strbuf_addstr(&sb, _("Merging:\n"));
+	cnt = commit_list_count(merge_bases);
+	strbuf_addf(&sb, Q_("found %u common ancestor:",
+			    "found %u common ancestors:", cnt), cnt);
+	for (iter = merge_bases; iter; iter = iter->next)
+		format_commit(&sb, 2 * opt->priv->call_depth, iter->item);
+	printf("%s", sb.buf);
+	strbuf_reset(&sb);
+#endif
 
 	merged_merge_bases = pop_commit(&merge_bases);
 	if (merged_merge_bases == NULL) {
@@ -3907,8 +3890,6 @@ static void merge_ort_internal(struct merge_options *opt,
 					result);
 	strbuf_release(&merge_base_abbrev);
 	opt->ancestor = NULL;  /* avoid accidental re-use of opt->ancestor */
-	if (result->clean < 0)
-		flush_output(opt);
 }
 
 static void merge_start(struct merge_options *opt, struct merge_result *result)
@@ -3933,6 +3914,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	assert(opt->recursive_variant >= MERGE_VARIANT_NORMAL &&
 	       opt->recursive_variant <= MERGE_VARIANT_THEIRS);
 
+	/* verbosity, buffer_output, and obuf are ignored */
 	assert(opt->verbosity >= 0 && opt->verbosity <= 5);
 	assert(opt->buffer_output <= 2);
 	assert(opt->obuf.len == 0);
@@ -4005,6 +3987,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		 */
 		string_list_init(&opt->priv->paths_to_free, 0);
 #endif
+		strmap_init(&opt->priv->output, 1);
 		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
 }
@@ -4038,11 +4021,35 @@ void merge_switch_to_result(struct merge_options *opt,
 		trace2_region_leave("merge", "record_unmerged", opt->repo);
 	}
 
-#if 0
 	if (display_update_msgs) {
-		/* FIXME: Write out messages */
+		struct merge_options_internal *opti = result->priv;
+		struct hashmap_iter iter;
+		struct str_entry *e;
+		struct string_list olist = STRING_LIST_INIT_NODUP;
+		int i;
+
+		trace2_region_enter("merge", "display messages", opt->repo);
+
+		/* Hack to Pre-allocate olist to the desired size */
+		ALLOC_GROW(olist.items, strmap_get_size(&opti->output),
+			   olist.alloc);
+
+		/* Put every entry from output into olist, then sort */
+		strmap_for_each_entry(&opti->output, &iter, e) {
+			string_list_append(&olist, e->item.string)->util = e->item.util;
+		}
+		string_list_sort(&olist);
+
+		/* Iterate over the items, printing them */
+		for (i = 0; i < olist.nr; ++i) {
+			struct strbuf *sb = olist.items[i].util;
+
+			printf("%s", sb->buf);
+		}
+		string_list_clear(&olist, 0);
+
+		trace2_region_leave("merge", "display messages", opt->repo);
 	}
-#endif
 
 	merge_finalize(opt, result);
 }
@@ -4053,11 +4060,6 @@ void merge_finalize(struct merge_options *opt,
 	struct merge_options_internal *opti = result->priv;
 
 	assert(opt->priv == NULL);
-
-	flush_output(opt);
-
-	if (!opti->call_depth && opt->buffer_output < 2)
-		strbuf_release(&opt->obuf);
 
 	reset_maps(opti, 0);
 	FREE_AND_NULL(opti->renames);
@@ -4093,6 +4095,25 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	string_list_clear(&opti->paths_to_free, 0);
 	opti->paths_to_free.strdup_strings = 0;
 #endif
+
+	if (!reinitialize) {
+		struct hashmap_iter iter;
+		struct str_entry *e;
+
+		/* Put every entry from output into olist, then sort */
+		strmap_for_each_entry(&opti->output, &iter, e) {
+			struct strbuf *sb = e->item.util;
+			strbuf_release(sb);
+			/*
+			 * We don't need to free(sb) here; we could pass
+			 * free_util=1 when free'ing opti->output instead, but
+			 * that's require another strmap_for_each_entry() loop,
+			 * and it's cheaper to free it here while we have it.
+			 */
+			free(sb);
+		}
+		strmap_free(&opti->output, 0);
+	}
 
 	/*
 	 * All strings and util fields in opti->unmerged are a subset

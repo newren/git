@@ -169,7 +169,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	}
 	fprintf(stderr, "\nDone.\n");
 
-	merge_switch_to_result(&merge_opt, head_tree, &result, 1, 1);
+	merge_switch_to_result(&merge_opt, head_tree, &result, 1, !result.clean);
 
 	if (result.clean < 0)
 		exit(128);
