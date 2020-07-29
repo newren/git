@@ -41,6 +41,7 @@ Current count: 30
 
 
 Unimplemented optimizations (5):
+  * avoid checking unmerged_index() in checkout() (& maybe refresh_index?)
   * hashmap -> khash (see commit 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
   * default allocation sizes for strmaps/pairs (e.g. 2*index entries for path)
   * dir rename:

@@ -3532,6 +3532,10 @@ static int checkout(struct merge_options *opt,
 	/* FIXME: Do I need to refresh the index?? */
 	refresh_index(opt->repo->index, REFRESH_QUIET, NULL, NULL, NULL);
 
+	/*
+	 * FIXME: Isn't checking for an unmerged_index unnecessary overhead if
+	 * sequencer/merge check that index is clean first?
+	 */
 	if (unmerged_index(opt->repo->index)) {
 		error(_("you need to resolve your current index first"));
 		return -1;
