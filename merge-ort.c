@@ -3448,7 +3448,7 @@ static void process_entries(struct merge_options *opt,
 		return;
 	}
 
-	/* Hack to pre-allocated both to the desired size */
+	/* Hack to pre-allocate plist to the desired size */
 	trace2_region_enter("merge", "plist grow", opt->repo);
 	ALLOC_GROW(plist.items, strmap_get_size(&opt->priv->paths), plist.alloc);
 	trace2_region_leave("merge", "plist grow", opt->repo);
