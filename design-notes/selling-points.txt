@@ -1,0 +1,55 @@
+Benefits of in-memory merge:
+  * maintainability & understandability
+  * API Quality
+  
+  * correctness
+    * fixes known issues
+      * submodules
+      * more gnarly rename cases
+      * tricker D/F conflicts?
+      * undetected conflicts when recursing
+    * avoids false positives and false negatives in early abort
+    * avoids early abort with partial merge results written to working copy
+
+  * features & performance:
+
+    * sparseness:
+      * sparse-checkouts (not dirtying files unnecessarily)
+      * sparse-clones (not being forced to download additional files unnecessarily)
+
+    * partial clones:
+      * avoids need to download many blobs
+
+    * enabling code refactoring
+      * speed of rename handling
+      * directory rename detection separate but related and started this work
+
+    * new capabilities
+      * mergability checks done e.g. by GitHub match those by client??
+      * cherry-pick to a branch which isn't checked out
+      * local diff against automerge
+      * discovery of "evil merges" (and evil reverts and maybe evil cherry-picks)
+
+Quotes:
+  * "I've written off that code as mostly unsalvageable long time ago."
+    -Junio, 2017-11-26,
+     https://lore.kernel.org/git/xmqqk1ydkbx0.fsf@gitster.mtv.corp.google.com/
+
+  * "rewriting the merge backend to "first try everything in-core
+    before start to update working tree" style is way overdue for
+    several years at least (I've started one and then lost steam
+    quite some time ago, and I would not be surprised if there were
+    a handful of other people)."
+    -Junio, 2020-03-02, #git-devel,
+     https://colabti.org/irclogger/irclogger_log/git-devel?date=2020-03-02
+
+  * "[It is] some pretty hairy code.  Every time I start to look at
+     it I get confused and can't remember what breakthrough I
+     thought I was close to making before.''
+     -Peff, 2011-06-16,
+      https://lore.kernel.org/git/20110616210551.GA15505@sigill.intra.peff.net
+
+  * "Eight years ago we both talked about merge-recursive and how it should
+     be rewritten, but we both procrastinated hoping the other person would
+     do it.  It looks like I won." [Quote to the best of my memory, years later]
+     -Peff, 2019-01-31, in-person in Belgium at Git Contributor Summit
