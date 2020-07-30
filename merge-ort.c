@@ -1679,6 +1679,13 @@ static int process_renames(struct merge_options *opt,
 			//base->merged.is_null = 1;
 			//base->merged.clean = 1;
 			base->path_conflict = 1;
+			path_msg(opt, oldpath, 0,
+				 _("CONFLICT (rename/rename): %s renamed to "
+				   "%s in %s and to %s in %s."),
+				 pathnames[0],
+				 pathnames[1], opt->branch1,
+				 pathnames[2], opt->branch2);
+
 			/* FIXME: Do un-rename in recursive case */
 			i++; /* We handled both renames, i.e. i+1 handled */
 			continue;
@@ -1716,6 +1723,7 @@ static int process_renames(struct merge_options *opt,
 			struct version_info merged;
 
 			struct conflict_info *base, *side1, *side2;
+			unsigned clean;
 
 			pathnames[0] = oldpath;
 			pathnames[other_source_index] = oldpath;
@@ -1723,14 +1731,13 @@ static int process_renames(struct merge_options *opt,
 			base = strmap_get(&opt->priv->paths, pathnames[0]);
 			side1 = strmap_get(&opt->priv->paths, pathnames[1]);
 			side2 = strmap_get(&opt->priv->paths, pathnames[2]);
-			/* FIXME: handle return value of handle_content_merge */
-			handle_content_merge(opt, pair->one->path,
-					     &base->stages[0],
-					     &side1->stages[1],
-					     &side2->stages[2],
-					     pathnames, 1 + 2 * opt->priv->call_depth,
-					     &merged);
-			/* FIXME: path_msg() depending on results? */
+			clean = handle_content_merge(opt, pair->one->path,
+						     &base->stages[0],
+						     &side1->stages[1],
+						     &side2->stages[2],
+						     pathnames,
+						     1 + 2*opt->priv->call_depth,
+						     &merged);
 
 #ifdef VERBOSE_DEBUG
 			printf("--> Rename/add:\n");
@@ -1743,6 +1750,15 @@ static int process_renames(struct merge_options *opt,
 #endif
 			memcpy(&newinfo->stages[target_index], &merged,
 			       sizeof(merged));
+			if (!clean) {
+				path_msg(opt, newpath, 0,
+					 _("CONFLICT (rename involved in "
+					   "collision): rename of %s -> %s has "
+					   "content conflicts AND collides "
+					   "with another path; this may result "
+					   "in nested conflict markers."),
+					 oldpath, newpath);
+			}
 		} else if (collision && source_deleted) {
 			/*
 			 * rename/add/delete or rename/rename(2to1)/delete:
@@ -3331,6 +3347,11 @@ static void process_entry(struct merge_options *opt,
 		path = unique_path(&opt->priv->paths, path, branch);
 		strmap_put(&opt->priv->paths, path, new_ci);
 
+		path_msg(opt, path, 0,
+			 _("CONFLICT (file/directory): directory in the way "
+			   "of %s from %s; moving it to %s instead."),
+			 e->string, branch, path);
+
 		/*
 		 * Zero out the filemask for the old ci.  At this point, ci
 		 * was just an entry for a directory, so we don't need to
@@ -3410,11 +3431,29 @@ static void process_entry(struct merge_options *opt,
 		}
 	} else if (ci->filemask == 3 || ci->filemask == 5) {
 		/* Modify/delete */
+		const char *modify_branch, *delete_branch;
 		int side = (ci->filemask == 5) ? 2 : 1;
 		int index = opt->priv->call_depth ? 0 : side;
+		modify_branch = (side == 1) ? opt->branch1 : opt->branch2;
+		delete_branch = (side == 1) ? opt->branch2 : opt->branch1;
 		ci->merged.result.mode = ci->stages[index].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[index].oid);
 		ci->merged.clean = 0;
+		if (ci->pathnames[0] != ci->pathnames[side]) {
+			path_msg(opt, path, 0,
+				 _("CONFLICT (rename/delete): %s renamed (to "
+				   "%s) on %s, but deleted in %s.  Version "
+				   "from %s left in tree."),
+				 ci->pathnames[0], path, modify_branch,
+				 delete_branch, modify_branch);
+		} else {
+			path_msg(opt, path, 0,
+				 _("CONFLICT (modify/delete): %s deleted in %s "
+				   "and modified in %s.  Version %s of %s left "
+				   "in tree."),
+				 path, delete_branch, modify_branch,
+				 modify_branch, path);
+		}
 	} else if ((ci->filemask == 2 || ci->filemask == 4)) {
 		/* Added on one side */
 		int side = (ci->filemask == 4) ? 2 : 1;

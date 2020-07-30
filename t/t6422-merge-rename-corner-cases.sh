@@ -455,7 +455,7 @@ test_expect_success 'handle rename-with-content-merge vs. add' '
 		git checkout A^0 &&
 
 		test_must_fail git merge -s recursive B^0 >out &&
-		#test_i18ngrep "CONFLICT (.*/add)" out &&
+		test_i18ngrep "CONFLICT (.*/add)" out &&
 
 		git ls-files -s >out &&
 		test_line_count = 2 out &&
@@ -501,7 +501,7 @@ test_expect_success 'handle rename-with-content-merge vs. add, merge other way' 
 		git checkout B^0 &&
 
 		test_must_fail git merge -s recursive A^0 >out &&
-		#test_i18ngrep "CONFLICT (.*/add)" out &&
+		test_i18ngrep "CONFLICT (.*/add)" out &&
 
 		git ls-files -s >out &&
 		test_line_count = 2 out &&
@@ -581,7 +581,7 @@ test_expect_success 'handle rename/rename (2to1) conflict correctly' '
 		git checkout B^0 &&
 
 		test_must_fail git merge -s recursive C^0 >out &&
-		#test_i18ngrep "CONFLICT (\(.*\)/\1)" out &&
+		test_i18ngrep "CONFLICT (\(.*\)/\1)" out &&
 
 		git ls-files -s >out &&
 		test_line_count = 2 out &&
