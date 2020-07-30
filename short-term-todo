@@ -1,3 +1,14 @@
+Output stuff:
+  * do I need global (not path-specific) capability too?
+  * coverage (e.g. rename/rename 2->1 and nested content conflicts)
+  * GIT_MERGE_VERBOSITY replacement with pipe-separated strings.
+    GIT_MERGE_DEBUG? (also, change strings into bitfield upfront, so checks
+    can be super cheap).  Then nuke VERBOSE_DEBUG.
+  * Need to handle merge.directoryRenames = "conflict"
+  * Write output not just to console but also to some file for user reference
+    (much like .git/MERGE_HEAD and friends)
+
+Create a list of differences between recursive and ort:
 * Overall plan
   X Renames
   X Write the talk
@@ -5,10 +16,10 @@
   X Implement basic perf ideas
   X Additional Perf testing
   X Micro-optimizations
-  * Output
-    * write output to merge_result (in field named output, of course)
-    * don't need the flush_output() thing
-    * use strmap; path -> strbuf, for each path that has a message.
+  / Output
+    X write output to merge_result (in field named output, of course)
+    X don't need the flush_output() thing
+    X use strmap; path -> strbuf, for each path that has a message.
   * Path conflict files
   * Check the "Stuff to not forget"
   / Make sure the API is clean/clear
