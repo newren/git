@@ -1,0 +1,51 @@
+Subject: [RFC] Strategy for reviewing and incoporating new merge strategy?
+
+Hi everyone,
+
+I don't know if my data structures, algorithms, or design are optimal
+for my new merge strategy, but the current iteration of my
+proof-of-concept now feels like a success.  There is lots of known
+code cleanup for me to do, and probably some refactorings that
+reviewers will suggest, but I first wanted to get opinions on the best
+plan forward for reviewing and incorporating this merge strategy into
+git.
+
+Particular areas I'm curious for feedback on:
+
+  * What's the right "size" and "pace" for review chunks?  This is much
+    too big to do as a single code dump or patch series.
+
+  * Is there a preferred order for the reviews or things you'd like to
+    see first?[1]
+
+  * I presume the new merge strategy will be made available but remain
+    non-default for a while.  Fair assumption?
+
+  * If my assumption above is accurate, we should have a scheme for
+    testing both the old recursive strategy and the new one.  That
+    might mean lots of nearly duplicated tests and a longer testsuite.
+    Is that okay?  If not, what should be done instead?
+
+Thanks,
+Elijah
+
+
+[1] Barring feedback on preferred order, my first rough guess at
+    the best ordering of the different patch series would be:
+
+      * strmap, a new public data structure external to merge-ort
+      * High level design document for the new merge strategy
+      * New header files and API
+      * New internal data structures
+      * Implement basic merge algorithm
+      * Add rename handling
+      * Add directory rename handling
+      * Extensive optimization work affecting both diffcore-rename
+        and merge-ort
+      * Making the new strategy available as an option
+      * New features
+      * Restructuring sequencer to take advantage of inmemory merges
+
+    Some of these (e.g. optimization work) may actually involve
+    multiple patch series.  Also, there's some miscellaneous stuff to
+    insert or add as well.

@@ -1,0 +1,52 @@
+* High level design
+  * avoids touching unpack_trees, cache_entries, and working tree
+    (won't touch any of these until merge is complete, and only if
+     switch_to_result() is called).
+  * uses traverse_trees() and builds up more involved data structures
+  * duplicate tree entries is a last-entry wins (might not be different...)
+  * substitution principle: renames just touch up the 3-way data structures;
+    directory renames just touch up the renames (and adds) into regular
+    renames
+  * orthogonality: don't try to print combinations of results (e.g.
+    rename/delete + file-in-the-way; just treat them as two separate messages,
+    because trying to get all permutations -- directory/file, directory
+    rename modified path, rename/rename(1to2), rename/rename(2to1), mixed
+    modes, etc., etc. is super unwieldy and attempts to do it in
+    merge-recursive were very incomplete, made the code brittle, and made it
+    super complex)
+* API
+  * parents listed as "side1" and "side2"; "side1" does not have to be HEAD
+  * merge base(s) listed BEFORE sides (related to heavy use of indices and
+    masks in the code for handling "sides")
+  * does not only return cleanness, also returns a tree
+  * updating in-memory index and working tree are optional
+  * broken into more steps; switch_to_result() being separate
+  * adds "wrapper" APIs for those wanting to get similar calling API as
+    before.  No wrapper equivalent for merge_recursive_generic(), though,
+    at least not yet.
+* CONFLICT messages
+  * more orthogonal
+  * always buffered
+  * no verbosity setting
+  * always sorted by pathname so multiple messages are together
+* Updates to index & working tree
+  * no false positives or false negatives on modified-files-in-way checks
+  * deferred until the end
+  * could allow rebase to operate with a dirty tree too...
+  * avoids vivifying sparse paths unnecessarily
+  * fixes submodule updates (if checkout works, merge automatically does)
+  * can take advantage of any parallelization in checkout codepath
+* Edge case merge resolutions
+  * directory/file conflicts -- renames out of the way
+  * more coming...
+* Rename rules (slightly modifications)
+  * basename preference (and basename guided)
+  * not detected when not needed for contents, thus changing output
+  * avoids checking duplicate input pairs (existing callers don't do this)
+  * directory rename detection rules modified slightly (?)
+  * remembering of renames even if similarity drops just below 50% threshold
+* Performance
+  * massive differences...see also "rename rules changed slightly"
+  * does not do index checks and rewrites that recursive did (now in wrapper)
+* Miscellaneous
+  * usage of asserts
