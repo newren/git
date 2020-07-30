@@ -1,11 +1,11 @@
 Current count: 30
 
 * Avoid small wasted effort (3)
-  * avoid unnecessary discard and re-read of cache
+  * avoid unnecessary discard and re-read of cache [b]
   * avoid checking index matches HEAD with every merge; do it at start of rebase
   * avoid working tree and index updates until the end
 * Work with less data (5)
-  * fewer tree-walks
+  * fewer tree-walks [a]
   * trivial tree merges, when all three trees match
   * trivial tree merges, when one side matches (if renames cached or not needed)
     * trivial tree merges for new trees
@@ -64,3 +64,17 @@ Rejected optimizations (3):
   * Running under jemalloc (saved a percent in the past, though)
   * Changing compiler flags (just used `make DEVELOPER=1`)
   * Parallelization
+
+
+[a] Perf note, avoid re-doing work:
+    * traverse_tree/read_tree_recursive count:
+      * merge-recursive:
+        * unpack_trees (1), diff-for-renames (2), get_files_dirs (2),
+          get_tree_entry_if_blob (3 * 2 * unmerged entries)
+      * merge-ort:
+        * direct call (1), unpack_trees (1)
+    * computing of mode/oid null, and which sides match.  merge-recursive
+      duplicates unpack_trees logic, where merge-ort saves it off.
+[b] Perf note, avoiding doing unnecessary work:
+    * Removal of unnecessary drop_cache and re-read of cache in
+      non-recursive case
