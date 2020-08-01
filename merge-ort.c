@@ -3093,6 +3093,58 @@ static int detect_and_process_renames(struct merge_options *opt,
 	return clean;
 }
 
+static int read_oid_strbuf(struct merge_options *opt,
+			   const struct object_id *oid,
+			   struct strbuf *dst)
+{
+	void *buf;
+	enum object_type type;
+	unsigned long size;
+	buf = read_object_file(oid, &type, &size);
+	if (!buf)
+		return err(opt, _("cannot read object %s"), oid_to_hex(oid));
+	if (type != OBJ_BLOB) {
+		free(buf);
+		return err(opt, _("object %s is not a blob"), oid_to_hex(oid));
+	}
+	strbuf_attach(dst, buf, size, size + 1);
+	return 0;
+}
+
+static int blob_unchanged(struct merge_options *opt,
+			  const struct version_info *base,
+			  const struct version_info *side,
+			  const char *path)
+{
+	struct strbuf basebuf = STRBUF_INIT;
+	struct strbuf sidebuf = STRBUF_INIT;
+	int ret = 0; /* assume changed for safety */
+	const struct index_state *idx = &opt->priv->attr_index;
+
+	if (base->mode != side->mode)
+		return 0;
+	if (oideq(&base->oid, &side->oid))
+		return 1;
+
+	if (read_oid_strbuf(opt, &base->oid, &basebuf) ||
+	    read_oid_strbuf(opt, &side->oid, &sidebuf))
+		goto error_return;
+	/*
+	 * Note: binary | is used so that both renormalizations are
+	 * performed.  Comparison can be skipped if both files are
+	 * unchanged since their sha1s have already been compared.
+	 */
+	if (renormalize_buffer(idx, path, basebuf.buf, basebuf.len, &basebuf) |
+	    renormalize_buffer(idx, path, sidebuf.buf, sidebuf.len, &sidebuf))
+		ret = (basebuf.len == sidebuf.len &&
+		       !memcmp(basebuf.buf, sidebuf.buf, basebuf.len));
+
+error_return:
+	strbuf_release(&basebuf);
+	strbuf_release(&sidebuf);
+	return ret;
+}
+
 struct directory_versions {
 	struct string_list versions;
 	struct string_list offsets;
@@ -3316,8 +3368,6 @@ static void process_entry(struct merge_options *opt,
 	struct conflict_info *ci = e->util;
 	int df_file_index = 0;
 
-	/* int normalize = opt->renormalize; */
-
 #ifdef VERBOSE_DEBUG
 	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
 #endif
@@ -3496,12 +3546,19 @@ static void process_entry(struct merge_options *opt,
 		const char *modify_branch, *delete_branch;
 		int side = (ci->filemask == 5) ? 2 : 1;
 		int index = opt->priv->call_depth ? 0 : side;
-		modify_branch = (side == 1) ? opt->branch1 : opt->branch2;
-		delete_branch = (side == 1) ? opt->branch2 : opt->branch1;
+
 		ci->merged.result.mode = ci->stages[index].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[index].oid);
 		ci->merged.clean = 0;
-		if (ci->pathnames[0] != ci->pathnames[side]) {
+
+		modify_branch = (side == 1) ? opt->branch1 : opt->branch2;
+		delete_branch = (side == 1) ? opt->branch2 : opt->branch1;
+
+		if (opt->renormalize &&
+		    blob_unchanged(opt, &ci->stages[0], &ci->stages[side],
+				   path)) {
+			ci->merged.clean = 1;
+		} else if (ci->pathnames[0] != ci->pathnames[side]) {
 			path_msg(opt, path, 0,
 				 _("CONFLICT (rename/delete): %s renamed (to "
 				   "%s) on %s, but deleted in %s.  Version "
