@@ -18,6 +18,7 @@
 #include "merge-ort.h"
 
 #include "alloc.h"
+#include "attr.h"
 #include "blob.h"
 #include "cache-tree.h"
 #include "commit.h"
@@ -99,6 +100,7 @@ struct merge_options_internal {
 	struct string_list paths_to_free; /* list of strings to free */
 #endif
 	struct rename_info *renames;
+	struct index_state attr_index; /* renormalization weirdly needs one... */
 	struct strmap output;  /* maps path -> conflict messages */
 	const char *current_dir_name;
 	char *toplevel_dir; /* see merge_info.directory_name comment */
@@ -1381,6 +1383,64 @@ static int merge_submodule(struct merge_options *opt,
 	return 0;
 }
 
+static void initialize_attr_index(struct merge_options *opt)
+{
+	/*
+	 * The renormalize_buffer() functions require attributes, and
+	 * annoyingly those can only be read from the working tree or from
+	 * an index_state.  merge-ort doesn't have an index_state, so we
+	 * generate a fake one containing only attribute information.
+	 */
+	struct conflict_info *ci;
+	struct index_state *attr_index = &opt->priv->attr_index;
+	struct cache_entry *ce;
+
+	if (!opt->renormalize)
+		return;
+
+	if (attr_index->initialized)
+		return;
+	attr_index->initialized = 1;
+
+	ci = strmap_get(&opt->priv->paths, GITATTRIBUTES_FILE);
+	if (!ci)
+		return;
+
+	if (ci->merged.clean) {
+		int len = strlen(GITATTRIBUTES_FILE);
+		ce = make_empty_cache_entry(attr_index, len);
+		ce->ce_mode = create_ce_mode(ci->merged.result.mode);
+		ce->ce_flags = create_ce_flags(0);
+		ce->ce_namelen = len;
+		oidcpy(&ce->oid, &ci->merged.result.oid);
+		memcpy(ce->name, GITATTRIBUTES_FILE, len);
+		add_index_entry(attr_index, ce,
+				ADD_CACHE_OK_TO_ADD | ADD_CACHE_OK_TO_REPLACE);
+		get_stream_filter(attr_index, GITATTRIBUTES_FILE, &ce->oid);
+	}
+	else {
+		int stage, len;
+		for (stage=0; stage<3; ++stage) {
+			unsigned stage_mask = (1 << stage);
+
+			if (!(ci->filemask & stage_mask))
+				continue;
+			len = strlen(GITATTRIBUTES_FILE);
+			// make_empty_transient_cache_entry(len)
+			ce = make_empty_cache_entry(attr_index, len);
+			ce->ce_mode = create_ce_mode(ci->stages[stage].mode);
+			ce->ce_flags = create_ce_flags(stage);
+			ce->ce_namelen = len;
+			oidcpy(&ce->oid, &ci->stages[stage].oid);
+			memcpy(ce->name, GITATTRIBUTES_FILE, len);
+			add_index_entry(attr_index, ce,
+					ADD_CACHE_OK_TO_ADD | ADD_CACHE_OK_TO_REPLACE);
+			get_stream_filter(attr_index, GITATTRIBUTES_FILE,
+					  &ce->oid);
+		}
+	}
+}
+
 static int merge_3way(struct merge_options *opt,
 		      const char *path,
 		      const struct version_info *o,
@@ -1394,6 +1454,8 @@ static int merge_3way(struct merge_options *opt,
 	struct ll_merge_options ll_opts = {0};
 	char *base, *name1, *name2;
 	int merge_status;
+
+	initialize_attr_index(opt);
 
 	ll_opts.renormalize = opt->renormalize;
 	ll_opts.extra_marker_size = extra_marker_size;
@@ -1433,7 +1495,7 @@ static int merge_3way(struct merge_options *opt,
 
 	merge_status = ll_merge(result_buf, path, &orig, base,
 				&src1, name1, &src2, name2,
-				opt->repo->index, &ll_opts);
+				&opt->priv->attr_index, &ll_opts);
 
 	free(base);
 	free(name1);
@@ -4033,6 +4095,9 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		strmap_init(&opt->priv->output, 1);
 		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
+
+	if (opt->renormalize)
+		git_attr_set_direction(GIT_ATTR_CHECKOUT);
 }
 
 void merge_switch_to_result(struct merge_options *opt,
@@ -4102,6 +4167,8 @@ void merge_finalize(struct merge_options *opt,
 {
 	struct merge_options_internal *opti = result->priv;
 
+	if (opt->renormalize)
+		git_attr_set_direction(GIT_ATTR_CHECKIN);
 	assert(opt->priv == NULL);
 
 	reset_maps(opti, 0);
@@ -4157,6 +4224,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		}
 		strmap_free(&opti->output, 0);
 	}
+	if (opti->attr_index.cache_nr) /* true iff opt->renormalize */
+		discard_index(&opti->attr_index);
 
 	/*
 	 * All strings and util fields in opti->unmerged are a subset
