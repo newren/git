@@ -101,8 +101,13 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	struct strbuf reflog_msg = STRBUF_INIT;
 	struct strbuf branch_name = STRBUF_INIT;
 
+	if (argc == 2 && !strcmp(argv[1], "-h")) {
+		printf("usage: read the code, figure out how to use it, then do so\n");
+		exit(129);
+	}
 	if (argc != 5 || strcmp(argv[1], "--onto"))
 		die("usage: read the code, figure out how to use it, then do so");
+
 	onto = peel_committish(argv[2]);
 	strbuf_addf(&branch_name, "refs/heads/%s", argv[4]);
 
