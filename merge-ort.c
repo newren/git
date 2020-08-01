@@ -599,7 +599,7 @@ static void collect_rename_info(struct merge_options *opt,
 		return;
 
 	for (side = 1; side <= 2; ++side) {
-		unsigned side_mask = (side << 1);
+		unsigned side_mask = (1 << side);
 
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
@@ -1760,7 +1760,7 @@ static int process_renames(struct merge_options *opt,
 		target_index = pair->score; /* from append_rename_pairs() */
 		assert(target_index == 1 || target_index == 2);
 		other_source_index = 3-target_index;
-		old_sidemask = (other_source_index << 1); /* 2 or 4 */
+		old_sidemask = (1 << other_source_index); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
 #ifdef VERBOSE_DEBUG
