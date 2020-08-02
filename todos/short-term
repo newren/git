@@ -1,9 +1,3 @@
-Attr stuff (t6038):
-  * Add a "struct index_state attr_index" to opt->priv
-  * Initialize it before process_entries()
-  * Leave it empty if !opt->renormalize
-  * if (opt->renormalize), only put .gitattributes entries into it.
-
 Output stuff:
   * Am I missing cases where I need to add conflict messages?
   * test coverage (e.g. rename/rename 2->1 and nested content conflicts)
@@ -22,7 +16,6 @@ Output stuff:
     (much like .git/MERGE_HEAD and friends; maybe .git/MERGE_OUTPUT to go
      along with .git/MERGE_TREE?)
 
-Create a list of differences between recursive and ort:
 * Overall plan
   X Renames
   X Write the talk
