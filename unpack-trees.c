@@ -239,7 +239,7 @@ static int add_rejected_path(struct unpack_trees_options *o,
 /*
  * display all the error messages stored in a nice way
  */
-void display_error_msgs(struct unpack_trees_options *o)
+static void display_error_msgs(struct unpack_trees_options *o)
 {
 	int e;
 	unsigned error_displayed = 0;
@@ -1560,6 +1560,9 @@ static void populate_from_existing_patterns(struct unpack_trees_options *o,
 }
 
 
+static int verify_absent(const struct cache_entry *,
+			 enum unpack_trees_error_types,
+			 struct unpack_trees_options *);
 /*
  * N-way merge "len" trees.  Returns 0 on success, -1 on failure to manipulate the
  * resulting index, -2 on failure to reflect the changes to the work tree.
@@ -1827,7 +1830,7 @@ static int reject_merge(const struct cache_entry *ce,
 	return add_rejected_path(o, ERROR_WOULD_OVERWRITE, ce->name);
 }
 
-int cache_entries_same(const struct cache_entry *a, const struct cache_entry *b)
+static int same(const struct cache_entry *a, const struct cache_entry *b)
 {
 	if (!!a != !!b)
 		return 0;
@@ -1839,7 +1842,6 @@ int cache_entries_same(const struct cache_entry *a, const struct cache_entry *b)
 	       oideq(&a->oid, &b->oid);
 }
 
-#define same(a,b) cache_entries_same(a,b)
 
 /*
  * When a CE gets turned into an unmerged entry, we
@@ -2129,9 +2131,9 @@ static int verify_absent_1(const struct cache_entry *ce,
 	}
 }
 
-int verify_absent(const struct cache_entry *ce,
-		  enum unpack_trees_error_types error_type,
-		  struct unpack_trees_options *o)
+static int verify_absent(const struct cache_entry *ce,
+			 enum unpack_trees_error_types error_type,
+			 struct unpack_trees_options *o)
 {
 	if (!o->skip_sparse_checkout && (ce->ce_flags & CE_NEW_SKIP_WORKTREE))
 		return 0;
@@ -2394,24 +2396,6 @@ int threeway_merge(const struct cache_entry * const *stages,
 		if (no_anc_exists && head && remote && same(head, remote))
 			return merged_entry(head, index, o);
 
-	} else if (o->semi_aggressive) {
-		/*
-		 * Resolve unchanged on one side and deleted on other cases.
-		 */
-		int head_deleted = !head;
-		int remote_deleted = !remote;
-
-		if ((head_deleted && remote && remote_match) ||
-		    (remote_deleted && head && head_match)) {
-			const struct cache_entry *ce = head ? head : remote;
-			if (index)
-				return deleted_entry(index, index, o);
-			if (ce && !head_deleted) {
-				if (verify_absent(ce, ERROR_WOULD_LOSE_UNTRACKED_REMOVED, o))
-					return -1;
-			}
-			return 0;
-		}
 	}
 
 	/* Below are "no merge" cases, which require that the index be
