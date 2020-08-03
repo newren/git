@@ -1,17 +1,21 @@
+*** Fix failing directory rename detection cases ***
+
+Cleanup stuff:
+  * MERGE_DIRECTORY_RENAMES_DEFAULT:
+    * differs from MERGE_DIRECTORY_RENAMES_CONFLICT in that it will print an
+      informational message about merge.directoryRenames.
+      ("directory renames resulted in conflicts, if you'd rather they were
+        just automatically resolved, set merge.directoryRenames to true")
+  * Attr stuff:
+    * pre-merge .gitattributes (assuming no attribute related info), then use
+      result in merging other files
+
 Output stuff:
   * Am I missing cases where I need to add conflict messages?
   * test coverage (e.g. rename/rename 2->1 and nested content conflicts)
   * GIT_MERGE_VERBOSITY replacement with pipe-separated strings.
     GIT_MERGE_DEBUG? (also, change strings into bitfield upfront, so checks
     can be super cheap).  Then nuke VERBOSE_DEBUG.
-  * Need to handle merge.directoryRenames = "conflict"
-    * Need supplemental information for marking things as conflicted even if not
-      due to contents (clean dir renames are conflicts by default...)
-    * when processing directory renames, immediately call path_msg() and
-      mark the file as path_conflict=1 ?
-    * consider adding global (not path-specific) output capability too
-      ("directory renames resulted in conflicts, if you'd rather they were
-        just automatically resolved, set merge.directoryRenames to true")
   * Write output not just to console but also to some file for user reference
     (much like .git/MERGE_HEAD and friends; maybe .git/MERGE_OUTPUT to go
      along with .git/MERGE_TREE?)
@@ -36,9 +40,18 @@ Output stuff:
   * Look for test_expect_failure in merge tests of testsuite; fix some
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
-  / Default to histogram diff...but less hackily
+  X Default to histogram diff
   * Features like --remerge-diff
   * Diff3 improvements
+
+* Stuff to not forget:
+  * Path conflict files; also, multiple auxiliary files to add (e.g. for
+    mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
+    D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
+  * FIXMEs in checkout() (and elsewhere)
+  * Do an additional rename-like pass when ignore_case, searching for file
+    collisions (or can I just rely on unpack_trees reporting errors?)
+  * Avoid string_list_lookup() & string_list_insert() in merge-ort
 
 Path_conflict files:
   * Mode conflict (Directory/Non-Executable/Executable/Submodule/Symlink)
@@ -53,18 +66,6 @@ Path_conflict files:
     * add/add, rename/add, rename/rename(2to1)
     * rename/add/delete
     * take an add/add onto rename/rename(1to2) or delete/delete onto 2to1
-
-* Stuff to not forget:
-  * Path conflict files; also, multiple auxiliary files to add (e.g. for
-    mode conflict at a, need a~HEAD, a~MERGE_HEAD, a.path_conflict, or for
-    D/F conflict at a, need a~HEAD and a.path_conflict in addition to dir a/)
-  * Normalization code from merge-recursive.c -- modify/delete might actually
-    be a not-modified/delete (but possibly move from merge_3way() to
-    collect_merge_info_callback())
-  * FIXMEs in checkout() (and elsewhere)
-  * Do an additional rename-like pass when ignore_case, searching for file
-    collisions (or can I just rely on unpack_trees reporting errors?)
-  * Avoid string_list_lookup() & string_list_insert() in merge-ort
 
 * Important stuff to call out for reviewers to double-check:
   * write_tree() -- yet another place trees are written (builtin/mktree,
