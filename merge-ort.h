@@ -13,9 +13,6 @@ struct merge_result {
 	/* Result of merge.  If !clean, represents what would go in worktree */
 	struct tree *tree;
 
-	/* merge status messages (conflict notices, automerging files, etc.) */
-	struct strbuf *output; /* NULL means ignore output? */
-
 	/*
 	 * Additional metadata used by merge_switch_to_result() or future calls
 	 * to merge_ort_inmemory_*().
