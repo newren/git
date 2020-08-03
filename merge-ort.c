@@ -2532,6 +2532,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	struct string_list dirs_to_insert = STRING_LIST_INIT_NODUP;
 	struct conflict_info *ci, *new_ci;
 	struct string_list_item *item;
+	const char *branch_with_new_path, *branch_with_dir_rename;
 	char *old_path = pair->two->path;
 	char *parent_name;
 	char *cur_path;
@@ -2653,25 +2654,48 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 #endif
 	}
 
-#if 0
-	/*
-	 * Record the original change status (or 'type' of change).  If it
-	 * was originally an add ('A'), this lets us differentiate later
-	 * between a RENAME_DELETE conflict and RENAME_VIA_DIR (they
-	 * otherwise look the same).  If it was originally a rename ('R'),
-	 * this lets us remember and report accurately about the transitive
-	 * renaming that occurred via the directory rename detection.  Also,
-	 * record the original destination name.
-	 */
-	re->dir_rename_original_type = pair->status;
-	re->dir_rename_original_dest = old_path;
-
-	/*
-	 * We don't actually look at pair->status again, but it seems
-	 * pedagogically correct to adjust it.
-	 */
-	pair->status = 'R';
-#endif
+	/* ci->filemask is 2 or 4; as asserted above */
+	branch_with_new_path   = (ci->filemask == 2) ? opt->branch1 : opt->branch2;
+	branch_with_dir_rename = (ci->filemask == 2) ? opt->branch2 : opt->branch1;
+	if (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE) {
+		/* Notify user of updated path */
+		if (pair->status == 'A')
+			path_msg(opt, new_path, 1,
+				 _("Path updated: %s added in %s inside a "
+				   "directory that was renamed in %s; moving "
+				   "it to %s."),
+				 old_path, branch_with_new_path,
+				 branch_with_dir_rename, new_path);
+		else
+			path_msg(opt, new_path, 1,
+				 _("Path updated: %s renamed to %s in %s, "
+				   "inside a directory that was renamed in %s; "
+				   "moving it to %s."),
+				 pair->one->path, old_path, branch_with_new_path,
+				 branch_with_dir_rename, new_path);
+	} else {
+		/*
+		 * opt->detect_directory_renames has the value
+		 * MERGE_DIRECTORY_RENAMES_CONFLICT, so mark these as conflicts.
+		 */
+		ci->path_conflict = 1;
+		if (pair->status == 'A')
+			path_msg(opt, new_path, 0,
+				 _("CONFLICT (file location): %s added in %s "
+				   "inside a directory that was renamed in %s, "
+				   "suggesting it should perhaps be moved to "
+				   "%s."),
+				 old_path, branch_with_new_path,
+				 branch_with_dir_rename, new_path);
+		else
+			path_msg(opt, new_path, 0,
+				 _("CONFLICT (file location): %s renamed to %s "
+				   "in %s, inside a directory that was renamed "
+				   "in %s, suggesting it should perhaps be "
+				   "moved to %s."),
+				 pair->one->path, old_path, branch_with_new_path,
+				 branch_with_dir_rename, new_path);
+	}
 
 	/*
 	 * Finally, record the new location.
