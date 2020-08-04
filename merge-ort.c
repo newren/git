@@ -589,10 +589,13 @@ static void collect_rename_info(struct merge_options *opt,
 	}
 
 	/* Update dirs_removed, as needed */
-	if (dirmask == 3 || dirmask == 5) {
-		/* absent_mask = 0x07 - dirmask; side = absent_mask >> 1 */
-		unsigned side = (0x07 - dirmask) >> 1;
-		strmap_put(&renames->dirs_removed[side], fullname, NULL);
+	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
+		/* absent_mask = 0x07 - dirmask; side_mask = absent_mask >> 1 */
+		unsigned side_mask = (0x07 - dirmask) >> 1;
+		if (side_mask & 1)
+			strmap_put(&renames->dirs_removed[1], fullname, NULL);
+		if (side_mask & 2)
+			strmap_put(&renames->dirs_removed[2], fullname, NULL);
 	}
 
 	if (filemask == 0 || filemask == 7)
