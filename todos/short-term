@@ -1,4 +1,33 @@
+* Upstream cleanups
+  * Move: t60[234]*.sh (expcept bisect) to t64*.sh
+  * Move: t303*.sh also into t64*.sh
+  * Move: t7405-submodule-merge.sh into t64*.sh
+
+* Demo-able stuff
+  * Headline
+    * "Fearless refactoring" (fast rename detection)
+    * "Sparsify & partial clones -- going even further"
+  * Behind the scenes
+    * Perf
+      * pgdev cherry-pick case
+      * linux rebase case
+      * partial clones improvements, in conjunction with sparse checkouts
+    * Correctness
+      * avoid false positive/false negative early abort
+      * sparse-checkout improvement (avoid unnecessarily dirtying worktree, both
+        due to SKIP_WORKTREE stuff, and due to rebase)
+      * submodules
+      * special cases -- D/F conflicts, etc.
+  * new features coming:
+    * cherry-pick to a branch which isn't checked out
+    * local diff against automerge ('git diff --merge'?)
+    * discovery of "evil" merges/cherry-picks/reverts
+
 *** Fix failing directory rename detection cases ***
+  * I can note when filemask is 1 for a source in collect_rename_info, and then
+    put it in a strmap and ignore those paths later for dir rename detection.
+    Does that fix all the cases?
+  * Failing tests with clean (6): 17, 25, 30, 52, 60, 62
 
 Cleanup stuff:
   * MERGE_DIRECTORY_RENAMES_DEFAULT:
@@ -9,6 +38,10 @@ Cleanup stuff:
   * Attr stuff:
     * pre-merge .gitattributes (assuming no attribute related info), then use
       result in merging other files
+  * Make merge_switch_to_result() more versatile:
+    * write output to console, to MERGE_OUT, both, or neither
+    * update index and working directory, or index only.
+      (working directory only makes no sense; at least need an in-memory index)
 
 Output stuff:
   * Am I missing cases where I need to add conflict messages?
@@ -16,6 +49,7 @@ Output stuff:
   * GIT_MERGE_VERBOSITY replacement with pipe-separated strings.
     GIT_MERGE_DEBUG? (also, change strings into bitfield upfront, so checks
     can be super cheap).  Then nuke VERBOSE_DEBUG.
+    See: string_list_split
   * Write output not just to console but also to some file for user reference
     (much like .git/MERGE_HEAD and friends; maybe .git/MERGE_OUTPUT to go
      along with .git/MERGE_TREE?)
