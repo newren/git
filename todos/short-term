@@ -29,6 +29,14 @@
     Does that fix all the cases?
   * Failing tests with clean (6): 17, 25, 30, 52, 60, 62
 
+*** Stuff to investigate:
+  * Why are there so many "Auto-merging" messages in pgdev cherry-pick case?
+  * Why does pgdev cherry-pick bail on rename detection?  (Is it computing
+    num_sources * num_dests rather than num_relevant_sources * num_dests?)
+  * If D/F conflict starts but match_mask on dir, does trivial resolve work?
+    Even if the file was renamed into place and has content conflicts?
+    resolve_trivial_directory_merge() seems to assume path is handled entirely.
+
 Cleanup stuff:
   * MERGE_DIRECTORY_RENAMES_DEFAULT:
     * differs from MERGE_DIRECTORY_RENAMES_CONFLICT in that it will print an
@@ -38,6 +46,15 @@ Cleanup stuff:
   * Attr stuff:
     * pre-merge .gitattributes (assuming no attribute related info), then use
       result in merging other files
+  * Make merge/ directory
+    * output-handling??
+    * collect-merge-info
+    * rename-detection
+    * directory-rename-detection
+    * process_entries
+    * external-api ?
+    * submodule-handling
+    * content-merge-handling ? (
   * Make merge_switch_to_result() more versatile:
     * write output to console, to MERGE_OUT, both, or neither
     * update index and working directory, or index only.
