@@ -2617,6 +2617,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	assert(ci->dirmask == 0);
 	strmap_remove(&opt->priv->paths, old_path, 0);
 
+	branch_with_new_path   = (ci->filemask == 2) ? opt->branch1 : opt->branch2;
+	branch_with_dir_rename = (ci->filemask == 2) ? opt->branch2 : opt->branch1;
+
 	/* Now, finally update ci and stick it into opt->priv->paths */
 	ci->merged.directory_name = parent_name;
 	len = strlen(parent_name);
@@ -2655,11 +2658,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 #if !USE_MEMORY_POOL
 		free(ci);
 #endif
+		ci = new_ci;
 	}
 
-	/* ci->filemask is 2 or 4; as asserted above */
-	branch_with_new_path   = (ci->filemask == 2) ? opt->branch1 : opt->branch2;
-	branch_with_dir_rename = (ci->filemask == 2) ? opt->branch2 : opt->branch1;
 	if (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_TRUE) {
 		/* Notify user of updated path */
 		if (pair->status == 'A')
@@ -3540,7 +3541,8 @@ static void process_entry(struct merge_options *opt,
 						   ci->pathnames,
 						   opt->priv->call_depth * 2,
 						   &merged_file);
-		ci->merged.clean = clean_merge && !ci->df_conflict;
+		ci->merged.clean = clean_merge &&
+				   !ci->df_conflict && !ci->path_conflict;
 		ci->merged.result.mode = merged_file.mode;
 		oidcpy(&ci->merged.result.oid, &merged_file.oid);
 #ifdef VERBOSE_DEBUG
