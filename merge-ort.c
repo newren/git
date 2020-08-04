@@ -935,9 +935,12 @@ static void resolve_trivial_directory_merge(struct conflict_info *ci, int side)
 	oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 	ci->merged.result.mode = ci->stages[side].mode;
 	ci->merged.is_null = is_null_oid(&ci->stages[side].oid);
+	/* FIXME: Do I need to worry about the next 5 lines?? */
+	/* ci->dirmask &= ~ci->match_mask; */
+	/* ci->df_conflict = 0; */
 	ci->match_mask = 0;
-	ci->merged.clean = 1;
-	ci->processed = 1;
+	ci->merged.clean = 1; /* (ci->filemask == 0); */
+	ci->processed = 1; /* ci->merged.clean; */
 }
 
 static int handle_deferred_entries(struct merge_options *opt,
