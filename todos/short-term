@@ -1,3 +1,14 @@
+* Performance Idea:
+  * Keep a list of semi_relevant_sources too, for cases where we are detecting
+    renames solely for the purpose of directory rename detection.
+    * If a majority of paths under a directory are sufficient to
+      determine the directory rename, we don't need to do inexact
+      rename detection for semi_relevant_sources.
+      * Do I want to skip basename matching too, if possible?  Or just
+        exhaustive searching?
+      * Do I want to change the diffcore_rename API to allow individual stages
+        to be executed?
+
 * Upstream cleanups
   * Move: t60[234]*.sh (expcept bisect) to t64*.sh
   * Move: t303*.sh also into t64*.sh
