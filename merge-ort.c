@@ -2139,9 +2139,13 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	dir_renames = xmalloc(sizeof(*dir_renames));
 	strmap_init(dir_renames, 0);
 
-	/* If there can't be any renames on this side of history, return early */
+#if 0 /* FIXME: Clean this up */
+	/* It's tempting to bail early if there aren't any dirs_removed to
+	 * consider, but it causes things like tests 6b of t6043 to fail.
+	 */
 	if (strmap_get_size(&opt->priv->renames->dirs_removed[side]) == 0)
 		return dir_renames;
+#endif
 
 	/*
 	 * Typically, we think of a directory rename as all files from a
@@ -2175,6 +2179,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			/* Directory didn't change at all; ignore this one. */
 			continue;
 
+#if 0 /* FIXME: Clean this up */
 		if (!strmap_contains(&opt->priv->renames->dirs_removed[side],
 				     old_dir)) {
 			/* old_dir still exists and can't be a dir rename */
@@ -2182,6 +2187,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			free(new_dir);
 			continue;
 		}
+#endif
 
 		info = strmap_get(dir_renames, old_dir);
 		if (info) {
