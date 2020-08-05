@@ -1606,6 +1606,7 @@ static int handle_content_merge(struct merge_options *opt,
 			if (ret)
 				return -1;
 			clean &= (merge_status == 0);
+			path_msg(opt, path, 1, _("Auto-merging %s"), path);
 		} else if (S_ISGITLINK(a->mode)) {
 			clean = merge_submodule(opt, pathnames[0],
 						&o->oid, &a->oid, &b->oid,
@@ -3565,11 +3566,7 @@ static void process_entry(struct merge_options *opt,
 			ci->stages[df_file_index].mode = merged_file.mode;
 			oidcpy(&ci->stages[df_file_index].oid, &merged_file.oid);
 		}
-		if (clean_merge) {
-			if (S_ISREG(a->mode) && S_ISREG(b->mode))
-				path_msg(opt, path, 1,
-					 _("Auto-merging %s"), path);
-		} else {
+		if (!clean_merge) {
 			const char *reason = _("content");
 			if (ci->filemask == 6)
 				reason = _("add/add");
