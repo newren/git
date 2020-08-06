@@ -4,15 +4,18 @@
     * If a majority of paths under a directory are sufficient to
       determine the directory rename, we don't need to do inexact
       rename detection for semi_relevant_sources.
-      * Do I want to skip basename matching too, if possible?  Or just
-        exhaustive searching?
+      * May want to check before and after basename matching (might be able to
+        skip not just exhaustive searching but also basename matching).
       * Do I want to change the diffcore_rename API to allow individual stages
         to be executed?
+    * basename matching already has pseudo directory rename detection logic in
+      it, so this will just extend it a little
+    * May need to modify how cached_pairs work (e.g. cached-as-delete-IF: the
+      file on the other side remains unmodified)
 
-* Upstream cleanups
-  * Move: t60[234]*.sh (expcept bisect) to t64*.sh
-  * Move: t303*.sh also into t64*.sh
-  * Move: t7405-submodule-merge.sh into t64*.sh
+Feature work:
+  * git show --remerge-diff[=<pick-commit>] ?  But if multiple commits to show,
+    then this doesn't work so well.
 
 * Demo-able stuff
   * Headline
@@ -34,16 +37,7 @@
     * local diff against automerge ('git diff --merge'?)
     * discovery of "evil" merges/cherry-picks/reverts
 
-*** Fix failing directory rename detection cases ***
-  * I can note when filemask is 1 for a source in collect_rename_info, and then
-    put it in a strmap and ignore those paths later for dir rename detection.
-    Does that fix all the cases?
-  * Failing tests with clean (6): 17, 25, 30, 52, 60, 62
-
 *** Stuff to investigate:
-  * Why are there so many "Auto-merging" messages in pgdev cherry-pick case?
-  * Why does pgdev cherry-pick bail on rename detection?  (Is it computing
-    num_sources * num_dests rather than num_relevant_sources * num_dests?)
   * If D/F conflict starts but match_mask on dir, does trivial resolve work?
     Even if the file was renamed into place and has content conflicts?
     resolve_trivial_directory_merge() seems to assume path is handled entirely.
@@ -89,7 +83,7 @@ Output stuff:
   X Implement basic perf ideas
   X Additional Perf testing
   X Micro-optimizations
-  / Output
+  X Output
     X write output to merge_result (in field named output, of course)
     X don't need the flush_output() thing
     X use strmap; path -> strbuf, for each path that has a message.
