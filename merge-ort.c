@@ -3610,6 +3610,7 @@ static void process_entry(struct merge_options *opt,
 		if (opt->renormalize &&
 		    blob_unchanged(opt, &ci->stages[0], &ci->stages[side],
 				   path)) {
+			ci->merged.is_null = 1;
 			ci->merged.clean = 1;
 		} else if (ci->pathnames[0] != ci->pathnames[side]) {
 			path_msg(opt, path, 0,
