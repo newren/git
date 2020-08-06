@@ -1270,13 +1270,8 @@ static int merge_submodule(struct merge_options *opt,
 	int i;
 	int search = !opt->priv->call_depth;
 
-	/* store a in result in case we fail */
-	/* FIXME: This is the WRONG resolution for the recursive case when
-	 * we need to be careful to avoid accidentally matching either side.
-	 * Should probably use o instead there, much like we do for merging
-	 * binaries.
-	 */
-	oidcpy(result, a);
+	/* store fallback answer in result in case we fail */
+	oidcpy(result, opt->priv->call_depth ? o : a);
 
 	/* we can not handle deletion conflicts */
 	if (is_null_oid(o))
@@ -1598,9 +1593,14 @@ static int handle_content_merge(struct merge_options *opt,
 			clean &= (merge_status == 0);
 			path_msg(opt, path, 1, _("Auto-merging %s"), path);
 		} else if (S_ISGITLINK(a->mode)) {
+			int two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
 			clean = merge_submodule(opt, pathnames[0],
-						&o->oid, &a->oid, &b->oid,
-						&result->oid);
+						two_way ? &null_oid : &o->oid,
+						&a->oid, &b->oid, &result->oid);
+			if (opt->priv->call_depth && two_way && !clean) {
+				result->mode = o->mode;
+				oidcpy(&result->oid, &o->oid);
+			}
 		} else if (S_ISLNK(a->mode)) {
 			if (opt->priv->call_depth) {
 				clean = 0;

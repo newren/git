@@ -1221,7 +1221,7 @@ test_expect_success 'setup submodule modify/modify' '
 	)
 '
 
-test_expect_failure 'check submodule modify/modify' '
+test_expect_success 'check submodule modify/modify' '
 	(
 		cd submodule-modify-modify &&
 
@@ -1309,7 +1309,7 @@ test_expect_success 'setup submodule add/add' '
 	)
 '
 
-test_expect_failure 'check submodule add/add' '
+test_expect_success 'check submodule add/add' '
 	(
 		cd submodule-add-add &&
 
