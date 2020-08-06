@@ -1449,9 +1449,9 @@ static void initialize_attr_index(struct merge_options *opt)
 
 static int merge_3way(struct merge_options *opt,
 		      const char *path,
-		      const struct version_info *o,
-		      const struct version_info *a,
-		      const struct version_info *b,
+		      const struct object_id *o,
+		      const struct object_id *a,
+		      const struct object_id *b,
 		      const char *pathnames[3],
 		      const int extra_marker_size,
 		      mmbuffer_t *result_buf)
@@ -1495,9 +1495,9 @@ static int merge_3way(struct merge_options *opt,
 		name2 = mkpathdup("%s:%s", opt->branch2,  pathnames[2]);
 	}
 
-	read_mmblob(&orig, &o->oid);
-	read_mmblob(&src1, &a->oid);
-	read_mmblob(&src2, &b->oid);
+	read_mmblob(&orig, o);
+	read_mmblob(&src1, a);
+	read_mmblob(&src2, b);
 
 	merge_status = ll_merge(result_buf, path, &orig, base,
 				&src1, name1, &src2, name2,
@@ -1589,7 +1589,8 @@ static int handle_content_merge(struct merge_options *opt,
 			mmbuffer_t result_buf;
 			int ret = 0, merge_status;
 
-			merge_status = merge_3way(opt, path, o, a, b,
+			merge_status = merge_3way(opt, path,
+						  &o->oid, &a->oid, &b->oid,
 						  pathnames, extra_marker_size,
 						  &result_buf);
 
