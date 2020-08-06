@@ -128,19 +128,6 @@ struct merged_info {
 	const char *directory_name;
 };
 
-#if 0
-enum rename_conflict_type {
-	RENAME_NONE = 0,
-	RENAME_VIA_DIR,
-	RENAME_ADD,
-	RENAME_ADD_DELETE,
-	RENAME_DELETE,
-	// RENAME_ONE_FILE_TO_ONE,  // FIXME
-	RENAME_ONE_FILE_TO_TWO,
-	RENAME_TWO_FILES_TO_ONE
-};
-#endif
-
 struct conflict_info {
 	struct merged_info merged;
 	struct version_info stages[3];
@@ -263,15 +250,17 @@ static void path_msg(struct merge_options *opt,
 
 static inline int merge_detect_rename(struct merge_options *opt)
 {
+#ifdef SOMEONE_HAS_A_REASON_OTHER_THAN_PERF_FOR_TURNING_OFF_RENAME_DETECTION
 	/*
 	 * We do not have logic to handle the detection of copies.  In
 	 * fact, it may not even make sense to add such logic: would we
 	 * really want a change to a base file to be propagated through
 	 * multiple other files by a merge?
 	 */
-
-	/* FIXME: More words here... */
 	return !!opt->detect_renames;
+#else
+	return DIFF_DETECT_RENAME;
+#endif
 }
 
 static struct commit_list *reverse_commit_list(struct commit_list *list)
@@ -1136,7 +1125,6 @@ static int handle_deferred_entries(struct merge_options *opt,
 }
 
 static int collect_merge_info(struct merge_options *opt,
-			      /* FIXME: We do NOT need the trees anymore */
 			      struct tree *merge_base,
 			      struct tree *side1,
 			      struct tree *side2)
@@ -1558,17 +1546,11 @@ static int handle_content_merge(struct merge_options *opt,
 		}
 	} else {
 		/*
-		 * FIXME:
-		 * If we ensure to set up match_mask in handle rename,
-		 * then we can assert the following:
-		    assert(!oideq(&a->oid, &o->oid) || !oideq(&b->oid, &o->oid));
-		 * Getting here means a & b are both (files OR submodules OR
-		 * symlinks); they do not differ in type.
+		 * Getting here means a & b are both files OR both submodules OR
+		 * both symlinks; a and b do not differ in type.
 		 */
 
-		/*
-		 * Merge modes
-		 */
+		/* Merge modes */
 		if (a->mode == b->mode || a->mode == o->mode)
 			result->mode = b->mode;
 		else {
@@ -1578,7 +1560,14 @@ static int handle_content_merge(struct merge_options *opt,
 			clean = (b->mode == o->mode);
 		}
 
-		/* FIXME: can remove next four lines based on match_mask too */
+		/*
+		 * Trivial oid merge.
+		 *
+		 * Note: While one might assume that the next four lines would
+		 * be unnecessary due to the fact that match_mask is often
+		 * setup and already handled, renames don't always take care
+		 * of that.
+		 */
 		if (oideq(&a->oid, &b->oid) || oideq(&a->oid, &o->oid))
 			oidcpy(&result->oid, &b->oid);
 		else if (oideq(&b->oid, &o->oid))
