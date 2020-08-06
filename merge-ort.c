@@ -1553,6 +1553,20 @@ static int handle_content_merge(struct merge_options *opt,
 			assert(S_ISREG(a->mode));
 			result->mode = a->mode;
 			clean = (b->mode == o->mode);
+			/*
+			 * FIXME: If opt->priv->call_depth && !clean, then we
+			 * really should not make result->mode match either
+			 * a->mode or b->mode; that causes t6036 "check
+			 * conflicting mode for regular file" to fail.  It
+			 * would be best to use some other mode, but we'll
+			 * confuse all kinds of stuff if we use one where
+			 * S_ISREG(result->mode) isn't true, and if we use
+			 * something like 0100666, then tree-walk.c's calls
+			 * to canon_mode() will just normalize that to 100644
+			 * for us and thus not solve anything.
+			 *
+			 * Not sure if there's anything we can do...
+			 */
 		}
 
 		/*
@@ -1567,14 +1581,22 @@ static int handle_content_merge(struct merge_options *opt,
 			oidcpy(&result->oid, &b->oid);
 		else if (oideq(&b->oid, &o->oid))
 			oidcpy(&result->oid, &a->oid);
-		/* Remaining merge rules depends on file vs. submodule vs. symlink. */
-		/* FIXME: What if o is different type than a & b? */
+
+		/* Remaining rules depend on file vs. submodule vs. symlink. */
 		else if (S_ISREG(a->mode)) {
 			mmbuffer_t result_buf;
 			int ret = 0, merge_status;
+			int two_way;
+
+			/*
+			 * If 'o' is different type, treat it as null so we
+			 * do a two-way merge.
+			 */
+			two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
 
 			merge_status = merge_3way(opt, path,
-						  &o->oid, &a->oid, &b->oid,
+						  two_way ? &null_oid : &o->oid,
+						  &a->oid, &b->oid,
 						  pathnames, extra_marker_size,
 						  &result_buf);
 
