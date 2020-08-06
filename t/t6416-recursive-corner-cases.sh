@@ -1067,7 +1067,7 @@ test_expect_success 'setup symlink modify/modify' '
 	)
 '
 
-test_expect_failure 'check symlink modify/modify' '
+test_expect_success 'check symlink modify/modify' '
 	(
 		cd symlink-modify-modify &&
 
@@ -1133,7 +1133,7 @@ test_expect_success 'setup symlink add/add' '
 	)
 '
 
-test_expect_failure 'check symlink add/add' '
+test_expect_success 'check symlink add/add' '
 	(
 		cd symlink-add-add &&
 

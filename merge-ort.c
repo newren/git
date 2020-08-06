@@ -1602,18 +1602,23 @@ static int handle_content_merge(struct merge_options *opt,
 						&o->oid, &a->oid, &b->oid,
 						&result->oid);
 		} else if (S_ISLNK(a->mode)) {
-			switch (opt->recursive_variant) {
-			case MERGE_VARIANT_NORMAL:
-				oidcpy(&result->oid, &a->oid);
-				if (!oideq(&a->oid, &b->oid))
+			if (opt->priv->call_depth) {
+				clean = 0;
+				result->mode = o->mode;
+				oidcpy(&result->oid, &o->oid);
+			} else {
+				switch (opt->recursive_variant) {
+				case MERGE_VARIANT_NORMAL:
 					clean = 0;
-				break;
-			case MERGE_VARIANT_OURS:
-				oidcpy(&result->oid, &a->oid);
-				break;
-			case MERGE_VARIANT_THEIRS:
-				oidcpy(&result->oid, &b->oid);
-				break;
+					oidcpy(&result->oid, &a->oid);
+					break;
+				case MERGE_VARIANT_OURS:
+					oidcpy(&result->oid, &a->oid);
+					break;
+				case MERGE_VARIANT_THEIRS:
+					oidcpy(&result->oid, &b->oid);
+					break;
+				}
 			}
 		} else
 			BUG("unsupported object type in the tree: %06o for %s",
@@ -3544,6 +3549,7 @@ static void process_entry(struct merge_options *opt,
 		ci->merged.clean = clean_merge &&
 				   !ci->df_conflict && !ci->path_conflict;
 		ci->merged.result.mode = merged_file.mode;
+		ci->merged.is_null = (merged_file.mode == 0);
 		oidcpy(&ci->merged.result.oid, &merged_file.oid);
 #ifdef VERBOSE_DEBUG
 		printf("Content merging %s (%s); mode: %06o, hash: %s\n",
