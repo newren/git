@@ -8,12 +8,33 @@
     directory renames just touch up the renames (and adds) into regular
     renames
   * orthogonality: don't try to print combinations of results (e.g.
-    rename/delete + file-in-the-way; just treat them as two separate messages,
-    because trying to get all permutations -- directory/file, directory
-    rename modified path, rename/rename(1to2), rename/rename(2to1), mixed
-    modes, etc., etc. is super unwieldy and attempts to do it in
-    merge-recursive were very incomplete, made the code brittle, and made it
-    super complex)
+    rename/delete + file-in-the-way; just treat them as two separate
+    messages, because trying to get all permutations -- directory/file,
+    path modified by directory rename, rename/rename(1to2),
+    rename/rename(2to1), rename/add[/delete], mixed modes, content
+    conflicts, etc., etc. is super unwieldy and attempts to do it in
+    merge-recursive were very incomplete, made the code brittle, and made
+    it super complex)
+    * Examples previous code combined:
+      * rename/delete (path) + modify/delete (content) + D/F
+      * rename (path) + add/add (content)
+    * Examples that could have happened:
+      * rename/add/delete:
+        on side of history that didn't rename the given file, remove the file
+	instead and place an unrelated file in the way of the rename
+      * rename/rename(2to1)/mode conflict/delete/delete:
+        two different files, one executable and the other not, are renamed
+        to the same location, each side deletes the source file that the
+        other side renames
+      * rename/rename(1to2)/add/add:
+        file renamed differently on each side of history, with each side
+        placing an unrelated file in the way of the other
+      * rename/rename(1to2)/content conflict/file location/(D/F)/(D/F)/:
+        both sides modify a file in conflicting way, both rename that file
+        but to different paths, one side renames the directory which the
+        other side had renamed that file into causing it to possibly need a
+        transitive rename, and each side puts a directory in the way of the
+        other's path.
 * API
   * parents listed as "side1" and "side2"; "side1" does not have to be HEAD
   * merge base(s) listed BEFORE sides (related to heavy use of indices and
