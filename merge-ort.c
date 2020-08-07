@@ -1661,7 +1661,7 @@ static int process_renames(struct merge_options *opt,
 		struct conflict_info *oldinfo, *newinfo;
 		unsigned int old_sidemask;
 		int target_index, other_source_index;
-		int source_deleted, collision;
+		int source_deleted, collision, type_changed;
 		const char *rename_branch, *delete_branch;
 
 		oldpath = pair->one->path;
@@ -1788,6 +1788,36 @@ static int process_renames(struct merge_options *opt,
 		old_sidemask = (1 << other_source_index); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
+		type_changed = !source_deleted &&
+			(S_ISREG(oldinfo->stages[other_source_index].mode) !=
+			 S_ISREG(newinfo->stages[target_index].mode));
+		if (type_changed) {
+			/*
+			 * if type_changed && collision are both true, then this
+			 * was really a double rename, but one side wasn't
+			 * detected due to lack of break detection.  I.e.
+			 * something like
+			 *    orig: has normal file 'foo'
+			 *    side1: renames 'foo' to 'bar', adds 'foo' symlink
+			 *    side2: renames 'foo' to 'bar'
+			 * In this case, the foo->bar rename on side1 won't be
+			 * detected because the new symlink named 'foo' is
+			 * there and we don't do break detection.  But we detect
+			 * this here because we don't want to merge the content
+			 * of the foo symlink with the foo->bar file, so we
+			 * have some logic to handle this special case.  The
+			 * easiest way to do that is make 'bar' on side1 not
+			 * be considered a colliding file but the other part
+			 * of a normal rename.  If the file is very different,
+			 * well we're going to get content merge conflicts
+			 * anyway so it doesn't hurt.  And if the colliding
+			 * file also has a different type, that'll be handled
+			 * by the content merge logic in process_entry() too.
+			 *
+			 * See also t3030, 'rename vs. rename/symlink'
+			 */
+			collision = 0;
+		}
 		if (source_deleted) {
 			if (target_index == 1) {
 				rename_branch = opt->branch1;
@@ -1809,9 +1839,11 @@ static int process_renames(struct merge_options *opt,
 #endif
 		assert(source_deleted || oldinfo->filemask & old_sidemask);
 
-		/* In all cases, mark the original as resolved by removal */
-		oldinfo->merged.is_null = 1;
-		oldinfo->merged.clean = 1;
+		if (!type_changed) {
+			/* Mark the original as resolved by removal */
+			oldinfo->merged.is_null = 1;
+			oldinfo->merged.clean = 1;
+		}
 
 		/* Need to check for special types of rename conflicts... */
 		if (collision && !source_deleted) {
@@ -1889,7 +1921,13 @@ static int process_renames(struct merge_options *opt,
 			       sizeof(newinfo->stages[0]));
 			newinfo->filemask |= (1 << 0);
 			newinfo->pathnames[0] = oldpath;
-			if (source_deleted) {
+			if (type_changed) {
+				/* Mark the original as resolved by removal */
+				memcpy(&oldinfo->stages[0].oid, &null_oid,
+				       sizeof(oldinfo->stages[0].oid));
+				oldinfo->stages[0].mode = 0;
+				oldinfo->filemask &= 0x06;
+			} else if (source_deleted) {
 				newinfo->path_conflict = 1;
 				path_msg(opt, newpath, 0,
 					 _("CONFLICT (rename/delete): %s renamed"
