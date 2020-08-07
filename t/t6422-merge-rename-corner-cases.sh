@@ -876,7 +876,7 @@ test_setup_rad () {
 	)
 }
 
-test_expect_failure 'rad-check: rename/add/delete conflict' '
+test_expect_success 'rad-check: rename/add/delete conflict' '
 	test_setup_rad &&
 	(
 		cd rad &&
@@ -949,7 +949,7 @@ test_setup_rrdd () {
 	)
 }
 
-test_expect_failure 'rrdd-check: rename/rename(2to1)/delete/delete conflict' '
+test_expect_success 'rrdd-check: rename/rename(2to1)/delete/delete conflict' '
 	test_setup_rrdd &&
 	(
 		cd rrdd &&

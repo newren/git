@@ -1662,6 +1662,7 @@ static int process_renames(struct merge_options *opt,
 		unsigned int old_sidemask;
 		int target_index, other_source_index;
 		int source_deleted, collision;
+		const char *rename_branch, *delete_branch;
 
 		oldpath = pair->one->path;
 		newpath = pair->two->path;
@@ -1787,6 +1788,16 @@ static int process_renames(struct merge_options *opt,
 		old_sidemask = (1 << other_source_index); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
+		if (source_deleted) {
+			if (target_index == 1) {
+				rename_branch = opt->branch1;
+				delete_branch = opt->branch2;
+			} else {
+				rename_branch = opt->branch2;
+				delete_branch = opt->branch1;
+			}
+		}
+
 #ifdef VERBOSE_DEBUG
 		printf("collision: %d, source_deleted: %d\n",
 		       collision, source_deleted);
@@ -1858,8 +1869,11 @@ static int process_renames(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 			printf("--> Rename/add/delete; not touching.\n");
 #endif
-			/* FIXME: Would be nicer to look like rename/add than
-			   add/add. */
+			newinfo->path_conflict = 1;
+			path_msg(opt, newpath, 0,
+				 _("CONFLICT (rename/delete): %s renamed "
+				   "to %s on %s, but deleted in %s."),
+				 oldpath, newpath, rename_branch, delete_branch);
 		} else {
 			/*
 			 * normal rename or rename/delete; copy the existing
@@ -1875,7 +1889,14 @@ static int process_renames(struct merge_options *opt,
 			       sizeof(newinfo->stages[0]));
 			newinfo->filemask |= (1 << 0);
 			newinfo->pathnames[0] = oldpath;
-			if (!source_deleted) {
+			if (source_deleted) {
+				newinfo->path_conflict = 1;
+				path_msg(opt, newpath, 0,
+					 _("CONFLICT (rename/delete): %s renamed"
+					   " to %s on %s, but deleted in %s."),
+					 oldpath, newpath,
+					 rename_branch, delete_branch);
+			} else {
 #ifdef VERBOSE_DEBUG
 				printf("      Copied stage %d from old to new\n",
 				       other_source_index);
@@ -3612,13 +3633,12 @@ static void process_entry(struct merge_options *opt,
 				   path)) {
 			ci->merged.is_null = 1;
 			ci->merged.clean = 1;
-		} else if (ci->pathnames[0] != ci->pathnames[side]) {
-			path_msg(opt, path, 0,
-				 _("CONFLICT (rename/delete): %s renamed (to "
-				   "%s) on %s, but deleted in %s.  Version "
-				   "from %s left in tree."),
-				 ci->pathnames[0], path, modify_branch,
-				 delete_branch, modify_branch);
+		} else if (ci->path_conflict &&
+			   oideq(&ci->stages[0].oid, &ci->stages[side].oid)) {
+			/*
+			 * This came from a rename/delete; no action to take,
+			 * but avoid printing "modify/delete" conflict notice.
+			 */
 		} else {
 			path_msg(opt, path, 0,
 				 _("CONFLICT (modify/delete): %s deleted in %s "
