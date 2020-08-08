@@ -1038,7 +1038,7 @@ test_setup_mod6 () {
 	)
 }
 
-test_expect_failure 'mod6-check: chains of rename/rename(1to2) and rename/rename(2to1)' '
+test_expect_success 'mod6-check: chains of rename/rename(1to2) and rename/rename(2to1)' '
 	test_setup_mod6 &&
 	(
 		cd mod6 &&

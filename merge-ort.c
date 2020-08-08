@@ -1685,6 +1685,7 @@ static int process_renames(struct merge_options *opt,
 			const char *pathnames[3];
 			struct version_info merged;
 			struct conflict_info *base, *side1, *side2;
+			unsigned was_binary_blob = 0;
 
 			pathnames[0] = oldpath;
 			pathnames[1] = newpath;
@@ -1738,10 +1739,13 @@ static int process_renames(struct merge_options *opt,
 							   1 + 2 * opt->priv->call_depth,
 							   &merged);
 			/* FIXME: path_msg() depending on results? */
-			memcpy(&side1->stages[1], &merged, sizeof(merged));
 			if (!clean_merge &&
 			    merged.mode == side1->stages[1].mode &&
 			    oideq(&merged.oid, &side1->stages[1].oid)) {
+				was_binary_blob = 1;
+			}
+			memcpy(&side1->stages[1], &merged, sizeof(merged));
+			if (was_binary_blob) {
 				/*
 				 * Getting here means we were attempting to
 				 * merge a binary blob.
