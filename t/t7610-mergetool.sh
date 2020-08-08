@@ -532,7 +532,9 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool file1 file2 spaced\ name subdir/file3 &&
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
-	yes "l" | git mergetool submod &&
+	yes "c" | git mergetool submod~HEAD &&
+	git rm submod &&
+	git mv submod~HEAD submod &&
 	git submodule update -N &&
 	echo "not a submodule" >expect &&
 	test_cmp expect submod &&
@@ -549,7 +551,11 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool file1 file2 spaced\ name subdir/file3 &&
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
-	yes "r" | git mergetool submod &&
+	mv submod submod.orig &&
+	git rm --cached submod &&
+	#yes "r" | git mergetool submod &&
+	yes "c" | git mergetool submod~test19 &&
+	git mv submod~test19 submod &&
 	test -d submod.orig &&
 	git submodule update -N &&
 	echo "not a submodule" >expect &&
@@ -567,6 +573,7 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
 	yes "l" | git mergetool submod &&
+	yes "d" | git mergetool submod~test19 &&
 	echo "master submodule" >expect &&
 	test_cmp expect submod/bar &&
 	git submodule update -N &&

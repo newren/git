@@ -1384,7 +1384,7 @@ test_expect_success 'setup conflicting entry types (submodule vs symlink)' '
 	)
 '
 
-test_expect_failure 'check conflicting entry types (submodule vs symlink)' '
+test_expect_success 'check conflicting entry types (submodule vs symlink)' '
 	(
 		cd submodule-symlink-add-add &&
 
