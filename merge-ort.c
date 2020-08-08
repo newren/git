@@ -1519,134 +1519,112 @@ static int handle_content_merge(struct merge_options *opt,
 	 */
 	unsigned clean = 1;
 
+	/*
+	 * handle_content_merge() needs both files to be of the same type, i.e.
+	 * both files OR both submodules OR both symlinks.  Conflicting types
+	 * needs to be handled elsewhere.
+	 */
 	assert((S_IFMT & a->mode) == (S_IFMT & b->mode));
-	if ((S_IFMT & a->mode) != (S_IFMT & b->mode)) {
-		/* Not both files, not both submodules, not both symlinks */
-		/*
-		 * FIXME: this is a retarded resolution; it'd be better to
-		 * rename paths elsewhere.
-		 */
-		clean = 0;
-		if (S_ISGITLINK(a->mode)) {
-			result->mode = a->mode;
-			oidcpy(&result->oid, &a->oid);
-		} else if (S_ISGITLINK(b->mode)) {
-			result->mode = b->mode;
-			oidcpy(&result->oid, &b->oid);
-		} else if (S_ISREG(a->mode)) {
-			result->mode = a->mode;
-			oidcpy(&result->oid, &a->oid);
-		} else {
-			result->mode = b->mode;
-			oidcpy(&result->oid, &b->oid);
-		}
-	} else {
-		/*
-		 * Getting here means a & b are both files OR both submodules OR
-		 * both symlinks; a and b do not differ in type.
-		 */
 
-		/* Merge modes */
-		if (a->mode == b->mode || a->mode == o->mode)
-			result->mode = b->mode;
-		else {
-			/* must be the 100644/100755 case */
-			assert(S_ISREG(a->mode));
-			result->mode = a->mode;
-			clean = (b->mode == o->mode);
-			/*
-			 * FIXME: If opt->priv->call_depth && !clean, then we
-			 * really should not make result->mode match either
-			 * a->mode or b->mode; that causes t6036 "check
-			 * conflicting mode for regular file" to fail.  It
-			 * would be best to use some other mode, but we'll
-			 * confuse all kinds of stuff if we use one where
-			 * S_ISREG(result->mode) isn't true, and if we use
-			 * something like 0100666, then tree-walk.c's calls
-			 * to canon_mode() will just normalize that to 100644
-			 * for us and thus not solve anything.
-			 *
-			 * Not sure if there's anything we can do...
-			 */
-		}
-
+	/* Merge modes */
+	if (a->mode == b->mode || a->mode == o->mode)
+		result->mode = b->mode;
+	else {
+		/* must be the 100644/100755 case */
+		assert(S_ISREG(a->mode));
+		result->mode = a->mode;
+		clean = (b->mode == o->mode);
 		/*
-		 * Trivial oid merge.
+		 * FIXME: If opt->priv->call_depth && !clean, then we really
+		 * should not make result->mode match either a->mode or
+		 * b->mode; that causes t6036 "check conflicting mode for
+		 * regular file" to fail.  It would be best to use some other
+		 * mode, but we'll confuse all kinds of stuff if we use one
+		 * where S_ISREG(result->mode) isn't true, and if we use
+		 * something like 0100666, then tree-walk.c's calls to
+		 * canon_mode() will just normalize that to 100644 for us and
+		 * thus not solve anything.
 		 *
-		 * Note: While one might assume that the next four lines would
-		 * be unnecessary due to the fact that match_mask is often
-		 * setup and already handled, renames don't always take care
-		 * of that.
+		 * Not sure if there's anything we can do...
 		 */
-		if (oideq(&a->oid, &b->oid) || oideq(&a->oid, &o->oid))
-			oidcpy(&result->oid, &b->oid);
-		else if (oideq(&b->oid, &o->oid))
-			oidcpy(&result->oid, &a->oid);
-
-		/* Remaining rules depend on file vs. submodule vs. symlink. */
-		else if (S_ISREG(a->mode)) {
-			mmbuffer_t result_buf;
-			int ret = 0, merge_status;
-			int two_way;
-
-			/*
-			 * If 'o' is different type, treat it as null so we
-			 * do a two-way merge.
-			 */
-			two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
-
-			merge_status = merge_3way(opt, path,
-						  two_way ? &null_oid : &o->oid,
-						  &a->oid, &b->oid,
-						  pathnames, extra_marker_size,
-						  &result_buf);
-
-			if ((merge_status < 0) || !result_buf.ptr)
-				ret = err(opt, _("Failed to execute internal merge"));
-
-			if (!ret &&
-			    write_object_file(result_buf.ptr, result_buf.size,
-					      blob_type, &result->oid))
-				ret = err(opt, _("Unable to add %s to database"),
-					  path);
-
-			free(result_buf.ptr);
-			if (ret)
-				return -1;
-			clean &= (merge_status == 0);
-			path_msg(opt, path, 1, _("Auto-merging %s"), path);
-		} else if (S_ISGITLINK(a->mode)) {
-			int two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
-			clean = merge_submodule(opt, pathnames[0],
-						two_way ? &null_oid : &o->oid,
-						&a->oid, &b->oid, &result->oid);
-			if (opt->priv->call_depth && two_way && !clean) {
-				result->mode = o->mode;
-				oidcpy(&result->oid, &o->oid);
-			}
-		} else if (S_ISLNK(a->mode)) {
-			if (opt->priv->call_depth) {
-				clean = 0;
-				result->mode = o->mode;
-				oidcpy(&result->oid, &o->oid);
-			} else {
-				switch (opt->recursive_variant) {
-				case MERGE_VARIANT_NORMAL:
-					clean = 0;
-					oidcpy(&result->oid, &a->oid);
-					break;
-				case MERGE_VARIANT_OURS:
-					oidcpy(&result->oid, &a->oid);
-					break;
-				case MERGE_VARIANT_THEIRS:
-					oidcpy(&result->oid, &b->oid);
-					break;
-				}
-			}
-		} else
-			BUG("unsupported object type in the tree: %06o for %s",
-			    a->mode, path);
 	}
+
+	/*
+	 * Trivial oid merge.
+	 *
+	 * Note: While one might assume that the next four lines would
+	 * be unnecessary due to the fact that match_mask is often
+	 * setup and already handled, renames don't always take care
+	 * of that.
+	 */
+	if (oideq(&a->oid, &b->oid) || oideq(&a->oid, &o->oid))
+		oidcpy(&result->oid, &b->oid);
+	else if (oideq(&b->oid, &o->oid))
+		oidcpy(&result->oid, &a->oid);
+
+	/* Remaining rules depend on file vs. submodule vs. symlink. */
+	else if (S_ISREG(a->mode)) {
+		mmbuffer_t result_buf;
+		int ret = 0, merge_status;
+		int two_way;
+
+		/*
+		 * If 'o' is different type, treat it as null so we do a
+		 * two-way merge.
+		 */
+		two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
+
+		merge_status = merge_3way(opt, path,
+					  two_way ? &null_oid : &o->oid,
+					  &a->oid, &b->oid,
+					  pathnames, extra_marker_size,
+					  &result_buf);
+
+		if ((merge_status < 0) || !result_buf.ptr)
+			ret = err(opt, _("Failed to execute internal merge"));
+
+		if (!ret &&
+		    write_object_file(result_buf.ptr, result_buf.size,
+				      blob_type, &result->oid))
+			ret = err(opt, _("Unable to add %s to database"),
+				  path);
+
+		free(result_buf.ptr);
+		if (ret)
+			return -1;
+		clean &= (merge_status == 0);
+		path_msg(opt, path, 1, _("Auto-merging %s"), path);
+	} else if (S_ISGITLINK(a->mode)) {
+		int two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
+		clean = merge_submodule(opt, pathnames[0],
+					two_way ? &null_oid : &o->oid,
+					&a->oid, &b->oid, &result->oid);
+		if (opt->priv->call_depth && two_way && !clean) {
+			result->mode = o->mode;
+			oidcpy(&result->oid, &o->oid);
+		}
+	} else if (S_ISLNK(a->mode)) {
+		if (opt->priv->call_depth) {
+			clean = 0;
+			result->mode = o->mode;
+			oidcpy(&result->oid, &o->oid);
+		} else {
+			switch (opt->recursive_variant) {
+			case MERGE_VARIANT_NORMAL:
+				clean = 0;
+				oidcpy(&result->oid, &a->oid);
+				break;
+			case MERGE_VARIANT_OURS:
+				oidcpy(&result->oid, &a->oid);
+				break;
+			case MERGE_VARIANT_THEIRS:
+				oidcpy(&result->oid, &b->oid);
+				break;
+			}
+		}
+	} else
+		BUG("unsupported object type in the tree: %06o for %s",
+		    a->mode, path);
 
 	return clean;
 }
