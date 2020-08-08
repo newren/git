@@ -1662,7 +1662,7 @@ static int process_renames(struct merge_options *opt,
 		unsigned int old_sidemask;
 		int target_index, other_source_index;
 		int source_deleted, collision, type_changed;
-		const char *rename_branch, *delete_branch;
+		const char *rename_branch = NULL, *delete_branch = NULL;
 
 		oldpath = pair->one->path;
 		newpath = pair->two->path;
