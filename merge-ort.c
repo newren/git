@@ -2676,12 +2676,12 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		parent_name = cur_dir;
 	}
 
+#if !USE_MEMORY_POOL
 	/*
-	 * Remove old_path from opt->priv->paths.  old_path also will
+	 * We are removing old_path from opt->priv->paths.  old_path also will
 	 * eventually need to be freed, but it may still be used by e.g.
 	 * ci->pathnames.  So, store it in another string-list for now.
 	 */
-#if !USE_MEMORY_POOL
 	string_list_append(&opt->priv->paths_to_free, old_path);
 #endif
 #ifdef VERBOSE_DEBUG
