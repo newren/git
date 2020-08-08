@@ -1654,49 +1654,6 @@ static int process_renames(struct merge_options *opt,
 			   struct diff_queue_struct *renames)
 {
 	int clean_merge = 1, i;
-	int num_rename_rename = 0;
-
-	/* Sort rename/rename(1to*) first, keep track of how many there are */
-	for (i = 0; i < renames->nr; ++i) {
-		if (i+1 < renames->nr &&
-		    !strcmp(renames->queue[i]->one->path,
-			    renames->queue[i+1]->one->path)) {
-			struct diff_filepair temp[2];
-			if (i > num_rename_rename + 1) {
-				memcpy(temp,
-				       renames->queue[num_rename_rename],
-				       sizeof(temp));
-				memcpy(renames->queue[num_rename_rename],
-				       renames->queue[i],
-				       sizeof(temp));
-				memcpy(renames->queue[i],
-				       temp,
-				       sizeof(temp));
-			} else if (i > num_rename_rename) {
-				/*
-				 * Only one value before to move after. Also,
-				 * can't use memcpy to copy both i & i+1 back
-				 * at once since i+1 will overwrite i.  Could
-				 * use memmove, but I just use two memcpy calls.
-				 */
-				memcpy(temp,
-				       renames->queue[num_rename_rename],
-				       sizeof(struct diff_filepair));
-				memcpy(renames->queue[num_rename_rename],
-				       renames->queue[i],
-				       sizeof(struct diff_filepair));
-				memcpy(renames->queue[num_rename_rename+1],
-				       renames->queue[i+1],
-				       sizeof(struct diff_filepair));
-				memcpy(renames->queue[i],
-				       temp,
-				       sizeof(struct diff_filepair));
-			}
-			num_rename_rename += 2;
-			i += 1; /* i will be incremented again by loop */
-		}
-	}
-	/* Then in remaining loop below, the second if-check is simpler */
 
 	for (i = 0; i < renames->nr; ++i) {
 		const char *oldpath, *newpath;
@@ -1722,7 +1679,8 @@ static int process_renames(struct merge_options *opt,
 		if (!oldinfo || oldinfo->merged.clean)
 			continue;
 
-		if (i < num_rename_rename) {
+		if (i+1 < renames->nr &&
+		    !strcmp(oldpath, renames->queue[i+1]->one->path)) {
 			/* Handle rename/rename(1to2) or rename/rename(1to1) */
 			const char *pathnames[3];
 			struct version_info merged;
