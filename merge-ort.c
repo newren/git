@@ -1913,7 +1913,7 @@ static int process_renames(struct merge_options *opt,
 			newinfo->path_conflict = 1;
 			path_msg(opt, newpath, 0,
 				 _("CONFLICT (rename/delete): %s renamed "
-				   "to %s on %s, but deleted in %s."),
+				   "to %s in %s, but deleted in %s."),
 				 oldpath, newpath, rename_branch, delete_branch);
 		} else {
 			/*
@@ -1940,7 +1940,7 @@ static int process_renames(struct merge_options *opt,
 				newinfo->path_conflict = 1;
 				path_msg(opt, newpath, 0,
 					 _("CONFLICT (rename/delete): %s renamed"
-					   " to %s on %s, but deleted in %s."),
+					   " to %s in %s, but deleted in %s."),
 					 oldpath, newpath,
 					 rename_branch, delete_branch);
 			} else {
