@@ -1709,7 +1709,6 @@ static int process_renames(struct merge_options *opt,
 			}
 
 			/* This is a rename/rename(1to2) */
-			/* FIXME: handle return value of handle_content_merge */
 #ifdef VERBOSE_DEBUG
 			printf("--> Rename/rename(1to2):\n");
 			printf("      Paths: %s, %s, %s\n",
@@ -1738,7 +1737,6 @@ static int process_renames(struct merge_options *opt,
 							   pathnames,
 							   1 + 2 * opt->priv->call_depth,
 							   &merged);
-			/* FIXME: path_msg() depending on results? */
 			if (!clean_merge &&
 			    merged.mode == side1->stages[1].mode &&
 			    oideq(&merged.oid, &side1->stages[1].oid)) {
@@ -1763,12 +1761,20 @@ static int process_renames(struct merge_options *opt,
 			}
 			memcpy(&side2->stages[2], &merged, sizeof(merged));
 
-			/* FIXME: Mark side1 & side2 as conflicted */
 			side1->path_conflict = 1;
 			side2->path_conflict = 1;
-			/* FIXME: Need to report conflict to output somehow */
-			//base->merged.is_null = 1;
-			//base->merged.clean = 1;
+			/*
+			 * TODO: For renames we normally remove the path at the
+			 * old name.  It would thus seem consistent to do the
+			 * same for rename/rename(1to2) cases, but we haven't
+			 * done so traditionally and a number of the regression
+			 * tests now encode an expectation that the file is
+			 * left there at stage 1.  If we ever decide to change
+			 * this, add the following two lines here:
+			 *    base->merged.is_null = 1;
+			 *    base->merged.clean = 1;
+			 * and remove the setting of base->path_conflict to 1.
+			 */
 			base->path_conflict = 1;
 			path_msg(opt, oldpath, 0,
 				 _("CONFLICT (rename/rename): %s renamed to "
@@ -1777,7 +1783,6 @@ static int process_renames(struct merge_options *opt,
 				 pathnames[1], opt->branch1,
 				 pathnames[2], opt->branch2);
 
-			/* FIXME: Do un-rename in recursive case */
 			i++; /* We handled both renames, i.e. i+1 handled */
 			continue;
 		}
