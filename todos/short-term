@@ -64,6 +64,7 @@ Cleanup stuff:
     * write output to console, to MERGE_OUT, both, or neither
     * update index and working directory, or index only.
       (working directory only makes no sense; at least need an in-memory index)
+  * Why does conflict_info need a processed flag?  (merge-recursive holdover?)
 
 Output stuff:
   * Am I missing cases where I need to add conflict messages?
@@ -87,16 +88,16 @@ Output stuff:
     X write output to merge_result (in field named output, of course)
     X don't need the flush_output() thing
     X use strmap; path -> strbuf, for each path that has a message.
+  X Look for test_expect_failure in merge tests of testsuite; fix some
+  X Default to histogram diff
   * Path conflict files
   * Check the "Stuff to not forget"
   / Make sure the API is clean/clear
     * make merge-ort have its own options, maybe merge_inmemory_options?
     * make repo part of merge_options_internal?
-  * Cleanup of FIXMEs
-  * Look for test_expect_failure in merge tests of testsuite; fix some
+  / Cleanup of FIXMEs
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
-  X Default to histogram diff
   * Features like --remerge-diff
   * Diff3 improvements
 
