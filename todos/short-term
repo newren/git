@@ -13,30 +13,6 @@
     * May need to modify how cached_pairs work (e.g. cached-as-delete-IF: the
       file on the other side remains unmodified)
 
-Feature work:
-  * git show --remerge-diff[=<pick-commit>] ?  But if multiple commits to show,
-    then this doesn't work so well.
-
-* Demo-able stuff
-  * Headline
-    * "Fearless refactoring" (fast rename detection)
-    * "Sparsify & partial clones -- going even further"
-  * Behind the scenes
-    * Perf
-      * pgdev cherry-pick case
-      * linux rebase case
-      * partial clones improvements, in conjunction with sparse checkouts
-    * Correctness
-      * avoid false positive/false negative early abort
-      * sparse-checkout improvement (avoid unnecessarily dirtying worktree, both
-        due to SKIP_WORKTREE stuff, and due to rebase)
-      * submodules
-      * special cases -- D/F conflicts, etc.
-  * new features coming:
-    * cherry-pick to a branch which isn't checked out
-    * local diff against automerge ('git diff --merge'?)
-    * discovery of "evil" merges/cherry-picks/reverts
-
 *** Stuff to investigate:
   * If D/F conflict starts but match_mask on dir, does trivial resolve work?
     Even if the file was renamed into place and has content conflicts?
@@ -51,6 +27,10 @@ Cleanup stuff:
   * Attr stuff:
     * pre-merge .gitattributes (assuming no attribute related info), then use
       result in merging other files
+  * Output
+    * Move diff_warn_rename_limit to join the code doing output of messages
+    * print informational message about merge.directoryRenames at same time
+    * Make path_msg assert that the path given exists in opt->priv->paths
   * Make merge/ directory
     * output-handling??
     * collect-merge-info
@@ -67,8 +47,6 @@ Cleanup stuff:
   * Why does conflict_info need a processed flag?  (merge-recursive holdover?)
 
 Output stuff:
-  * Am I missing cases where I need to add conflict messages?
-  * test coverage (e.g. rename/rename 2->1 and nested content conflicts)
   * GIT_MERGE_VERBOSITY replacement with pipe-separated strings.
     GIT_MERGE_DEBUG? (also, change strings into bitfield upfront, so checks
     can be super cheap).  Then nuke VERBOSE_DEBUG.
@@ -98,6 +76,7 @@ Output stuff:
   / Cleanup of FIXMEs
   * Double check data structures; is anything unnecessary or needing a rename?
   * Correctness testing against lotsa repos
+  * Code coverage & valgrind testing
   * Features like --remerge-diff
   * Diff3 improvements
 
@@ -140,3 +119,27 @@ Path_conflict files:
     * 2 stages each side: rename/add
     * (Note that add can be replaced by rename(2to1), just as rename(1to2) can
        replace a delete)
+
+Feature work:
+  * git show --remerge-diff[=<pick-commit>] ?  But if multiple commits to show,
+    then this doesn't work so well.
+
+* Demo-able stuff
+  * Headline
+    * "Fearless refactoring" (fast rename detection)
+    * "Sparsify & partial clones -- going even further"
+  * Behind the scenes
+    * Perf
+      * pgdev cherry-pick case
+      * linux rebase case
+      * partial clones improvements, in conjunction with sparse checkouts
+    * Correctness
+      * avoid false positive/false negative early abort
+      * sparse-checkout improvement (avoid unnecessarily dirtying worktree, both
+        due to SKIP_WORKTREE stuff, and due to rebase)
+      * submodules
+      * special cases -- D/F conflicts, etc.
+  * new features coming:
+    * cherry-pick to a branch which isn't checked out
+    * local diff against automerge ('git diff --merge'?)
+    * discovery of "evil" merges/cherry-picks/reverts
