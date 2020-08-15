@@ -173,6 +173,8 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 		last_commit = create_commit(result.tree, commit, last_commit);
 	}
 	fprintf(stderr, "\nDone.\n");
+	rev_info_free(&revs);
+	memset(&revs, 0, sizeof(revs));
 
 	merge_switch_to_result(&merge_opt, head_tree, &result, 1, !result.clean);
 

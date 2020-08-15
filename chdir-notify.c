@@ -91,3 +91,18 @@ char *reparent_relative_path(const char *old_cwd,
 
 	return ret;
 }
+
+void chdir_deregister_all(void)
+{
+	struct list_head *pos, *tmp;
+
+	if (list_empty(&chdir_notify_entries))
+		return;
+
+	list_for_each_safe(pos, tmp, &chdir_notify_entries) {
+		struct chdir_notify_entry *e =
+			list_entry(pos, struct chdir_notify_entry, list);
+		free(e);
+	}
+	memset(&chdir_notify_entries, 0, sizeof(chdir_notify_entries));
+}

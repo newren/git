@@ -1411,6 +1411,11 @@ void sanitize_stdfds(void)
 		close(fd);
 }
 
+void finalize_globals(void)
+{
+	chdir_deregister_all();
+}
+
 int daemonize(void)
 {
 #ifdef NO_POSIX_GOODIES

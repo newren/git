@@ -70,4 +70,9 @@ char *reparent_relative_path(const char *old_cwd,
 			     const char *new_cwd,
 			     const char *path);
 
+/*
+ * Deregister all subscribers and free any associated memory.
+ */
+void chdir_deregister_all(void);
+
 #endif /* CHDIR_NOTIFY_H */

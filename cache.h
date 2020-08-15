@@ -604,6 +604,9 @@ const char *setup_git_directory(void);
 char *prefix_path(const char *prefix, int len, const char *path);
 char *prefix_path_gently(const char *prefix, int len, int *remaining, const char *path);
 
+/* Release resources related to global config. */
+void finalize_globals(void);
+
 /*
  * Concatenate "prefix" (if len is non-zero) and "path", with no
  * connecting characters (so "prefix" should end with a "/").

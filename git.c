@@ -358,6 +358,7 @@ static int handle_alias(int *argcp, const char ***argv)
 			trace2_cmd_name("_run_shell_alias_");
 
 			ret = run_command(&child);
+			finalize_globals();
 			if (ret >= 0)   /* normal exit */
 				exit(ret);
 
@@ -697,8 +698,11 @@ static void handle_builtin(int argc, const char **argv)
 	}
 
 	builtin = get_builtin(cmd);
-	if (builtin)
-		exit(run_builtin(builtin, argc, argv));
+	if (builtin) {
+		int result = run_builtin(builtin, argc, argv);
+		finalize_globals();
+		exit(result);
+	}
 	strvec_clear(&args);
 }
 
@@ -742,6 +746,7 @@ static void execv_dashed_external(const char **argv)
 	 * generic string as our trace2 command verb to indicate that we
 	 * launched a dashed command.
 	 */
+	finalize_globals();
 	if (status >= 0)
 		exit(status);
 	else if (errno != ENOENT)
@@ -796,6 +801,7 @@ static int run_argv(int *argcp, const char ***argv)
 			 */
 			i = run_command_v_opt_tr2(args.v, RUN_SILENT_EXEC_FAILURE |
 						  RUN_CLEAN_ON_EXIT | RUN_WAIT_AFTER_CLEAN, "git_alias");
+			finalize_globals();
 			if (i >= 0 || errno != ENOENT)
 				exit(i);
 			die("could not execute builtin %s", **argv);

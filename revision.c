@@ -1419,6 +1419,8 @@ static int limit_list(struct rev_info *revs)
 			slop = still_interesting(list, date, slop, &interesting_cache);
 			if (slop)
 				continue;
+			free_commit_list(list);
+			revs->commits = NULL;
 			break;
 		}
 		if (revs->min_age != -1 && (commit->date > revs->min_age) &&
@@ -3279,6 +3281,15 @@ static void set_children(struct rev_info *revs)
 		for (p = commit->parents; p; p = p->next)
 			add_child(revs, p->item, commit);
 	}
+}
+
+void rev_info_free(struct rev_info *revs)
+{
+	int i;
+
+	for (i = 0; i < revs->cmdline.nr; i++)
+		free((char*)revs->cmdline.rev[i].name);
+	free(revs->cmdline.rev);
 }
 
 void reset_revision_walk(void)
