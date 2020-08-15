@@ -3931,13 +3931,7 @@ static int checkout(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 	printf("after clear_unpack_trees_porcelain()\n");
 #endif
-	/*
-	 * FIXME: Why in the world doesn't clear_directory() free entries and
-	 * ignored?  That seems so stupid...
-	 */
-	free(unpack_opts.dir->entries);
-	free(unpack_opts.dir->ignored);
-	clear_directory(unpack_opts.dir);
+	dir_clear(unpack_opts.dir);
 	FREE_AND_NULL(unpack_opts.dir);
 	return ret;
 }
