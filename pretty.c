@@ -1690,6 +1690,7 @@ void repo_format_commit_message(struct repository *r,
 		char *out = reencode_string_len(sb->buf, sb->len,
 						output_enc, utf8, &outsz);
 		if (out)
+			/* FIXME: strbuf_release(sb); maybe? */
 			strbuf_attach(sb, out, outsz, outsz + 1);
 	}
 

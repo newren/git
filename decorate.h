@@ -58,4 +58,7 @@ void *add_decoration(struct decoration *n, const struct object *obj, void *decor
  */
 void *lookup_decoration(struct decoration *n, const struct object *obj);
 
+/* Clear allocated memory and zero all fields */
+void clear_decorations(struct decoration *n, int free_decorations);
+
 #endif

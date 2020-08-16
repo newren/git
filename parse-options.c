@@ -627,6 +627,7 @@ static int show_gitcomp(const struct option *opts, int show_all)
  * OPTION_ALIAS.
  */
 static struct option *preprocess_options(struct parse_opt_ctx_t *ctx,
+					 struct string_list *help_strings,
 					 const struct option *options)
 {
 	struct option *newopt;
@@ -678,6 +679,7 @@ static struct option *preprocess_options(struct parse_opt_ctx_t *ctx,
 			newopt[i].short_name = short_name;
 			newopt[i].long_name = long_name;
 			newopt[i].help = strbuf_detach(&help, NULL);
+			string_list_append(help_strings, newopt[i].help);
 			break;
 		}
 
@@ -839,12 +841,13 @@ int parse_options(int argc, const char **argv, const char *prefix,
 {
 	struct parse_opt_ctx_t ctx;
 	struct option *real_options;
+	struct string_list help_strings = STRING_LIST_INIT_NODUP;
 
 	disallow_abbreviated_options =
 		git_env_bool("GIT_TEST_DISALLOW_ABBREVIATED_OPTIONS", 0);
 
 	memset(&ctx, 0, sizeof(ctx));
-	real_options = preprocess_options(&ctx, options);
+	real_options = preprocess_options(&ctx, &help_strings, options);
 	if (real_options)
 		options = real_options;
 	parse_options_start_1(&ctx, argc, argv, prefix, options, flags);
@@ -870,6 +873,8 @@ int parse_options(int argc, const char **argv, const char *prefix,
 	}
 
 	precompose_argv(argc, argv);
+	help_strings.strdup_strings = 1;
+	string_list_clear(&help_strings, 0);
 	free(real_options);
 	free(ctx.alias_groups);
 	return parse_options_end(&ctx);

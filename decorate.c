@@ -81,3 +81,15 @@ void *lookup_decoration(struct decoration *n, const struct object *obj)
 			j = 0;
 	}
 }
+
+void clear_decorations(struct decoration *n, int free_decorations)
+{
+	if (free_decorations) {
+		int i;
+
+		for (i = 0; i < n->size; i++)
+			free(n->entries[i].decoration);
+	}
+	free(n->entries);
+	memset(n, 0, sizeof(*n));
+}

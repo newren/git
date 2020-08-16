@@ -689,6 +689,7 @@ int cmd_rev_list(int argc, const char **argv, const char *prefix)
 		else
 			printf("%d\n", revs.count_left + revs.count_right);
 	}
+	rev_info_free(&revs);
 
 	return 0;
 }
