@@ -51,7 +51,6 @@ static void free_complete_reflog(struct complete_reflogs *array)
 	}
 	free(array->items);
 	free(array->ref);
-	free((char*)array->short_ref);
 	free(array);
 }
 
@@ -111,25 +110,10 @@ struct reflog_walk_info {
 	struct commit_reflog *last_commit_reflog;
 };
 
-void reflog_walk_init(struct reflog_walk_info **info)
+void init_reflog_walk(struct reflog_walk_info **info)
 {
 	*info = xcalloc(1, sizeof(struct reflog_walk_info));
 	(*info)->complete_reflogs.strdup_strings = 1;
-}
-
-void reflog_walk_free(struct reflog_walk_info **info)
-{
-	int i;
-
-	for (i = 0; i < (*info)->nr; i++)
-		free((*info)->logs[i]);
-	free((*info)->logs);
-
-	for (i = 0; i < (*info)->complete_reflogs.nr; i++)
-		free_complete_reflog((*info)->complete_reflogs.items[i].util);
-	string_list_clear(&(*info)->complete_reflogs, 0);
-
-	FREE_AND_NULL(*info);
 }
 
 int add_reflog_for_walk(struct reflog_walk_info *info,

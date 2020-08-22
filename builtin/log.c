@@ -396,7 +396,6 @@ static int cmd_log_walk(struct rev_info *rev)
 	struct commit *commit;
 	int saved_nrl = 0;
 	int saved_dcctc = 0, close_file = rev->diffopt.close_file;
-	int ret;
 
 	if (rev->early_output)
 		setup_early_output();
@@ -442,27 +441,9 @@ static int cmd_log_walk(struct rev_info *rev)
 
 	if (rev->diffopt.output_format & DIFF_FORMAT_CHECKDIFF &&
 	    rev->diffopt.flags.check_failed) {
-		ret = 02;
+		return 02;
 	}
-	else
-		ret = diff_result_code(&rev->diffopt, 0);
-	return ret;
-}
-
-static void cleanup_rev(struct rev_info *rev)
-{
-	if (rev->mailmap) {
-		clear_mailmap(rev->mailmap);
-		FREE_AND_NULL(rev->mailmap);
-	}
-	rev_info_free(rev);
-}
-
-static int cmd_log_walk_and_cleanup(struct rev_info *rev)
-{
-	int ret = cmd_log_walk(rev);
-	cleanup_rev(rev);
-	return ret;
+	return diff_result_code(&rev->diffopt, 0);
 }
 
 static int git_log_config(const char *var, const char *value, void *cb)
@@ -532,7 +513,7 @@ int cmd_whatchanged(int argc, const char **argv, const char *prefix)
 	cmd_log_init(argc, argv, prefix, &rev, &opt);
 	if (!rev.diffopt.output_format)
 		rev.diffopt.output_format = DIFF_FORMAT_RAW;
-	return cmd_log_walk_and_cleanup(&rev);
+	return cmd_log_walk(&rev);
 }
 
 static void show_tagger(const char *buf, struct rev_info *rev)
@@ -654,7 +635,7 @@ int cmd_show(int argc, const char **argv, const char *prefix)
 	cmd_log_init(argc, argv, prefix, &rev, &opt);
 
 	if (!rev.no_walk)
-		return cmd_log_walk_and_cleanup(&rev);
+		return cmd_log_walk(&rev);
 
 	count = rev.pending.nr;
 	objects = rev.pending.objects;
@@ -709,7 +690,6 @@ int cmd_show(int argc, const char **argv, const char *prefix)
 			ret = error(_("unknown type: %d"), o->type);
 		}
 	}
-	cleanup_rev(&rev);
 	free(objects);
 	return ret;
 }
@@ -726,7 +706,7 @@ int cmd_log_reflog(int argc, const char **argv, const char *prefix)
 	git_config(git_log_config, NULL);
 
 	repo_init_revisions(the_repository, &rev, prefix);
-	reflog_walk_init(&rev.reflog_info);
+	init_reflog_walk(&rev.reflog_info);
 	rev.verbose_header = 1;
 	memset(&opt, 0, sizeof(opt));
 	opt.def = "HEAD";
@@ -737,7 +717,7 @@ int cmd_log_reflog(int argc, const char **argv, const char *prefix)
 	rev.always_show_header = 1;
 	cmd_log_init_finish(argc, argv, prefix, &rev, &opt);
 
-	return cmd_log_walk_and_cleanup(&rev);
+	return cmd_log_walk(&rev);
 }
 
 static void log_setup_revisions_tweak(struct rev_info *rev,
@@ -770,7 +750,7 @@ int cmd_log(int argc, const char **argv, const char *prefix)
 	opt.revarg_opt = REVARG_COMMITTISH;
 	opt.tweak = log_setup_revisions_tweak;
 	cmd_log_init(argc, argv, prefix, &rev, &opt);
-	return cmd_log_walk_and_cleanup(&rev);
+	return cmd_log_walk(&rev);
 }
 
 /* format-patch */

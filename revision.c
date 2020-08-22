@@ -973,7 +973,6 @@ static void try_to_simplify_commit(struct rev_info *revs, struct commit *commit)
 	for (pp = &commit->parents, nth_parent = 0, relevant_parents = 0;
 	     (parent = *pp) != NULL;
 	     pp = &parent->next, nth_parent++) {
-		struct commit_list *tmp;
 		struct commit *p = parent->item;
 		if (relevant_commit(p))
 			relevant_parents++;
@@ -1021,10 +1020,8 @@ static void try_to_simplify_commit(struct rev_info *revs, struct commit *commit)
 					ts->treesame[nth_parent] = 1;
 				continue;
 			}
-			tmp = NULL;
-			tmp = commit_list_insert(p, &tmp);
-			free_commit_list(commit->parents);
-			commit->parents = tmp;
+			parent->next = NULL;
+			commit->parents = parent;
 
 			/*
 			 * A merge commit is a "diversion" if it is not
@@ -1055,7 +1052,6 @@ static void try_to_simplify_commit(struct rev_info *revs, struct commit *commit)
 					die("cannot simplify commit %s (invalid %s)",
 					    oid_to_hex(&commit->object.oid),
 					    oid_to_hex(&p->object.oid));
-				free_commit_list(p->parents);
 				p->parents = NULL;
 			}
 		/* fallthrough */
@@ -2224,7 +2220,7 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 		revs->simplify_history = 0;
 		revs->limited = 1;
 	} else if (!strcmp(arg, "-g") || !strcmp(arg, "--walk-reflogs")) {
-		reflog_walk_init(&revs->reflog_info);
+		init_reflog_walk(&revs->reflog_info);
 	} else if (!strcmp(arg, "--default")) {
 		if (argc <= 1)
 			return error("bad --default argument");
@@ -3287,6 +3283,15 @@ static void set_children(struct rev_info *revs)
 	}
 }
 
+void rev_info_free(struct rev_info *revs)
+{
+	int i;
+
+	for (i = 0; i < revs->cmdline.nr; i++)
+		free((char*)revs->cmdline.rev[i].name);
+	free(revs->cmdline.rev);
+}
+
 void reset_revision_walk(void)
 {
 	clear_object_flags(SEEN | ADDED | SHOWN | TOPO_WALK_EXPLORED | TOPO_WALK_INDEGREE);
@@ -3892,17 +3897,10 @@ static void save_parents(struct rev_info *revs, struct commit *commit)
 		*pp = EMPTY_PARENT_LIST;
 }
 
-static void free_saved_parent_commit_list(struct commit_list **list_ptr)
-{
-	if (*list_ptr != EMPTY_PARENT_LIST)
-		free_commit_list(*list_ptr);
-}
-
 static void free_saved_parents(struct rev_info *revs)
 {
 	if (revs->saved_parents_slab)
-		deep_clear_saved_parents(revs->saved_parents_slab,
-					 free_saved_parent_commit_list);
+		clear_saved_parents(revs->saved_parents_slab);
 }
 
 struct commit_list *get_saved_parents(struct rev_info *revs, const struct commit *commit)
@@ -3936,45 +3934,6 @@ enum commit_action simplify_commit(struct rev_info *revs, struct commit *commit)
 			return commit_error;
 	}
 	return action;
-}
-
-void rev_info_free(struct rev_info *revs)
-{
-	int i;
-
-#if 0
-	if (revs->commits)
-		free_commit_list(revs->commits);
-#endif
-
-	object_array_clear(&revs->boundary_commits);
-
-	for (i = 0; i < revs->cmdline.nr; i++) {
-#if 0
-		/* This block causes double free for 'git fetch origin' */
-		struct object *obj = revs->cmdline.rev[i].item;
-		if (obj->type == OBJ_COMMIT)
-			free_commit_list(((struct commit *)obj)->parents);
-#endif
-		free((char*)revs->cmdline.rev[i].name);
-	}
-	free(revs->cmdline.rev);
-
-	clear_pathspec(&revs->prune_data);
-	clear_pathspec(&revs->pruning.pathspec);
-	if (revs->graph)
-		graph_free(revs->graph);
-	free(revs->graph);
-	clear_pathspec(&revs->diffopt.pathspec);
-
-	if (revs->reflog_info)
-		reflog_walk_free(&revs->reflog_info);
-
-	clear_decorations(&revs->children, 1);
-	clear_decorations(&revs->merge_simplification, 1);
-	clear_decorations(&revs->treesame, 1);
-	free_saved_parents(revs);
-	free(revs->saved_parents_slab);
 }
 
 static void track_linear(struct rev_info *revs, struct commit *commit)
