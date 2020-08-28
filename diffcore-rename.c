@@ -400,8 +400,8 @@ static int find_exact_renames(struct diff_options *options,
 struct rename_guess_info {
 	struct strintmap idx_map;
 	struct strmap dir_rename;
-	struct strmap *relevant_source_dirs;
-	struct strmap *relevant_target_dirs;
+	struct strset *relevant_source_dirs;
+	struct strset *relevant_target_dirs;
 	int initialized;
 };
 
@@ -429,9 +429,9 @@ static char *get_highest_rename_path(struct strintmap *counts) {
 }
 
 static void initialize_rename_guess_info(struct rename_guess_info *info,
-					 struct strmap *relevant_sources,
-					 struct strmap *relevant_targets,
-					 struct strmap *dirs_removed)
+					 struct strset *relevant_sources,
+					 struct strset *relevant_targets,
+					 struct strset *dirs_removed)
 {
 	struct strintmap *counts;
 	struct hashmap_iter iter;
@@ -445,11 +445,11 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	/* Setup info->relevant_target_dirs */
 	info->relevant_target_dirs = NULL;
 	if (relevant_targets) {
-		info->relevant_target_dirs = xmalloc(sizeof(struct strmap));
-		strmap_init(info->relevant_target_dirs, 1);
-		strmap_for_each_entry(relevant_targets, &iter, entry) {
+		info->relevant_target_dirs = xmalloc(sizeof(struct strset));
+		strset_init(info->relevant_target_dirs, 1);
+		strset_for_each_entry(relevant_targets, &iter, entry) {
 			char *dirname = get_dirname(entry->item.string);
-			strmap_put(info->relevant_target_dirs, dirname, NULL);
+			strset_add(info->relevant_target_dirs, dirname);
 			free(dirname);
 		}
 	}
@@ -459,18 +459,17 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	if (!relevant_sources) {
 		info->relevant_source_dirs = dirs_removed; /* might be NULL */
 	} else if (relevant_sources && dirs_removed &&
-		   strmap_get_size(relevant_sources) >
-		   strmap_get_size(dirs_removed)) {
+		   strset_get_size(relevant_sources) >
+		   strset_get_size(dirs_removed)) {
 		info->relevant_source_dirs = dirs_removed;
 	} else {
-		info->relevant_source_dirs = xmalloc(sizeof(struct strmap));
-		strmap_init(info->relevant_source_dirs, 1);
-		strmap_for_each_entry(relevant_sources, &iter, entry) {
+		info->relevant_source_dirs = xmalloc(sizeof(struct strset));
+		strset_init(info->relevant_source_dirs, 1);
+		strset_for_each_entry(relevant_sources, &iter, entry) {
 			char *dirname = get_dirname(entry->item.string);
 			if (!dirs_removed ||
-			    strmap_contains(dirs_removed, dirname))
-				strmap_put(info->relevant_source_dirs,
-					   dirname, NULL);
+			    strset_contains(dirs_removed, dirname))
+				strset_add(info->relevant_source_dirs, dirname);
 			free(dirname);
 		}
 	}
@@ -510,7 +509,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		/* Get old_dir, skip if its directory isn't relevant. */
 		old_dir = get_dirname(oldname);
 		if (info->relevant_source_dirs &&
-		    !strmap_contains(info->relevant_source_dirs, old_dir)) {
+		    !strset_contains(info->relevant_source_dirs, old_dir)) {
 			free(old_dir);
 			continue;
 		}
@@ -518,7 +517,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		/* Get new_dir, skip if its directory isn't relevant. */
 		new_dir = get_dirname(newname);
 		if (info->relevant_target_dirs &&
-		    !strmap_contains(info->relevant_target_dirs, new_dir)) {
+		    !strset_contains(info->relevant_target_dirs, new_dir)) {
 			free(new_dir);
 			continue;
 		}
@@ -564,11 +563,11 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	/* Free resources we don't need anymore */
 	if (info->relevant_source_dirs &&
 	    info->relevant_source_dirs != dirs_removed) {
-		strmap_free(info->relevant_source_dirs, 0);
+		strset_free(info->relevant_source_dirs);
 		FREE_AND_NULL(info->relevant_source_dirs);
 	}
 	if (info->relevant_target_dirs) {
-		strmap_free(info->relevant_target_dirs, 0);
+		strset_free(info->relevant_target_dirs);
 		FREE_AND_NULL(info->relevant_target_dirs);
 	}
 }
@@ -583,9 +582,9 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 
 static int idx_possible_rename(char *filename,
 			       struct rename_guess_info *info,
-			       struct strmap *relevant_sources,
-			       struct strmap *relevant_targets,
-			       struct strmap *dirs_removed)
+			       struct strset *relevant_sources,
+			       struct strset *relevant_targets,
+			       struct strset *dirs_removed)
 {
 	/*
 	 * Our comparison of files with the same basename (see
@@ -652,9 +651,9 @@ static int idx_possible_rename(char *filename,
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
 				 int num_src,
-				 struct strmap *relevant_sources,
-				 struct strmap *relevant_targets,
-				 struct strmap *dirs_removed)
+				 struct strset *relevant_sources,
+				 struct strset *relevant_targets,
+				 struct strset *dirs_removed)
 {
 	/*
 	 * When I checked, over 76% of file renames in linux just moved
@@ -688,7 +687,7 @@ static int find_basename_matches(struct diff_options *options,
 	struct rename_guess_info info;
 
 	info.initialized = 0;
-	if (dirs_removed && strmap_empty(dirs_removed))
+	if (dirs_removed && strset_empty(dirs_removed))
 		/* If we have no dirs_removed, make it easy to exit early. */
 		dirs_removed = NULL;
 
@@ -776,10 +775,10 @@ static int find_basename_matches(struct diff_options *options,
 
 			/* If we don't care about the source/target, skip it */
 			if (relevant_sources &&
-			    !strmap_contains(relevant_sources, one->path))
+			    !strset_contains(relevant_sources, one->path))
 				continue;
 			if (relevant_targets &&
-			    !strmap_contains(relevant_targets, two->path))
+			    !strset_contains(relevant_targets, two->path))
 				continue;
 
 			/* Estimate the similarity */
@@ -929,7 +928,7 @@ static void dump_unmatched(int num_src)
 
 static int remove_unneeded_paths_from_src(int num_src,
 					  int detecting_copies,
-					  struct strmap *interesting)
+					  struct strset *interesting)
 {
 	/*
 	 * Note on reasons why we cull unneeded sources but not targets:
@@ -940,7 +939,7 @@ static int remove_unneeded_paths_from_src(int num_src,
 	 *      Iterating over the targets is done in the outer loop, hence
 	 *      we only iterate over each of those once.  Therefore, we can
 	 *      simply exit the outer loop early if
-	 *          !strmap_contains(relevant_targets, PATH)
+	 *          !strset_contains(relevant_targets, PATH)
 	 *      By contrast, the sources are iterated in the inner loop; we
 	 *      don't want to have to iterate over known-not-needed sources
 	 *      N times each since we already know we don't need them.  As
@@ -962,7 +961,7 @@ static int remove_unneeded_paths_from_src(int num_src,
 			continue;
 
 		/* If we don't care about the source path, skip it */
-		if (interesting && !strmap_contains(interesting, one->path))
+		if (interesting && !strset_contains(interesting, one->path))
 			continue;
 
 		if (new_num_src < i)
@@ -993,9 +992,9 @@ void diff_free_filepair_data(struct diff_filepair *p)
 
 void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
-			      struct strmap *relevant_sources,
-			      struct strmap *relevant_targets,
-			      struct strmap *dirs_removed)
+			      struct strset *relevant_sources,
+			      struct strset *relevant_targets,
+			      struct strset *dirs_removed)
 {
 	int detect_rename = options->detect_rename;
 	int minimum_score = options->rename_score;
@@ -1131,7 +1130,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	printf("\nRename stats:\n");
 	printf("  Started with (%d x %d), %d relevant\n",
 	       rename_src_nr, rename_dst_nr,
-	       relevant_sources ? strmap_get_size(relevant_sources) : rename_src_nr);
+	       relevant_sources ? strset_get_size(relevant_sources) : rename_src_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
 	printf("  Now have (%d x %d)\n", num_src, num_create);
 	if (num_src > 0)
@@ -1180,7 +1179,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			continue; /* dealt with exact & basename match already */
 
 		if (relevant_targets &&
-		    !strmap_contains(relevant_targets, two->path))
+		    !strset_contains(relevant_targets, two->path))
 			continue;
 
 		m = &mx[dst_cnt * NUM_CANDIDATE_PER_DST];

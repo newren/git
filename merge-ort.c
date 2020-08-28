@@ -44,10 +44,10 @@
 struct rename_info {
 	/* For the next six vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
-	struct strmap relevant_sources[3]; /* set of fullnames */
-	struct strmap dirs_removed[3];     /* set of full dirnames */
+	struct strset relevant_sources[3]; /* set of fullnames */
+	struct strset dirs_removed[3];     /* set of full dirnames */
 	struct strintmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
-	struct strmap target_dirs[3];             /* set of directory paths */
+	struct strset target_dirs[3];             /* set of directory paths */
 	unsigned trivial_merges_okay[3];          /* 0 = no, 1 = maybe */
 	/*
 	 * dir_rename_mask:
@@ -76,7 +76,7 @@ struct rename_info {
 	struct tree *merge_trees[3];
 	int cached_pairs_valid_side;
 	struct strmap cached_pairs[3];   /* fullnames -> {rename_path or NULL} */
-	struct strmap cached_target_names[3]; /* set of target fullnames */
+	struct strset cached_target_names[3]; /* set of target fullnames */
 	/*
 	 * And sometimes it pays to detect renames, and then restart the merge
 	 * with the renames cached so that we can do trivial tree merging.
@@ -497,12 +497,12 @@ static void add_pair(struct merge_options *opt,
 	struct mem_pool *pool = &opt->priv->pool;
 #endif
 	struct rename_info *renames = opt->priv->renames;
-	struct strmap *cache = is_add ? &renames->cached_target_names[side] :
+	struct strmap *cache = is_add ? &renames->cached_target_names[side].map :
 					&renames->cached_pairs[side];
 	int names_idx = is_add ? side : 0;
 
 	if (!is_add)
-		strmap_put(&renames->relevant_sources[side], pathname, NULL);
+		strset_add(&renames->relevant_sources[side], pathname);
 
 	if (strmap_contains(cache, pathname))
 		return;
@@ -582,9 +582,9 @@ static void collect_rename_info(struct merge_options *opt,
 		/* absent_mask = 0x07 - dirmask; side_mask = absent_mask >> 1 */
 		unsigned side_mask = (0x07 - dirmask) >> 1;
 		if (side_mask & 1)
-			strmap_put(&renames->dirs_removed[1], fullname, NULL);
+			strset_add(&renames->dirs_removed[1], fullname);
 		if (side_mask & 2)
-			strmap_put(&renames->dirs_removed[2], fullname, NULL);
+			strset_add(&renames->dirs_removed[2], fullname);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -751,8 +751,8 @@ static int collect_merge_info_callback(int n,
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
 			if (filemask)
-				strmap_remove(&renames->relevant_sources[2],
-					      fullpath, 0);
+				strset_remove(&renames->relevant_sources[2],
+					      fullpath);
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
@@ -779,8 +779,8 @@ static int collect_merge_info_callback(int n,
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
 			if (filemask)
-				strmap_remove(&renames->relevant_sources[1],
-					      fullpath, 0);
+				strset_remove(&renames->relevant_sources[1],
+					      fullpath);
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
@@ -859,7 +859,7 @@ static int collect_merge_info_callback(int n,
 		}
 		if (renames->dir_rename_mask != 0x07 && side &&
 		    renames->trivial_merges_okay[side] &&
-		    !strmap_contains(&renames->target_dirs[side], pi.string)) {
+		    !strset_contains(&renames->target_dirs[side], pi.string)) {
 			strintmap_set(&renames->possible_trivial_merges[side],
 				      pi.string, renames->dir_rename_mask);
 			renames->dir_rename_mask = prev_dir_rename_mask;
@@ -947,7 +947,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		struct strintmap copy;
 
 		/* Loop over the set of paths we need to know rename info for */
-		strmap_for_each_entry(&renames->relevant_sources[side],
+		strset_for_each_entry(&renames->relevant_sources[side],
 				      &iter, entry) {
 			char *rename_target, *dir, *dir_marker;
 			struct string_list_item *item;
@@ -981,11 +981,10 @@ static int handle_deferred_entries(struct merge_options *opt,
 			dir = xstrdup(rename_target);
 			while ((dir_marker = strrchr(dir, '/'))) {
 				*dir_marker = '\0';
-				if (strmap_contains(&renames->target_dirs[side],
+				if (strset_contains(&renames->target_dirs[side],
 						    dir))
 					break;
-				strmap_put(&renames->target_dirs[side],
-					   dir, NULL);
+				strset_add(&renames->target_dirs[side], dir);
 			}
 			free(dir);
 		}
@@ -1020,7 +1019,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 			dirmask = ci->dirmask;
 
 			if (optimization_okay &&
-			    !strmap_contains(&renames->target_dirs[side],
+			    !strset_contains(&renames->target_dirs[side],
 					     path)) {
 				resolve_trivial_directory_merge(ci, side);
 				continue;
@@ -1078,7 +1077,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 			ci = strmap_get(&opt->priv->paths, path);
 
 			assert(renames->trivial_merges_okay[side] &&
-			       !strmap_contains(&renames->target_dirs[side],
+			       !strset_contains(&renames->target_dirs[side],
 						path));
 			resolve_trivial_directory_merge(ci, side);
 		}
@@ -2208,7 +2207,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	/* It's tempting to bail early if there aren't any dirs_removed to
 	 * consider, but it causes things like tests 6b of t6043 to fail.
 	 */
-	if (strmap_get_size(&opt->priv->renames->dirs_removed[side]) == 0)
+	if (strset_get_size(&opt->priv->renames->dirs_removed[side]) == 0)
 		return dir_renames;
 #endif
 
@@ -2245,7 +2244,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			continue;
 
 #if 0 /* FIXME: Clean this up */
-		if (!strmap_contains(&opt->priv->renames->dirs_removed[side],
+		if (!strset_contains(&opt->priv->renames->dirs_removed[side],
 				     old_dir)) {
 			/* old_dir still exists and can't be a dir rename */
 			free(old_dir);
@@ -2788,7 +2787,7 @@ static inline int possible_renames(struct rename_info *renames,
 				   unsigned side_index)
 {
 	return renames->pairs[side_index].nr > 0 &&
-	       !strmap_empty(&renames->relevant_sources[side_index]);
+	       !strset_empty(&renames->relevant_sources[side_index]);
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
@@ -2820,8 +2819,8 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 
 	/* Remove from relevant_sources all entries in cached_pairs[side] */
 	strmap_for_each_entry(&renames->cached_pairs[side], &iter, entry)
-		strmap_remove(&renames->relevant_sources[side],
-			      entry->item.string, 0);
+		strset_remove(&renames->relevant_sources[side],
+			      entry->item.string);
 }
 
 static void use_cached_pairs(struct merge_options *opt,
@@ -2864,7 +2863,7 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 	char *old_value;
 
 	if (!new_path &&
-	    !strmap_contains(&renames->relevant_sources[side], p->one->path))
+	    !strset_contains(&renames->relevant_sources[side], p->one->path))
 		return;
 	if (p->status == 'D') {
 		/*
@@ -4319,22 +4318,22 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
 #if USE_MEMORY_POOL
-			strmap_init_with_mem_pool(&renames->relevant_sources[i],
+			strset_init_with_mem_pool(&renames->relevant_sources[i],
 						  pool, 0);
-			strmap_init_with_mem_pool(&renames->dirs_removed[i],
+			strset_init_with_mem_pool(&renames->dirs_removed[i],
 						  pool, 0);
 			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
 						  pool, 0);
-			strmap_init_with_mem_pool(&renames->target_dirs[i],
+			strset_init_with_mem_pool(&renames->target_dirs[i],
 						  pool, 1);
 #else
-			strmap_init(&renames->relevant_sources[i], 0);
-			strmap_init(&renames->dirs_removed[i], 0);
+			strset_init(&renames->relevant_sources[i], 0);
+			strset_init(&renames->dirs_removed[i], 0);
 			strintmap_init(&renames->possible_trivial_merges[i], 0);
-			strmap_init(&renames->target_dirs[i], 1);
+			strset_init(&renames->target_dirs[i], 1);
 #endif
 			strmap_init(&renames->cached_pairs[i], 1);
-			strmap_init(&renames->cached_target_names[i], 0);
+			strset_init(&renames->cached_target_names[i], 0);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
@@ -4444,6 +4443,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		reinitialize ? strmap_clear : strmap_free;
 	void (*strintmap_func)(struct strintmap *) =
 		reinitialize ? strintmap_clear : strintmap_free;
+	void (*strset_func)(struct strset *) =
+		reinitialize ? strset_clear : strset_free;
 
 	/*
 	 * We marked opti->paths with strdup_strings = 0, so that we
@@ -4499,14 +4500,14 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
-		strmap_func(&renames->relevant_sources[i], 0);
-		strmap_func(&renames->dirs_removed[i], 0);
+		strset_func(&renames->relevant_sources[i]);
+		strset_func(&renames->dirs_removed[i]);
 		strintmap_func(&renames->possible_trivial_merges[i]);
-		strmap_func(&renames->target_dirs[i], 0);
+		strset_func(&renames->target_dirs[i]);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		if (i != renames->cached_pairs_valid_side &&
 		    -1 != renames->cached_pairs_valid_side) {
-			strmap_func(&renames->cached_target_names[i], 0);
+			strset_func(&renames->cached_target_names[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
 		}
 	}
@@ -4560,8 +4561,8 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	s = renames->cached_pairs_valid_side;
 	strmap_for_each_entry(&renames->cached_pairs[s], &iter, entry)
 		if (entry->item.util)
-			strmap_put(&renames->cached_target_names[s],
-				   entry->item.util, NULL);
+			strset_add(&renames->cached_target_names[s],
+				   entry->item.util);
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
