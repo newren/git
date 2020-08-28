@@ -27,7 +27,7 @@ static struct diff_rename_dst {
 } *rename_dst;
 static int rename_dst_nr, rename_dst_alloc;
 /* Mapping from break source pathname to break destination index */
-static struct strmap *break_idx = NULL;
+static struct strintmap *break_idx = NULL;
 
 static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
 {
@@ -74,7 +74,7 @@ static void register_rename_src(struct diff_filepair *p)
 	if (p->broken_pair) {
 		if (!break_idx) {
 			break_idx = xmalloc(sizeof(*break_idx));
-			strmap_init(break_idx, 0);
+			strintmap_init(break_idx, 0);
 		}
 		strintmap_set(break_idx, p->one->path, rename_dst_nr);
 	}
@@ -398,7 +398,7 @@ static int find_exact_renames(struct diff_options *options,
 }
 
 struct rename_guess_info {
-	struct strmap idx_map;
+	struct strintmap idx_map;
 	struct strmap dir_rename;
 	struct strmap *relevant_source_dirs;
 	struct strmap *relevant_target_dirs;
@@ -411,13 +411,13 @@ static char *get_dirname(char *filename)
 	return slash ? xstrndup(filename, slash-filename) : xstrdup("");
 }
 
-static char *get_highest_rename_path(struct strmap *counts) {
+static char *get_highest_rename_path(struct strintmap *counts) {
 	int highest_count = 0;
 	char *highest_target_dir = NULL;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
-	strmap_for_each_entry(counts, &iter, entry) {
+	strintmap_for_each_entry(counts, &iter, entry) {
 		char *target_dir = entry->item.string;
 		intptr_t count = (intptr_t)entry->item.util;
 		if (count > highest_count) {
@@ -433,13 +433,13 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 					 struct strmap *relevant_targets,
 					 struct strmap *dirs_removed)
 {
-	struct strmap *counts;
+	struct strintmap *counts;
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 	int i;
 
 	info->initialized = 1;
-	strmap_init(&info->idx_map, 0);
+	strintmap_init(&info->idx_map, 0);
 	strmap_init(&info->dir_rename, 1);
 
 	/* Setup info->relevant_target_dirs */
@@ -529,7 +529,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 			counts = dir_rename_entry->util;
 		} else {
 			counts = xmalloc(sizeof(*counts));
-			strmap_init(counts, 1);
+			strintmap_init(counts, 1);
 			strmap_put(&info->dir_rename, old_dir, counts);
 		}
 
@@ -551,7 +551,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	 */
 	strmap_for_each_entry(&info->dir_rename, &iter, entry) {
 		/* entry->item.string is source_dir */
-		struct strmap *counts = entry->item.util;
+		struct strintmap *counts = entry->item.util;
 		char *best_newdir;
 
 		best_newdir = xstrdup(get_highest_rename_path(counts));
@@ -683,8 +683,8 @@ static int find_basename_matches(struct diff_options *options,
 
 	int i, renames = 0;
 	int skip_unmodified;
-	struct strmap sources; //= STRMAP_INIT_NODUP;
-	struct strmap dests; // = STRMAP_INIT_NODUP;
+	struct strintmap sources; //= STRMAP_INIT_NODUP;
+	struct strintmap dests; // = STRMAP_INIT_NODUP;
 	struct rename_guess_info info;
 
 	info.initialized = 0;
@@ -706,8 +706,8 @@ static int find_basename_matches(struct diff_options *options,
 	skip_unmodified = 0;
 
 	/* Create maps of basename -> fullname(s) for sources and dests */
-	strmap_init(&sources, 0);
-	strmap_init(&dests, 0);
+	strintmap_init(&sources, 0);
+	strintmap_init(&dests, 0);
 	for (i = 0; i < num_src; ++i) {
 		char *filename = rename_src[i].p->one->path;
 		char *base;
@@ -718,7 +718,7 @@ static int find_basename_matches(struct diff_options *options,
 		base = strrchr(filename, '/');
 		base = (base ? base+1 : filename);
 
-		if (strmap_contains(&sources, base))
+		if (strintmap_contains(&sources, base))
 			strintmap_set(&sources, base, -1);
 		else
 			strintmap_set(&sources, base, i);
@@ -733,7 +733,7 @@ static int find_basename_matches(struct diff_options *options,
 		base = strrchr(filename, '/');
 		base = (base ? base+1 : filename);
 
-		if (strmap_contains(&dests, base))
+		if (strintmap_contains(&dests, base))
 			strintmap_set(&dests, base, -1);
 		else
 			strintmap_set(&dests, base, i);
@@ -752,7 +752,7 @@ static int find_basename_matches(struct diff_options *options,
 		src_index = strintmap_get(&sources, base, -1);
 		assert(src_index == -1 || src_index == i);
 
-		if (strmap_contains(&dests, base)) {
+		if (strintmap_contains(&dests, base)) {
 			struct diff_filespec *one, *two;
 			int score;
 
@@ -1318,7 +1318,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	FREE_AND_NULL(rename_src);
 	rename_src_nr = rename_src_alloc = 0;
 	if (break_idx) {
-		strmap_free(break_idx, 0);
+		strintmap_free(break_idx);
 		FREE_AND_NULL(break_idx);
 	}
 	trace2_region_leave("diff", "write back to queue", options->repo);

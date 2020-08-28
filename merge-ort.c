@@ -46,7 +46,7 @@ struct rename_info {
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
 	struct strmap relevant_sources[3]; /* set of fullnames */
 	struct strmap dirs_removed[3];     /* set of full dirnames */
-	struct strmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
+	struct strintmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
 	struct strmap target_dirs[3];             /* set of directory paths */
 	unsigned trivial_merges_okay[3];          /* 0 = no, 1 = maybe */
 	/*
@@ -944,7 +944,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 	path_count_before = strmap_get_size(&opt->priv->paths);
 	for (side = 1; side <= 2; side++) {
 		unsigned optimization_okay = 1;
-		struct strmap copy;
+		struct strintmap copy;
 
 		/* Loop over the set of paths we need to know rename info for */
 		strmap_for_each_entry(&renames->relevant_sources[side],
@@ -1002,12 +1002,12 @@ static int handle_deferred_entries(struct merge_options *opt,
 		 */
 		copy = renames->possible_trivial_merges[side];
 #if USE_MEMORY_POOL
-		strmap_init_with_mem_pool(&renames->possible_trivial_merges[side],
-					  &opt->priv->pool, 0);
+		strintmap_init_with_mem_pool(&renames->possible_trivial_merges[side],
+					     &opt->priv->pool, 0);
 #else
-		strmap_init(&renames->possible_trivial_merges[side], 0);
+		strintmap_init(&renames->possible_trivial_merges[side], 0);
 #endif
-		strmap_for_each_entry(&copy, &iter, entry) {
+		strintmap_for_each_entry(&copy, &iter, entry) {
 			char *path = entry->item.string;
 			unsigned dir_rename_mask = (intptr_t)entry->item.util;
 			struct conflict_info *ci;
@@ -1069,8 +1069,8 @@ static int handle_deferred_entries(struct merge_options *opt,
 			if (ret < 0)
 				return ret;
 		}
-		strmap_free(&copy, 0);
-		strmap_for_each_entry(&renames->possible_trivial_merges[side],
+		strintmap_free(&copy);
+		strintmap_for_each_entry(&renames->possible_trivial_merges[side],
 				      &iter, entry) {
 			char *path = entry->item.string;
 			struct conflict_info *ci;
@@ -1951,7 +1951,7 @@ static int process_renames(struct merge_options *opt,
  */
 struct dir_rename_info {
 	struct strbuf new_dir;
-	struct strmap possible_new_dirs;
+	struct strintmap possible_new_dirs;
 };
 
 struct collision_info {
@@ -2260,7 +2260,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		} else {
 			info = xcalloc(1, sizeof(*info));
 			strbuf_init(&info->new_dir, 0);
-			strmap_init(&info->possible_new_dirs, 0);
+			strintmap_init(&info->possible_new_dirs, 0);
 			strmap_put(dir_renames, old_dir, info);
 		}
 
@@ -2287,7 +2287,8 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		struct hashmap_iter pnd_iter;
 		struct str_entry *pnd_entry;
 
-		strmap_for_each_entry(&info->possible_new_dirs, &pnd_iter, pnd_entry) {
+		strintmap_for_each_entry(&info->possible_new_dirs, &pnd_iter,
+					 pnd_entry) {
 			intptr_t count = (intptr_t)pnd_entry->item.util;
 
 			if (count == max)
@@ -2323,8 +2324,8 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		 * possible_new_dirs that it did the strdup'ing so that it
 		 * will free them for us.
 		 */
-		info->possible_new_dirs.strdup_strings = 1;
-		strmap_free(&info->possible_new_dirs, 0);
+		info->possible_new_dirs.map.strdup_strings = 1;
+		strintmap_free(&info->possible_new_dirs);
 	}
 
 	for (i=0; i<to_remove.nr; ++i)
@@ -4322,14 +4323,14 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 						  pool, 0);
 			strmap_init_with_mem_pool(&renames->dirs_removed[i],
 						  pool, 0);
-			strmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
+			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
 						  pool, 0);
 			strmap_init_with_mem_pool(&renames->target_dirs[i],
 						  pool, 1);
 #else
 			strmap_init(&renames->relevant_sources[i], 0);
 			strmap_init(&renames->dirs_removed[i], 0);
-			strmap_init(&renames->possible_trivial_merges[i], 0);
+			strintmap_init(&renames->possible_trivial_merges[i], 0);
 			strmap_init(&renames->target_dirs[i], 1);
 #endif
 			strmap_init(&renames->cached_pairs[i], 1);
@@ -4441,6 +4442,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	int i;
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_clear : strmap_free;
+	void (*strintmap_func)(struct strintmap *) =
+		reinitialize ? strintmap_clear : strintmap_free;
 
 	/*
 	 * We marked opti->paths with strdup_strings = 0, so that we
@@ -4498,7 +4501,7 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	for (i=1; i<3; ++i) {
 		strmap_func(&renames->relevant_sources[i], 0);
 		strmap_func(&renames->dirs_removed[i], 0);
-		strmap_func(&renames->possible_trivial_merges[i], 0);
+		strintmap_func(&renames->possible_trivial_merges[i]);
 		strmap_func(&renames->target_dirs[i], 0);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		if (i != renames->cached_pairs_valid_side &&
