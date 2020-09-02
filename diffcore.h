@@ -165,6 +165,8 @@ void diffcore_break(struct repository *, int);
 void diffcore_rename(struct diff_options *);
 void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
+			      struct strset *content_relevant_sources,
+			      struct strset *location_relevant_sources,
 			      struct strset *relevant_sources,
 			      struct strset *relevant_targets,
 			      struct strset *dirs_removed);

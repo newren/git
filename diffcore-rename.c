@@ -992,6 +992,8 @@ void diff_free_filepair_data(struct diff_filepair *p)
 
 void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
+			      struct strset *content_relevant_sources,
+			      struct strset *location_relevant_sources,
 			      struct strset *relevant_sources,
 			      struct strset *relevant_targets,
 			      struct strset *dirs_removed)
@@ -1351,5 +1353,5 @@ void diffcore_rename_extended(struct diff_options *options,
 
 void diffcore_rename(struct diff_options *options)
 {
-	diffcore_rename_extended(options, NULL, NULL, NULL, NULL);
+	diffcore_rename_extended(options, NULL, NULL, NULL, NULL, NULL, NULL);
 }

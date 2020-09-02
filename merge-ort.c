@@ -2968,6 +2968,8 @@ static int detect_regular_renames(struct merge_options *opt,
 #else
 				 NULL,
 #endif
+				 &renames->content_relevant_sources[side_index],
+				 &renames->location_relevant_sources[side_index],
 				 &renames->relevant_sources[side_index],
 				 NULL,
 				 &renames->dirs_removed[side_index]);
