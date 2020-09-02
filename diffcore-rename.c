@@ -429,7 +429,7 @@ static char *get_highest_rename_path(struct strintmap *counts) {
 }
 
 static void initialize_rename_guess_info(struct rename_guess_info *info,
-					 struct strset *relevant_sources,
+					 struct strintmap *relevant_sources,
 					 struct strset *relevant_targets,
 					 struct strset *dirs_removed)
 {
@@ -459,7 +459,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	if (!relevant_sources) {
 		info->relevant_source_dirs = dirs_removed; /* might be NULL */
 	} else if (relevant_sources && dirs_removed &&
-		   strset_get_size(relevant_sources) >
+		   strintmap_get_size(relevant_sources) >
 		   strset_get_size(dirs_removed)) {
 		info->relevant_source_dirs = dirs_removed;
 	} else {
@@ -582,7 +582,7 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 
 static int idx_possible_rename(char *filename,
 			       struct rename_guess_info *info,
-			       struct strset *relevant_sources,
+			       struct strintmap *relevant_sources,
 			       struct strset *relevant_targets,
 			       struct strset *dirs_removed)
 {
@@ -651,7 +651,7 @@ static int idx_possible_rename(char *filename,
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
 				 int num_src,
-				 struct strset *relevant_sources,
+				 struct strintmap *relevant_sources,
 				 struct strset *relevant_targets,
 				 struct strset *dirs_removed)
 {
@@ -775,7 +775,7 @@ static int find_basename_matches(struct diff_options *options,
 
 			/* If we don't care about the source/target, skip it */
 			if (relevant_sources &&
-			    !strset_contains(relevant_sources, one->path))
+			    !strintmap_contains(relevant_sources, one->path))
 				continue;
 			if (relevant_targets &&
 			    !strset_contains(relevant_targets, two->path))
@@ -928,7 +928,7 @@ static void dump_unmatched(int num_src)
 
 static int remove_unneeded_paths_from_src(int num_src,
 					  int detecting_copies,
-					  struct strset *interesting)
+					  struct strintmap *interesting)
 {
 	/*
 	 * Note on reasons why we cull unneeded sources but not targets:
@@ -961,7 +961,7 @@ static int remove_unneeded_paths_from_src(int num_src,
 			continue;
 
 		/* If we don't care about the source path, skip it */
-		if (interesting && !strset_contains(interesting, one->path))
+		if (interesting && !strintmap_contains(interesting, one->path))
 			continue;
 
 		if (new_num_src < i)
@@ -992,9 +992,7 @@ void diff_free_filepair_data(struct diff_filepair *p)
 
 void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
-			      struct strset *content_relevant_sources,
-			      struct strset *location_relevant_sources,
-			      struct strset *relevant_sources,
+			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
 			      struct strset *dirs_removed)
 {
@@ -1132,7 +1130,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	printf("\nRename stats:\n");
 	printf("  Started with (%d x %d), %d relevant\n",
 	       rename_src_nr, rename_dst_nr,
-	       relevant_sources ? strset_get_size(relevant_sources) : rename_src_nr);
+	       relevant_sources ? strintmap_get_size(relevant_sources) : rename_src_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
 	printf("  Now have (%d x %d)\n", num_src, num_create);
 	if (num_src > 0)
@@ -1353,5 +1351,5 @@ void diffcore_rename_extended(struct diff_options *options,
 
 void diffcore_rename(struct diff_options *options)
 {
-	diffcore_rename_extended(options, NULL, NULL, NULL, NULL, NULL, NULL);
+	diffcore_rename_extended(options, NULL, NULL, NULL, NULL);
 }

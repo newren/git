@@ -41,12 +41,16 @@
 #define VERBOSE_DEBUG
 #endif
 
+enum relevance {
+	RELEVANT_CONTENT = 1,
+	RELEVANT_LOCATION = 2,
+	RELEVANT_BOTH = 3
+};
+
 struct rename_info {
 	/* For the next six vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
-	struct strset content_relevant_sources[3];  /* source filepaths */
-	struct strset location_relevant_sources[3]; /* source filepaths */
-	struct strset relevant_sources[3];          /* union of above two */
+	struct strintmap relevant_sources[3];  /* filepath => enum relevance */
 	struct strset dirs_removed[3];              /* directory paths */
 	struct strintmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
 	struct strset target_dirs[3];             /* set of directory paths */
@@ -505,11 +509,9 @@ static void add_pair(struct merge_options *opt,
 	int names_idx = is_add ? side : 0;
 
 	if (!is_add) {
-		strset_add(&renames->content_relevant_sources[side], pathname);
-		strset_add(&renames->relevant_sources[side], pathname);
-		if (dir_rename_mask == 0x07)
-			strset_add(&renames->location_relevant_sources[side],
-				   pathname);
+		strintmap_set(&renames->relevant_sources[side], pathname,
+			      (dir_rename_mask == 0x07) ? RELEVANT_BOTH :
+							  RELEVANT_CONTENT);
 	}
 
 	if (strmap_contains(cache, pathname))
@@ -761,15 +763,21 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side1_matches_mbase) {
 		if (side2_null && filemask) {
-			/* Ignore this path, nothing to do. */
+			/*
+			 * This path was in relevant_sources, but
+			 * RELEVANT_CONTENT is no longer true.  Remove that
+			 * flag for the path, and if that makes the path no
+			 * longer relevant, remove it from relevant_sources.
+			 */
 #ifdef VERBOSE_DEBUG
 			printf("Path 1.A for %s\n", names[0].path);
 #endif
-			strset_remove(&renames->content_relevant_sources[2],
-				      fullpath);
-			if (renames->dir_rename_mask != 0x07)
-				strset_remove(&renames->relevant_sources[2],
-					      fullpath);
+			if (renames->dir_rename_mask == 0x07)
+				strintmap_set(&renames->relevant_sources[2],
+					      fullpath, RELEVANT_LOCATION);
+			else
+				strintmap_remove(&renames->relevant_sources[2],
+						 fullpath);
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side2 version as resolution */
 			assert(filemask == 0x07);
@@ -792,15 +800,21 @@ static int collect_merge_info_callback(int n,
 	 */
 	if (side2_matches_mbase) {
 		if (side1_null && filemask) {
-			/* Ignore this path, nothing to do. */
+			/*
+			 * This path was in relevant_sources, but
+			 * RELEVANT_CONTENT is no longer true.  Remove that
+			 * flag for the path, and if that makes the path no
+			 * longer relevant, remove it from relevant_sources.
+			 */
 #ifdef VERBOSE_DEBUG
 			printf("Path 2.A for %s\n", names[0].path);
 #endif
-			strset_remove(&renames->content_relevant_sources[1],
-				      fullpath);
-			if (renames->dir_rename_mask != 0x07)
-				strset_remove(&renames->relevant_sources[1],
-					      fullpath);
+			if (renames->dir_rename_mask == 0x07)
+				strintmap_set(&renames->relevant_sources[1],
+					      fullpath, RELEVANT_LOCATION);
+			else
+				strintmap_remove(&renames->relevant_sources[1],
+						 fullpath);
 		} else if (!side1_is_tree && !side2_is_tree) {
 			/* use side1 version as resolution */
 			assert(filemask == 0x07);
@@ -2808,7 +2822,7 @@ static inline int possible_renames(struct rename_info *renames,
 				   unsigned side_index)
 {
 	return renames->pairs[side_index].nr > 0 &&
-	       !strset_empty(&renames->relevant_sources[side_index]);
+	       !strintmap_empty(&renames->relevant_sources[side_index]);
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
@@ -2840,12 +2854,8 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 
 	/* Remove from relevant_sources all entries in cached_pairs[side] */
 	strmap_for_each_entry(&renames->cached_pairs[side], &iter, entry) {
-		strset_remove(&renames->relevant_sources[side],
-			      entry->item.string);
-		strset_remove(&renames->content_relevant_sources[side],
-			      entry->item.string);
-		strset_remove(&renames->location_relevant_sources[side],
-			      entry->item.string);
+		strintmap_remove(&renames->relevant_sources[side],
+				 entry->item.string);
 	}
 }
 
@@ -2889,7 +2899,7 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 	char *old_value;
 
 	if (!new_path &&
-	    !strset_contains(&renames->relevant_sources[side], p->one->path))
+	    !strintmap_contains(&renames->relevant_sources[side], p->one->path))
 		return;
 	if (p->status == 'D') {
 		/*
@@ -2968,8 +2978,6 @@ static int detect_regular_renames(struct merge_options *opt,
 #else
 				 NULL,
 #endif
-				 &renames->content_relevant_sources[side_index],
-				 &renames->location_relevant_sources[side_index],
 				 &renames->relevant_sources[side_index],
 				 NULL,
 				 &renames->dirs_removed[side_index]);
@@ -4346,11 +4354,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
 #if USE_MEMORY_POOL
-			strset_init_with_mem_pool(&renames->relevant_sources[i],
-						  pool, 0);
-			strset_init_with_mem_pool(&renames->content_relevant_sources[i],
-						  pool, 0);
-			strset_init_with_mem_pool(&renames->location_relevant_sources[i],
+			strintmap_init_with_mem_pool(&renames->relevant_sources[i],
 						  pool, 0);
 			strset_init_with_mem_pool(&renames->dirs_removed[i],
 						  pool, 0);
@@ -4359,9 +4363,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 			strset_init_with_mem_pool(&renames->target_dirs[i],
 						  pool, 1);
 #else
-			strset_init(&renames->relevant_sources[i], 0);
-			strset_init(&renames->content_relevant_sources[i], 0);
-			strset_init(&renames->location_relevant_sources[i], 0);
+			strintmap_init(&renames->relevant_sources[i], 0);
 			strset_init(&renames->dirs_removed[i], 0);
 			strintmap_init(&renames->possible_trivial_merges[i], 0);
 			strset_init(&renames->target_dirs[i], 1);
@@ -4534,9 +4536,7 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
-		strset_func(&renames->relevant_sources[i]);
-		strset_func(&renames->content_relevant_sources[i]);
-		strset_func(&renames->location_relevant_sources[i]);
+		strintmap_func(&renames->relevant_sources[i]);
 		strset_func(&renames->dirs_removed[i]);
 		strintmap_func(&renames->possible_trivial_merges[i]);
 		strset_func(&renames->target_dirs[i]);
