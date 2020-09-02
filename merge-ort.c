@@ -578,7 +578,12 @@ static void collect_rename_info(struct merge_options *opt,
 	}
 
 	/* Update dirs_removed, as needed */
+#if 1
+	if (renames->dir_rename_mask == 0x07 &&
+	    (dirmask == 1 || dirmask == 3 || dirmask == 5)) {
+#else
 	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
+#endif
 		/* absent_mask = 0x07 - dirmask; side_mask = absent_mask >> 1 */
 		unsigned side_mask = (0x07 - dirmask) >> 1;
 		if (side_mask & 1)

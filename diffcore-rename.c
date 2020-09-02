@@ -1124,7 +1124,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
-#if 0
+#if 1
 	/* Debug spew */
 	fflush(NULL);
 	printf("\nRename stats:\n");
@@ -1137,6 +1137,31 @@ void diffcore_rename_extended(struct diff_options *options,
 		printf("  Remaining sources:\n");
 	for (i = 0; i < num_src; i++)
 		printf("    %s\n", rename_src[i].p->one->path);
+
+	if (dirs_removed) {
+		struct hashmap_iter iter;
+		struct str_entry *entry;
+		struct string_list olist = STRING_LIST_INIT_NODUP;
+
+		/* Hack to Pre-allocate olist to the desired size */
+		ALLOC_GROW(olist.items, strset_get_size(dirs_removed),
+			   olist.alloc);
+
+		/* Put every entry from output into olist, then sort */
+		strset_for_each_entry(dirs_removed, &iter, entry) {
+			string_list_append(&olist, entry->item.string);
+		}
+		string_list_sort(&olist);
+
+		/* Iterate over the items, printing them */
+		printf("Removed directories:\n");
+		for (i = 0; i < olist.nr; ++i)
+		  printf("    %s\n", olist.items[i].string);
+		string_list_clear(&olist, 0);
+		printf("Number of removed directories: %d\n",
+		       strset_get_size(dirs_removed));
+	}
+
 	fflush(NULL);
 
 #else
