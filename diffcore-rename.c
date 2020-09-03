@@ -403,7 +403,7 @@ struct rename_guess_info {
 	struct strmap dir_rename_guess;
 	struct strintmap *relevant_source_dirs;
 	struct strset *relevant_target_dirs;
-	int initialized;
+	unsigned setup;
 };
 
 static char *get_dirname(char *filename)
@@ -439,7 +439,11 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	struct str_entry *entry;
 	int i;
 
-	info->initialized = 1;
+	info->setup = 0;
+	if (!dirs_removed && !relevant_sources && !relevant_targets)
+		return;
+	info->setup = 1;
+
 	strintmap_init(&info->idx_map, 0);
 	strmap_init(&info->dir_rename_count, 1);
 	strmap_init(&info->dir_rename_guess, 0);
@@ -575,9 +579,9 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
-	if (!info->initialized)
+	if (!info->setup)
 		return;
-	
+
 	strmap_for_each_entry(&info->dir_rename_count, &iter, entry) {
 		struct strintmap *counts = entry->item.util;
 		strintmap_free(counts);
@@ -587,11 +591,7 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 	strintmap_free(&info->idx_map);
 }
 
-static int idx_possible_rename(char *filename,
-			       struct rename_guess_info *info,
-			       struct strintmap *relevant_sources,
-			       struct strset *relevant_targets,
-			       struct strintmap *dirs_removed)
+static int idx_possible_rename(char *filename, struct rename_guess_info *info)
 {
 	/*
 	 * Our comparison of files with the same basename (see
@@ -634,11 +634,8 @@ static int idx_possible_rename(char *filename,
 	char *old_dir, *new_dir, *new_path, *basename;
 	int idx;
 
-	if (!dirs_removed && !relevant_sources && !relevant_targets)
+	if (!info->setup)
 		return -1;
-	if (!info->initialized)
-		initialize_rename_guess_info(info, relevant_sources,
-					     relevant_targets, dirs_removed);
 
 	old_dir = get_dirname(filename);
 	new_dir = strmap_get(&info->dir_rename_guess, old_dir);
@@ -658,6 +655,7 @@ static int idx_possible_rename(char *filename,
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
 				 int num_src,
+				 struct rename_guess_info *info,
 				 struct strintmap *relevant_sources,
 				 struct strset *relevant_targets,
 				 struct strintmap *dirs_removed)
@@ -691,12 +689,6 @@ static int find_basename_matches(struct diff_options *options,
 	int skip_unmodified;
 	struct strintmap sources; //= STRMAP_INIT_NODUP;
 	struct strintmap dests; // = STRMAP_INIT_NODUP;
-	struct rename_guess_info info;
-
-	info.initialized = 0;
-	if (dirs_removed && strintmap_empty(dirs_removed))
-		/* If we have no dirs_removed, make it easy to exit early. */
-		dirs_removed = NULL;
 
 	/*
 	 * The prefeteching stuff wants to know if it can skip prefetching blobs
@@ -765,11 +757,7 @@ static int find_basename_matches(struct diff_options *options,
 			dst_index = strintmap_get(&dests, base, -1);
 			if (src_index == -1 || dst_index == -1) {
 				src_index = i;
-				dst_index = idx_possible_rename(filename,
-								&info,
-								relevant_sources,
-								relevant_targets,
-								dirs_removed);
+				dst_index = idx_possible_rename(filename, info);
 			}
 			if (dst_index == -1)
 				continue;
@@ -814,7 +802,6 @@ static int find_basename_matches(struct diff_options *options,
 
 	strintmap_free(&sources);
 	strintmap_free(&dests);
-	cleanup_rename_guess_info(&info);
 
 	return renames;
 }
@@ -1095,11 +1082,16 @@ void diffcore_rename_extended(struct diff_options *options,
 	num_src = rename_src_nr;
 
 	if (!want_copies) {
+		struct rename_guess_info info;
+
 		/* Cull sources used in exact renames */
 		trace2_region_enter("diff", "cull exact", options->repo);
 		num_src = remove_unneeded_paths_from_src(num_src, want_copies,
 							 NULL);
 		trace2_region_leave("diff", "cull exact", options->repo);
+
+		initialize_rename_guess_info(&info, relevant_sources,
+					     relevant_targets, dirs_removed);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
@@ -1107,10 +1099,13 @@ void diffcore_rename_extended(struct diff_options *options,
 		/* Cull the candidates list based on basename match. */
 		trace2_region_enter("diff", "basename matches", options->repo);
 		rename_count += find_basename_matches(options, minimum_score,
-						      num_src, relevant_sources,
+						      num_src, &info,
+						      relevant_sources,
 						      relevant_targets,
 						      dirs_removed);
 		trace2_region_leave("diff", "basename matches", options->repo);
+
+		cleanup_rename_guess_info(&info);
 #ifdef SECTION_LABEL
 		printf("Done.\n");
 #endif
