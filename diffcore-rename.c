@@ -400,7 +400,7 @@ static int find_exact_renames(struct diff_options *options,
 struct rename_guess_info {
 	struct strintmap idx_map;
 	struct strmap dir_rename;
-	struct strset *relevant_source_dirs;
+	struct strintmap *relevant_source_dirs;
 	struct strset *relevant_target_dirs;
 	int initialized;
 };
@@ -431,7 +431,7 @@ static char *get_highest_rename_path(struct strintmap *counts) {
 static void initialize_rename_guess_info(struct rename_guess_info *info,
 					 struct strintmap *relevant_sources,
 					 struct strset *relevant_targets,
-					 struct strset *dirs_removed)
+					 struct strintmap *dirs_removed)
 {
 	struct strintmap *counts;
 	struct hashmap_iter iter;
@@ -456,20 +456,17 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 
 	/* Setup info->relevant_source_dirs */
 	info->relevant_source_dirs = NULL;
-	if (!relevant_sources) {
+	if (dirs_removed || !relevant_sources) {
 		info->relevant_source_dirs = dirs_removed; /* might be NULL */
-	} else if (relevant_sources && dirs_removed &&
-		   strintmap_get_size(relevant_sources) >
-		   strset_get_size(dirs_removed)) {
-		info->relevant_source_dirs = dirs_removed;
 	} else {
-		info->relevant_source_dirs = xmalloc(sizeof(struct strset));
-		strset_init(info->relevant_source_dirs, 1);
+		info->relevant_source_dirs = xmalloc(sizeof(struct strintmap));
+		strintmap_init(info->relevant_source_dirs, 1);
 		strset_for_each_entry(relevant_sources, &iter, entry) {
 			char *dirname = get_dirname(entry->item.string);
 			if (!dirs_removed ||
-			    strset_contains(dirs_removed, dirname))
-				strset_add(info->relevant_source_dirs, dirname);
+			    strintmap_contains(dirs_removed, dirname))
+				strintmap_set(info->relevant_source_dirs,
+					      dirname, 0 /* value irrelevant */);
 			free(dirname);
 		}
 	}
@@ -509,7 +506,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		/* Get old_dir, skip if its directory isn't relevant. */
 		old_dir = get_dirname(oldname);
 		if (info->relevant_source_dirs &&
-		    !strset_contains(info->relevant_source_dirs, old_dir)) {
+		    !strintmap_contains(info->relevant_source_dirs, old_dir)) {
 			free(old_dir);
 			continue;
 		}
@@ -563,7 +560,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	/* Free resources we don't need anymore */
 	if (info->relevant_source_dirs &&
 	    info->relevant_source_dirs != dirs_removed) {
-		strset_free(info->relevant_source_dirs);
+		strintmap_free(info->relevant_source_dirs);
 		FREE_AND_NULL(info->relevant_source_dirs);
 	}
 	if (info->relevant_target_dirs) {
@@ -584,7 +581,7 @@ static int idx_possible_rename(char *filename,
 			       struct rename_guess_info *info,
 			       struct strintmap *relevant_sources,
 			       struct strset *relevant_targets,
-			       struct strset *dirs_removed)
+			       struct strintmap *dirs_removed)
 {
 	/*
 	 * Our comparison of files with the same basename (see
@@ -653,7 +650,7 @@ static int find_basename_matches(struct diff_options *options,
 				 int num_src,
 				 struct strintmap *relevant_sources,
 				 struct strset *relevant_targets,
-				 struct strset *dirs_removed)
+				 struct strintmap *dirs_removed)
 {
 	/*
 	 * When I checked, over 76% of file renames in linux just moved
@@ -687,7 +684,7 @@ static int find_basename_matches(struct diff_options *options,
 	struct rename_guess_info info;
 
 	info.initialized = 0;
-	if (dirs_removed && strset_empty(dirs_removed))
+	if (dirs_removed && strintmap_empty(dirs_removed))
 		/* If we have no dirs_removed, make it easy to exit early. */
 		dirs_removed = NULL;
 
@@ -994,7 +991,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
-			      struct strset *dirs_removed)
+			      struct strintmap *dirs_removed)
 {
 	int detect_rename = options->detect_rename;
 	int minimum_score = options->rename_score;
@@ -1144,7 +1141,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		struct string_list olist = STRING_LIST_INIT_NODUP;
 
 		/* Hack to Pre-allocate olist to the desired size */
-		ALLOC_GROW(olist.items, strset_get_size(dirs_removed),
+		ALLOC_GROW(olist.items, strintmap_get_size(dirs_removed),
 			   olist.alloc);
 
 		/* Put every entry from output into olist, then sort */
@@ -1159,7 +1156,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		  printf("    %s\n", olist.items[i].string);
 		string_list_clear(&olist, 0);
 		printf("Number of removed directories: %d\n",
-		       strset_get_size(dirs_removed));
+		       strintmap_get_size(dirs_removed));
 	}
 
 	fflush(NULL);

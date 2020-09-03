@@ -168,7 +168,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
-			      struct strset *dirs_removed);
+			      struct strintmap *dirs_removed);
 void diffcore_merge_broken(void);
 void diffcore_pickaxe(struct diff_options *);
 void diffcore_order(const char *orderfile);

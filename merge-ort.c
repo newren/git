@@ -51,7 +51,7 @@ struct rename_info {
 	/* For the next six vars, the 0th entry is ignored and unused */
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
 	struct strintmap relevant_sources[3];  /* filepath => enum relevance */
-	struct strset dirs_removed[3];              /* directory paths */
+	struct strintmap dirs_removed[3];      /* directory => bool */
 	struct strintmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
 	struct strset target_dirs[3];             /* set of directory paths */
 	unsigned trivial_merges_okay[3];          /* 0 = no, 1 = maybe */
@@ -588,18 +588,14 @@ static void collect_rename_info(struct merge_options *opt,
 	}
 
 	/* Update dirs_removed, as needed */
-#if 1
-	if (renames->dir_rename_mask == 0x07 &&
-	    (dirmask == 1 || dirmask == 3 || dirmask == 5)) {
-#else
 	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
-#endif
 		/* absent_mask = 0x07 - dirmask; side_mask = absent_mask >> 1 */
 		unsigned side_mask = (0x07 - dirmask) >> 1;
+		unsigned drd = (renames->dir_rename_mask == 0x07);
 		if (side_mask & 1)
-			strset_add(&renames->dirs_removed[1], fullname);
+			strintmap_set(&renames->dirs_removed[1], fullname, drd);
 		if (side_mask & 2)
-			strset_add(&renames->dirs_removed[2], fullname);
+			strintmap_set(&renames->dirs_removed[2], fullname, drd);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -4355,16 +4351,16 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		for (i=1; i<3; i++) {
 #if USE_MEMORY_POOL
 			strintmap_init_with_mem_pool(&renames->relevant_sources[i],
-						  pool, 0);
-			strset_init_with_mem_pool(&renames->dirs_removed[i],
-						  pool, 0);
+						     pool, 0);
+			strintmap_init_with_mem_pool(&renames->dirs_removed[i],
+						     pool, 0);
 			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
 						  pool, 0);
 			strset_init_with_mem_pool(&renames->target_dirs[i],
 						  pool, 1);
 #else
 			strintmap_init(&renames->relevant_sources[i], 0);
-			strset_init(&renames->dirs_removed[i], 0);
+			strintmap_init(&renames->dirs_removed[i], 0);
 			strintmap_init(&renames->possible_trivial_merges[i], 0);
 			strset_init(&renames->target_dirs[i], 1);
 #endif
@@ -4537,7 +4533,7 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
 		strintmap_func(&renames->relevant_sources[i]);
-		strset_func(&renames->dirs_removed[i]);
+		strintmap_func(&renames->dirs_removed[i]);
 		strintmap_func(&renames->possible_trivial_merges[i]);
 		strset_func(&renames->target_dirs[i]);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
