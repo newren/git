@@ -343,8 +343,8 @@ static int traverse_trees_wrapper_callback(int n,
 	if (!renames->callback_data_traverse_path)
 		renames->callback_data_traverse_path = xstrdup(info->traverse_path);
 
-	if (filemask == opt->priv->renames->dir_rename_mask)
-		opt->priv->renames->dir_rename_mask = 0x07;
+	if (filemask == renames->dir_rename_mask)
+		renames->dir_rename_mask = 0x07;
 
 	ALLOC_GROW(renames->callback_data, renames->callback_data_nr + 1,
 		   renames->callback_data_alloc);
@@ -535,6 +535,7 @@ static void add_pair(struct merge_options *opt,
 
 static void collect_rename_info(struct merge_options *opt,
 				struct name_entry *names,
+				const char *dirname,
 				const char *fullname,
 				unsigned filemask,
 				unsigned dirmask)
@@ -589,13 +590,24 @@ static void collect_rename_info(struct merge_options *opt,
 
 	/* Update dirs_removed, as needed */
 	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
-		/* absent_mask = 0x07 - dirmask; side_mask = absent_mask >> 1 */
-		unsigned side_mask = (0x07 - dirmask) >> 1;
+		/* absent_mask = 0x07 - dirmask; sides = absent_mask/2 */
+		unsigned sides = (0x07 - dirmask)/2;
 		unsigned drd = (renames->dir_rename_mask == 0x07);
-		if (side_mask & 1)
+		if (sides & 1)
 			strintmap_set(&renames->dirs_removed[1], fullname, drd);
-		if (side_mask & 2)
+		if (sides & 2)
 			strintmap_set(&renames->dirs_removed[2], fullname, drd);
+	}
+
+	if (renames->dir_rename_mask == 0x07 &&
+	    (filemask == 2 || filemask == 4)) {
+		/*
+		 * Need directory rename for parent directory on other side
+		 * of history.  Thus side = (~filemask & 0x06) >> 1, or
+		 * side = 3 - (filemask/2).
+		 */
+		unsigned side = 3 - (filemask >> 1);
+		strintmap_set(&renames->dirs_removed[side], dirname, 2);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -743,7 +755,7 @@ static int collect_merge_info_callback(int n,
 	 * a source and destination path.  We'll cull the unneeded sources
 	 * later.
 	 */
-	collect_rename_info(opt, names, fullpath, filemask, dirmask);
+	collect_rename_info(opt, names, dirname, fullpath, filemask, dirmask);
 
 	/*
 	 * If side1 matches mbase, then we have some simplifications.  In
