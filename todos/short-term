@@ -1,23 +1,8 @@
-*
-  dirs_removed only used in diffcore-rename.c to create relevant_source_dirs
-  dirs_removed used in two #ifdef'd-out places in merge-ort.c
-  dirs_removed thus only passed around in merge-ort.c to diffcore-rename.c
-
-
-* Performance Idea:
-  * Keep a list of semi_relevant_sources too, for cases where we are detecting
-    renames solely for the purpose of directory rename detection.
-    * If a majority of paths under a directory are sufficient to
-      determine the directory rename, we don't need to do inexact
-      rename detection for semi_relevant_sources.
-      * May want to check before and after basename matching (might be able to
-        skip not just exhaustive searching but also basename matching).
-      * Do I want to change the diffcore_rename API to allow individual stages
-        to be executed?
-    * basename matching already has pseudo directory rename detection logic in
-      it, so this will just extend it a little
-    * May need to modify how cached_pairs work (e.g. cached-as-delete-IF: the
-      file on the other side remains unmodified)
+* Stuff to consider with enum relevance
+  * I defined the enum in two places
+  * Hard-coded 0/1 values in dirs_removed should be documented somehow/somewhere
+  * Should write down notes about why cached_pairs is safe (or is it?)
+  * Could potentially cull sources before basename matching too
 
 *** Stuff to investigate:
   * If D/F conflict starts but match_mask on dir, does trivial resolve work?
