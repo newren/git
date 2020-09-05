@@ -597,6 +597,10 @@ static void collect_rename_info(struct merge_options *opt,
 			strintmap_set(&renames->dirs_removed[1], fullname, drd);
 		if (sides & 2)
 			strintmap_set(&renames->dirs_removed[2], fullname, drd);
+		if (!strcmp(fullname, "modules/pg-peering/src/test/java/com/palantir/nexus/db/peering")) {
+			printf("For %s, side_mask = %d, drd = %d\n",
+			       fullname, side_mask, drd);
+		}
 	}
 
 	if (renames->dir_rename_mask == 0x07 &&
