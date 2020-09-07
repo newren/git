@@ -1016,31 +1016,23 @@ static int handle_early_known_dir_renames(int num_src,
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
-	printf("In handle_early_known_dir_renames; num_src=%d\n", num_src);
 	if (!dirs_removed || !relevant_sources)
 		return num_src;
 
-	printf("About to loop...\n");
 	for (i = 0; i < num_src; i++) {
 		char *old_dir;
 		struct diff_filespec *one = rename_src[i].p->one;
 
-		printf("Considering %s\n", one->path);
-		if (one->rename_used)
+		if (!one->rename_used)
 			continue;
 
-		old_dir = get_dirname(one->path);
+		old_dir = one->path;
 		while (*old_dir != '\0' &&
 		       0 != strintmap_get(dirs_removed, old_dir, 0)) {
 			char *new_dir = "";
 			char *freeme = old_dir;
-			struct strintmap *counts;
 
 			increment_count(info, old_dir, new_dir);
-			counts = strmap_get(&info->dir_rename_count, old_dir);
-			assert(counts);
-			printf("Incremented count_unknown[%s] to %d\n",
-			       old_dir, strintmap_get(counts, new_dir, -1));
 			old_dir = get_dirname(old_dir);
 
 			/* Free resources we don't need anymore */
@@ -1059,8 +1051,6 @@ static int handle_early_known_dir_renames(int num_src,
 		/* entry->item.string is source_dir */
 		struct strintmap *counts = entry->item.util;
 
-		if (strintmap_get(dirs_removed, entry->item.string, 0) == 2)
-			printf("For path %s:\n", entry->item.string);
 		if (strintmap_get(dirs_removed, entry->item.string, 0) == 2 &&
 		    dir_rename_already_determinable(counts)) {
 			strintmap_set(dirs_removed, entry->item.string, 1);
