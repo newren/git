@@ -447,8 +447,6 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 			second = count;
 		}
 	}
-	printf("    first=%d, second=%d, unknown=%d\n",
-	       first, second, unknown);
 	return first > second + unknown;
 }
 
@@ -1317,8 +1315,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		/* Put every entry from output into olist, then sort */
 		strset_for_each_entry(dirs_removed, &iter, entry) {
-			if ((intptr_t)entry->item.util)
-				string_list_append(&olist, entry->item.string);
+			string_list_append(&olist, entry->item.string);
 		}
 		string_list_sort(&olist);
 
