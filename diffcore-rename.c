@@ -1280,7 +1280,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
-#if 1
+#if 0
 	/* Debug spew */
 	fflush(NULL);
 	printf("\nRename stats:\n");
