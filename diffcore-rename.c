@@ -447,6 +447,8 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 			second = count;
 		}
 	}
+	printf("******    first=%d, second=%d, unknown=%d\n",
+	       first, second, unknown);
 	return first > second + unknown;
 }
 
@@ -1016,23 +1018,33 @@ static int handle_early_known_dir_renames(int num_src,
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
+	printf("In handle_early_known_dir_renames; num_src=%d\n", num_src);
 	if (!dirs_removed || !relevant_sources)
 		return num_src;
 
+	printf("About to loop...\n");
 	for (i = 0; i < num_src; i++) {
 		char *old_dir;
 		struct diff_filespec *one = rename_src[i].p->one;
 
-		if (!one->rename_used)
+		printf("Considering %s\n", one->path);
+		if (one->rename_used) {
+			printf("    skipping because rename_used\n");
 			continue;
+		}
 
 		old_dir = one->path;
 		while (*old_dir != '\0' &&
 		       0 != strintmap_get(dirs_removed, old_dir, 0)) {
 			char *new_dir = "";
 			char *freeme = old_dir;
+			struct strintmap *counts;
 
 			increment_count(info, old_dir, new_dir);
+			counts = strmap_get(&info->dir_rename_count, old_dir);
+			assert(counts);
+			printf("Incremented count_unknown[%s] to %d\n",
+			       old_dir, strintmap_get(counts, new_dir, -1));
 			old_dir = get_dirname(old_dir);
 
 			/* Free resources we don't need anymore */
@@ -1051,6 +1063,12 @@ static int handle_early_known_dir_renames(int num_src,
 		/* entry->item.string is source_dir */
 		struct strintmap *counts = entry->item.util;
 
+		if (strintmap_get(dirs_removed, entry->item.string, 0) > 0)
+			printf("For path %s:\n", entry->item.string);
+		if (!strncmp(entry->item.string, "modules/pg-peering/src", 22))
+			printf("For path (%d), %s:\n",
+			       strintmap_get(dirs_removed, entry->item.string, -1),
+			       entry->item.string);
 		if (strintmap_get(dirs_removed, entry->item.string, 0) == 2 &&
 		    dir_rename_already_determinable(counts)) {
 			strintmap_set(dirs_removed, entry->item.string, 1);
@@ -1280,7 +1298,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	 */
 	num_create = (rename_dst_nr - rename_count);
 
-#if 0
+#if 1
 	/* Debug spew */
 	fflush(NULL);
 	printf("\nRename stats:\n");
@@ -1305,7 +1323,8 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		/* Put every entry from output into olist, then sort */
 		strset_for_each_entry(dirs_removed, &iter, entry) {
-			string_list_append(&olist, entry->item.string);
+			if ((intptr_t)entry->item.util)
+				string_list_append(&olist, entry->item.string);
 		}
 		string_list_sort(&olist);
 

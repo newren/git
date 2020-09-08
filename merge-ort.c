@@ -597,6 +597,10 @@ static void collect_rename_info(struct merge_options *opt,
 			strintmap_set(&renames->dirs_removed[1], fullname, drd);
 		if (sides & 2)
 			strintmap_set(&renames->dirs_removed[2], fullname, drd);
+		if (!strncmp(fullname, "modules/pg-peering/src/test/java/com/palantir/nexus/db/peering", 62)) {
+			printf("For %s, sides = %d, drd (for now) = %d\n",
+			       fullname, sides, drd);
+		}
 	}
 
 	if (renames->dir_rename_mask == 0x07 &&
@@ -608,6 +612,8 @@ static void collect_rename_info(struct merge_options *opt,
 		 */
 		unsigned side = 3 - (filemask >> 1);
 		strintmap_set(&renames->dirs_removed[side], dirname, 2);
+		printf("Set dirs_removed[%d][%s] = 2 because of %s\n",
+		       side, dirname, fullname);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -2980,6 +2986,7 @@ static int detect_regular_renames(struct merge_options *opt,
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
 	trace2_region_enter("diff", "diffcore_rename", opt->repo);
+	printf("Doing rename detection on side %d\n", side_index);
 	diffcore_rename_extended(&diff_opts,
 #if USE_MEMORY_POOL
 				 &opt->priv->pool,
