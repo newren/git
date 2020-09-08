@@ -3047,14 +3047,14 @@ static int collect_renames(struct merge_options *opt,
 	side_pairs = &renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
-#ifdef VERBOSE_DEBUG
+#ifndef VERBOSE_DEBUG
 	fprintf(stderr, "All pairs:\n");
 #endif
 	for (i = 0; i < side_pairs->nr; ++i) {
 		struct diff_filepair *p = side_pairs->queue[i];
 		char *new_path; /* non-NULL only with directory renames */
 
-#ifdef VERBOSE_DEBUG
+#ifndef VERBOSE_DEBUG
 		fprintf(stderr, "  (%c, %s -> %s)\n", p->status, p->one->path, p->two->path);
 #endif
 		possibly_cache_new_pair(renames, p, side_index, NULL);
@@ -3072,7 +3072,7 @@ static int collect_renames(struct merge_options *opt,
 						      rename_exclusions,
 						      &collisions,
 						      &clean);
-#ifdef VERBOSE_DEBUG
+#ifndef VERBOSE_DEBUG
 		fprintf(stderr, "    new_path: %s\n", new_path);
 #endif
 		if (p->status != 'R' && !new_path) {
@@ -3145,14 +3145,14 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
-#ifdef VERBOSE_DEBUG
+#ifndef VERBOSE_DEBUG
 		struct hashmap_iter iter;
 		struct str_entry *entry;
 #endif
 
 		for (s = 1; s <= 2; s++)
 			dir_renames[s] = get_directory_renames(opt, s, &clean);
-#ifdef VERBOSE_DEBUG
+#ifndef VERBOSE_DEBUG
 		for (s = 1; s <= 2; s++) {
 			fprintf(stderr, "dir renames[%d]:\n", s);
 			strmap_for_each_entry(dir_renames[s], &iter, entry) {

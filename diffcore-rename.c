@@ -435,6 +435,7 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 	int first = 0, second = 0, unknown = 0;
+	char *first_str = NULL, *second_str = NULL;
 	strintmap_for_each_entry(counts, &iter, entry) {
 		char *target_dir = entry->item.string;
 		intptr_t count = (intptr_t)entry->item.util;
@@ -442,13 +443,18 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 			unknown = count;
 		} else if (count >= first) {
 			second = first;
+			second_str = first_str;
 			first = count;
+			first_str = target_dir;
 		} else if (count >= second) {
 			second = count;
+			second_str = target_dir;
 		}
 	}
 	printf("******    first=%d, second=%d, unknown=%d\n",
 	       first, second, unknown);
+	printf("******    first=%s, second=%s\n",
+	       first_str, second_str);
 	return first > second + unknown;
 }
 
@@ -984,7 +990,9 @@ static int remove_unneeded_paths_from_src(int num_src,
 	int i, new_num_src;
 
 	if (detecting_copies && !interesting)
-		return num_src;
+		return num_src; /* nothing to remove */
+	if (break_idx)
+		return num_src; /* culling incompatbile with break detection */
 
 	for (i = 0, new_num_src = 0; i < num_src; i++) {
 		struct diff_filespec *one = rename_src[i].p->one;
@@ -1020,18 +1028,22 @@ static int handle_early_known_dir_renames(int num_src,
 
 	printf("In handle_early_known_dir_renames; num_src=%d\n", num_src);
 	if (!dirs_removed || !relevant_sources)
-		return num_src;
+		return num_src; /* nothing to cull */
+	if (break_idx)
+		return num_src; /* culling incompatbile with break detection */
 
 	printf("About to loop...\n");
 	for (i = 0; i < num_src; i++) {
 		char *old_dir;
 		struct diff_filespec *one = rename_src[i].p->one;
 
+		/*
+		 * sources that were parts should have already been removed
+		 * by a prior call to remove_unneeded_paths_from_src()
+		 */
+		assert(!one->rename_used);
+
 		printf("Considering %s\n", one->path);
-		if (one->rename_used) {
-			printf("    skipping because rename_used\n");
-			continue;
-		}
 
 		old_dir = one->path;
 		while (*old_dir != '\0' &&
@@ -1065,10 +1077,6 @@ static int handle_early_known_dir_renames(int num_src,
 
 		if (strintmap_get(dirs_removed, entry->item.string, 0) > 0)
 			printf("For path %s:\n", entry->item.string);
-		if (!strncmp(entry->item.string, "modules/pg-peering/src", 22))
-			printf("For path (%d), %s:\n",
-			       strintmap_get(dirs_removed, entry->item.string, -1),
-			       entry->item.string);
 		if (strintmap_get(dirs_removed, entry->item.string, 0) == 2 &&
 		    dir_rename_already_determinable(counts)) {
 			strintmap_set(dirs_removed, entry->item.string, 1);
@@ -1082,11 +1090,11 @@ static int handle_early_known_dir_renames(int num_src,
 		val = strintmap_get(relevant_sources, one->path, 0);
 
 		/*
-		 * sources that were parts of renames or were not found in
-		 * relevant_sources should have already been removed by a
-		 * prior call to remove_unneeded_paths_from_src()
+		 * sources that were not found in relevant_sources should
+		 * have already been removed by a prior call to
+		 * remove_unneeded_paths_from_src()
 		 */
-		assert(!one->rename_used && val != 0);
+		assert(val != 0);
 
 		if (val == RELEVANT_LOCATION) {
 			int removable = 1;
@@ -1205,6 +1213,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			register_rename_src(p);
 		}
 	}
+	if (break_idx && relevant_sources)
+		BUG("break detection incompatible with source specification");
 	trace2_region_leave("diff", "setup", options->repo);
 	if (rename_dst_nr == 0 || rename_src_nr == 0)
 		goto cleanup; /* nothing to do */
@@ -1236,7 +1246,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 	num_src = rename_src_nr;
 
-	if (want_copies) {
+	if (want_copies || break_idx) {
 		/*
 		 * Cull sources:
 		 *   - remove ones corresponding to exact renames
@@ -1391,7 +1401,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			struct diff_score this_src;
 
 			assert(!one->rename_used ||
-			       detect_rename == DIFF_DETECT_COPY);
+			       detect_rename == DIFF_DETECT_COPY ||
+			       break_idx);
 
 			if (skip_unmodified &&
 			    diff_unmodified_pair(rename_src[j].p))
