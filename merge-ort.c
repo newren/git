@@ -597,10 +597,6 @@ static void collect_rename_info(struct merge_options *opt,
 			strintmap_set(&renames->dirs_removed[1], fullname, drd);
 		if (sides & 2)
 			strintmap_set(&renames->dirs_removed[2], fullname, drd);
-		if (!strncmp(fullname, "modules/pg-peering/src/test/java/com/palantir/nexus/db/peering", 62)) {
-			printf("For %s, sides = %d, drd (for now) = %d\n",
-			       fullname, sides, drd);
-		}
 	}
 
 	if (renames->dir_rename_mask == 0x07 &&
@@ -612,8 +608,6 @@ static void collect_rename_info(struct merge_options *opt,
 		 */
 		unsigned side = 3 - (filemask >> 1);
 		strintmap_set(&renames->dirs_removed[side], dirname, 2);
-		printf("Set dirs_removed[%d][%s] = 2 because of %s\n",
-		       side, dirname, fullname);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -2986,7 +2980,6 @@ static int detect_regular_renames(struct merge_options *opt,
 	diff_queued_diff = renames->pairs[side_index];
 	dump_pairs(&diff_queued_diff, "Before diffcore_rename");
 	trace2_region_enter("diff", "diffcore_rename", opt->repo);
-	printf("Doing rename detection on side %d\n", side_index);
 	diffcore_rename_extended(&diff_opts,
 #if USE_MEMORY_POOL
 				 &opt->priv->pool,
@@ -3047,14 +3040,14 @@ static int collect_renames(struct merge_options *opt,
 	side_pairs = &renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
 
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 	fprintf(stderr, "All pairs:\n");
 #endif
 	for (i = 0; i < side_pairs->nr; ++i) {
 		struct diff_filepair *p = side_pairs->queue[i];
 		char *new_path; /* non-NULL only with directory renames */
 
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "  (%c, %s -> %s)\n", p->status, p->one->path, p->two->path);
 #endif
 		possibly_cache_new_pair(renames, p, side_index, NULL);
@@ -3072,7 +3065,7 @@ static int collect_renames(struct merge_options *opt,
 						      rename_exclusions,
 						      &collisions,
 						      &clean);
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		fprintf(stderr, "    new_path: %s\n", new_path);
 #endif
 		if (p->status != 'R' && !new_path) {
@@ -3145,14 +3138,14 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		struct hashmap_iter iter;
 		struct str_entry *entry;
 #endif
 
 		for (s = 1; s <= 2; s++)
 			dir_renames[s] = get_directory_renames(opt, s, &clean);
-#ifndef VERBOSE_DEBUG
+#ifdef VERBOSE_DEBUG
 		for (s = 1; s <= 2; s++) {
 			fprintf(stderr, "dir renames[%d]:\n", s);
 			strmap_for_each_entry(dir_renames[s], &iter, entry) {
