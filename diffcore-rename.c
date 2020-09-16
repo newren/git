@@ -1087,8 +1087,8 @@ static int handle_early_known_dir_renames(int num_src,
 		struct diff_filespec *one = rename_src[i].p->one;
 
 		/*
-		 * sources that were parts should have already been removed
-		 * by a prior call to remove_unneeded_paths_from_src()
+		 * sources that are part of a rename will have already been
+		 * removed by a prior call to remove_unneeded_paths_from_src()
 		 */
 		assert(!one->rename_used);
 
