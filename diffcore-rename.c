@@ -397,7 +397,7 @@ static int find_exact_renames(struct diff_options *options,
 	return renames;
 }
 
-struct rename_guess_info {
+struct dir_rename_info {
 	struct strintmap idx_map;
 	struct strmap dir_rename_count;
 	struct strmap dir_rename_guess;
@@ -458,7 +458,7 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	return first > second + unknown;
 }
 
-static void increment_count(struct rename_guess_info *info,
+static void increment_count(struct dir_rename_info *info,
 			    char *old_dir,
 			    char *new_dir)
 {
@@ -479,7 +479,7 @@ static void increment_count(struct rename_guess_info *info,
 	strintmap_incr(counts, new_dir, 1);
 }
 
-static void update_dir_rename_counts(struct rename_guess_info *info,
+static void update_dir_rename_counts(struct dir_rename_info *info,
 				     struct strintmap *dirs_removed,
 				     char *oldname,
 				     char *newname)
@@ -552,10 +552,10 @@ static void update_dir_rename_counts(struct rename_guess_info *info,
 	free(new_dir);
 }
 
-static void initialize_rename_guess_info(struct rename_guess_info *info,
-					 struct strintmap *relevant_sources,
-					 struct strset *relevant_targets,
-					 struct strintmap *dirs_removed)
+static void initialize_dir_rename_info(struct dir_rename_info *info,
+				       struct strintmap *relevant_sources,
+				       struct strset *relevant_targets,
+				       struct strintmap *dirs_removed)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -657,7 +657,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 	}
 }
 
-static void cleanup_rename_guess_info(struct rename_guess_info *info)
+static void cleanup_dir_rename_info(struct dir_rename_info *info)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -674,7 +674,7 @@ static void cleanup_rename_guess_info(struct rename_guess_info *info)
 	strintmap_free(&info->idx_map);
 }
 
-static int idx_possible_rename(char *filename, struct rename_guess_info *info)
+static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 {
 	/*
 	 * Our comparison of files with the same basename (see
@@ -738,7 +738,7 @@ static int idx_possible_rename(char *filename, struct rename_guess_info *info)
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
 				 int num_src,
-				 struct rename_guess_info *info,
+				 struct dir_rename_info *info,
 				 struct strintmap *relevant_sources,
 				 struct strset *relevant_targets,
 				 struct strintmap *dirs_removed)
@@ -1061,7 +1061,7 @@ static int remove_unneeded_paths_from_src(int num_src,
 }
 
 static int handle_early_known_dir_renames(int num_src,
-					  struct rename_guess_info *info,
+					  struct dir_rename_info *info,
 					  struct strintmap *relevant_sources,
 					  struct strintmap *dirs_removed)
 {
@@ -1289,7 +1289,7 @@ void diffcore_rename_extended(struct diff_options *options,
 							 relevant_sources);
 		trace2_region_leave("diff", "cull after exact", options->repo);
 	} else {
-		struct rename_guess_info info;
+		struct dir_rename_info info;
 
 		/* Cull sources used in exact renames */
 		trace2_region_enter("diff", "cull exact", options->repo);
@@ -1297,8 +1297,8 @@ void diffcore_rename_extended(struct diff_options *options,
 							 NULL);
 		trace2_region_leave("diff", "cull exact", options->repo);
 
-		initialize_rename_guess_info(&info, relevant_sources,
-					     relevant_targets, dirs_removed);
+		initialize_dir_rename_info(&info, relevant_sources,
+					   relevant_targets, dirs_removed);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
@@ -1329,7 +1329,7 @@ void diffcore_rename_extended(struct diff_options *options,
 							 dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
 
-		cleanup_rename_guess_info(&info);
+		cleanup_dir_rename_info(&info);
 #ifdef SECTION_LABEL
 		printf("Done.\n");
 #endif
