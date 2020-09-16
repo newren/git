@@ -412,6 +412,14 @@ static char *get_dirname(char *filename)
 	return slash ? xstrndup(filename, slash-filename) : xstrdup("");
 }
 
+static void dirname_munge(char *filename)
+{
+	char *slash = strrchr(filename, '/');
+	if (!slash)
+		slash = filename;
+	*slash = '\0';
+}
+
 static char *get_highest_rename_path(struct strintmap *counts)
 {
 	int highest_count = 0;
@@ -472,31 +480,72 @@ static void increment_count(struct rename_guess_info *info,
 }
 
 static void update_dir_rename_counts(struct rename_guess_info *info,
+				     struct strintmap *dirs_removed,
 				     char *oldname,
 				     char *newname)
 {
-	char *old_dir, *new_dir;
+	char *old_dir = xstrdup(oldname);
+	char *new_dir = xstrdup(newname);
+	int first_time_in_loop = 1;
 
 	if (!info->setup)
 		return;
 
-	/* Get old_dir, skip if its directory isn't relevant. */
-	old_dir = get_dirname(oldname);
-	if (info->relevant_source_dirs &&
-	    !strintmap_contains(info->relevant_source_dirs, old_dir)) {
-		free(old_dir);
-		return;
-	}
+	while (1) {
+		int drd_flag = 0;
+		
+		/* Get old_dir, skip if its directory isn't relevant. */
+		dirname_munge(old_dir);
+		if (info->relevant_source_dirs &&
+		    !strintmap_contains(info->relevant_source_dirs, old_dir))
+			break;
 
-	/* Get new_dir, skip if its directory isn't relevant. */
-	new_dir = get_dirname(newname);
-	if (info->relevant_target_dirs &&
-	    !strset_contains(info->relevant_target_dirs, new_dir)) {
-		free(new_dir);
-		return;
-	}
+		/* Get new_dir, skip if its directory isn't relevant. */
+		dirname_munge(new_dir);
+		if (info->relevant_target_dirs &&
+		    !strset_contains(info->relevant_target_dirs, new_dir))
+			break;
 
-	increment_count(info, old_dir, new_dir);
+		/*
+		 * When renaming
+		 *   "a/b/c/d/e/foo.c" -> "a/b/some/thing/else/e/foo.c"
+		 * then this suggests that both
+		 *   a/b/c/d/e/ => a/b/some/thing/else/e/
+		 *   a/b/c/d/   => a/b/some/thing/else/
+		 * so we want to increment counters for both.  We do NOT,
+		 * however, also want to suggest that there was the following
+		 * rename:
+		 *   a/b/c/ => a/b/some/thing/
+		 * so we need to quit at that point.
+		 *
+		 * Note the when first_time_in_loop, we only strip off the
+		 * basename, and we don't care if that's different.
+		 */
+		if (!first_time_in_loop && strcmp(old_dir+1, new_dir+1))
+			break;
+
+		/*
+		 * When dirs_removed is non-NULL, the value stored for any
+		 * given directory is the greater of:
+		 *   2: when we need directory rename detection for that
+		 *      specific directory
+		 *   1: when we're in a subdirectory of a directory that
+		 *      needs directory rename detection
+		 * We thus only need to track counters if the value is 2,
+		 * as far as directory rename detection is concerned, though
+		 * we also record it for first_time_in_loop because
+		 * find_basename_matches() can use that as a hint to find
+		 * a good pairing.
+		 */
+		if (dirs_removed)
+			drd_flag = strintmap_get(dirs_removed, old_dir, 0);
+		if (drd_flag == 2 || first_time_in_loop)
+			increment_count(info, old_dir, new_dir);
+
+		first_time_in_loop = 0;
+		if (drd_flag == 0)
+			break;
+	}
 
 	/* Free resources we don't need anymore */
 	free(old_dir);
@@ -574,6 +623,7 @@ static void initialize_rename_guess_info(struct rename_guess_info *info,
 		 * times that pairing occurs.
 		 */
 		update_dir_rename_counts(info,
+					 dirs_removed,
 					 rename_dst[i].p->one->path,
 					 rename_dst[i].p->two->path);
 	}
@@ -822,7 +872,8 @@ static int find_basename_matches(struct diff_options *options,
 #endif
 			record_rename_pair(dst_index, src_index, score);
 			renames++;
-			update_dir_rename_counts(info, one->path, two->path);
+			update_dir_rename_counts(info, dirs_removed,
+						 one->path, two->path);
 
 			/*
 			 * Found a rename so don't need text anymore; if we
