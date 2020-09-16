@@ -644,20 +644,10 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		strmap_put(&info->dir_rename_guess, entry->item.string,
 			   best_newdir);
 	}
-
-	/* Free resources we don't need anymore */
-	if (info->relevant_source_dirs &&
-	    info->relevant_source_dirs != dirs_removed) {
-		strintmap_free(info->relevant_source_dirs);
-		FREE_AND_NULL(info->relevant_source_dirs);
-	}
-	if (info->relevant_target_dirs) {
-		strset_free(info->relevant_target_dirs);
-		FREE_AND_NULL(info->relevant_target_dirs);
-	}
 }
 
-static void cleanup_dir_rename_info(struct dir_rename_info *info)
+static void cleanup_dir_rename_info(struct dir_rename_info *info,
+				    struct strintmap *dirs_removed)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -665,13 +655,31 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info)
 	if (!info->setup)
 		return;
 
+	/* idx_map */
+	strintmap_free(&info->idx_map);
+
+	/* dir_rename_count */
 	strmap_for_each_entry(&info->dir_rename_count, &iter, entry) {
 		struct strintmap *counts = entry->item.util;
 		strintmap_free(counts);
 	}
 	strmap_free(&info->dir_rename_count, 1);
+
+	/* dir_rename_guess */
 	strmap_free(&info->dir_rename_guess, 1);
-	strintmap_free(&info->idx_map);
+
+	/* relevant_source_dirs */
+	if (info->relevant_source_dirs &&
+	    info->relevant_source_dirs != dirs_removed) {
+		strintmap_free(info->relevant_source_dirs);
+		FREE_AND_NULL(info->relevant_source_dirs);
+	}
+
+	/* relevant_target_dirs */
+	if (info->relevant_target_dirs) {
+		strset_free(info->relevant_target_dirs);
+		FREE_AND_NULL(info->relevant_target_dirs);
+	}
 }
 
 static int idx_possible_rename(char *filename, struct dir_rename_info *info)
@@ -1329,7 +1337,7 @@ void diffcore_rename_extended(struct diff_options *options,
 							 dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
 
-		cleanup_dir_rename_info(&info);
+		cleanup_dir_rename_info(&info, dirs_removed);
 #ifdef SECTION_LABEL
 		printf("Done.\n");
 #endif
