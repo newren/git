@@ -22,7 +22,7 @@ time_run() {
   test -z "$(ps -ef | grep keybase | grep -v grep)" || die "keybase is running"
   test -z "$(git config --list | grep ^trace2\.)" || die "extra trace2 settings"
   test 0 -eq "$(grep ^SwapCached /proc/meminfo | awk {print\$2})" || die "swap"
-  ping -c 1 google.com >&/dev/null && die "network isn't off yet"
+  #ping -c 1 google.com >&/dev/null && die "network isn't off yet"
 
   if [ $suite = "no-renames" ]; then
     base=v5.4
