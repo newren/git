@@ -2990,6 +2990,7 @@ static int detect_regular_renames(struct merge_options *opt,
 				 &renames->relevant_sources[side_index],
 				 NULL,
 				 &renames->dirs_removed[side_index],
+				 &renames->cached_pairs[side_index],
 				 &renames->dir_rename_count[side_index]);
 	trace2_region_leave("diff", "diffcore_rename", opt->repo);
 	resolve_diffpair_statuses(&diff_queued_diff);

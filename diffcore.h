@@ -170,6 +170,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
 			      struct strintmap *dirs_removed,
+			      struct strmap *cached_pairs,
 			      struct strmap *dir_rename_count);
 void diffcore_merge_broken(void);
 void diffcore_pickaxe(struct diff_options *);

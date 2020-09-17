@@ -556,6 +556,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 				       struct strintmap *relevant_sources,
 				       struct strset *relevant_targets,
 				       struct strintmap *dirs_removed,
+				       struct strmap *cached_pairs,
 				       struct strmap *dir_rename_count)
 {
 	struct hashmap_iter iter;
@@ -623,10 +624,20 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		 * the old filename and the new filename and count how many
 		 * times that pairing occurs.
 		 */
-		update_dir_rename_counts(info,
-					 dirs_removed,
+		update_dir_rename_counts(info, dirs_removed,
 					 rename_dst[i].p->one->path,
 					 rename_dst[i].p->two->path);
+	}
+
+	/* Add cached_pairs to counts */
+	strmap_for_each_entry(cached_pairs, &iter, entry) {
+		char *old_name = entry->item.string;
+		char *new_name = entry->item.util;
+		if (!new_name)
+			/* known delete; ignore it */
+			continue;
+
+		update_dir_rename_counts(info, dirs_removed, old_name, new_name);
 	}
 
 	/*
@@ -1191,6 +1202,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
 			      struct strintmap *dirs_removed,
+			      struct strmap *cached_pairs,
 			      struct strmap *dir_rename_count)
 {
 	int detect_rename = options->detect_rename;
@@ -1307,7 +1319,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		initialize_dir_rename_info(&info, relevant_sources,
 					   relevant_targets, dirs_removed,
-					   dir_rename_count);
+					   cached_pairs, dir_rename_count);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
@@ -1578,5 +1590,5 @@ void diffcore_rename_extended(struct diff_options *options,
 
 void diffcore_rename(struct diff_options *options)
 {
-	diffcore_rename_extended(options, NULL, NULL, NULL, NULL, NULL);
+	diffcore_rename_extended(options, NULL, NULL, NULL, NULL, NULL, NULL);
 }
