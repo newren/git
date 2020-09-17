@@ -399,8 +399,8 @@ static int find_exact_renames(struct diff_options *options,
 
 struct dir_rename_info {
 	struct strintmap idx_map;
-	struct strmap dir_rename_count;
 	struct strmap dir_rename_guess;
+	struct strmap *dir_rename_count;
 	struct strintmap *relevant_source_dirs;
 	struct strset *relevant_target_dirs;
 	unsigned setup;
@@ -466,13 +466,13 @@ static void increment_count(struct dir_rename_info *info,
 	struct string_list_item *e;
 
 	/* Get the {new_dirs -> counts} mapping using old_dir */
-	e = strmap_get_item(&info->dir_rename_count, old_dir);
+	e = strmap_get_item(info->dir_rename_count, old_dir);
 	if (e) {
 		counts = e->util;
 	} else {
 		counts = xmalloc(sizeof(*counts));
 		strintmap_init(counts, 1);
-		strmap_put(&info->dir_rename_count, old_dir, counts);
+		strmap_put(info->dir_rename_count, old_dir, counts);
 	}
 
 	/* Increment the count for new_dir */
@@ -555,7 +555,8 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 static void initialize_dir_rename_info(struct dir_rename_info *info,
 				       struct strintmap *relevant_sources,
 				       struct strset *relevant_targets,
-				       struct strintmap *dirs_removed)
+				       struct strintmap *dirs_removed,
+				       struct strmap *dir_rename_count)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -566,8 +567,8 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		return;
 	info->setup = 1;
 
+	info->dir_rename_count = dir_rename_count;
 	strintmap_init(&info->idx_map, 0);
-	strmap_init(&info->dir_rename_count, 1);
 	strmap_init(&info->dir_rename_guess, 0);
 
 	/* Setup info->relevant_target_dirs */
@@ -635,7 +636,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	 *    dir_rename_guess: old_directory -> best_new_directory
 	 * where best_new_directory is the one with the highest count.
 	 */
-	strmap_for_each_entry(&info->dir_rename_count, &iter, entry) {
+	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
 		/* entry->item.string is source_dir */
 		struct strintmap *counts = entry->item.util;
 		char *best_newdir;
@@ -649,21 +650,11 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 static void cleanup_dir_rename_info(struct dir_rename_info *info,
 				    struct strintmap *dirs_removed)
 {
-	struct hashmap_iter iter;
-	struct str_entry *entry;
-
 	if (!info->setup)
 		return;
 
 	/* idx_map */
 	strintmap_free(&info->idx_map);
-
-	/* dir_rename_count */
-	strmap_for_each_entry(&info->dir_rename_count, &iter, entry) {
-		struct strintmap *counts = entry->item.util;
-		strintmap_free(counts);
-	}
-	strmap_free(&info->dir_rename_count, 1);
 
 	/* dir_rename_guess */
 	strmap_free(&info->dir_rename_guess, 1);
@@ -1121,7 +1112,7 @@ static int handle_early_known_dir_renames(int num_src,
 		free(old_dir);
 	}
 
-	strmap_for_each_entry(&info->dir_rename_count, &iter, entry) {
+	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
 		/* entry->item.string is source_dir */
 		struct strintmap *counts = entry->item.util;
 
@@ -1199,7 +1190,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
-			      struct strintmap *dirs_removed)
+			      struct strintmap *dirs_removed,
+			      struct strmap *dir_rename_count)
 {
 	int detect_rename = options->detect_rename;
 	int minimum_score = options->rename_score;
@@ -1314,7 +1306,8 @@ void diffcore_rename_extended(struct diff_options *options,
 		trace2_region_leave("diff", "cull exact", options->repo);
 
 		initialize_dir_rename_info(&info, relevant_sources,
-					   relevant_targets, dirs_removed);
+					   relevant_targets, dirs_removed,
+					   dir_rename_count);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
@@ -1585,5 +1578,5 @@ void diffcore_rename_extended(struct diff_options *options,
 
 void diffcore_rename(struct diff_options *options)
 {
-	diffcore_rename_extended(options, NULL, NULL, NULL, NULL);
+	diffcore_rename_extended(options, NULL, NULL, NULL, NULL, NULL);
 }

@@ -9,6 +9,7 @@
 struct diff_options;
 struct repository;
 struct strintmap;
+struct strmap;
 struct strset;
 struct userdiff_driver;
 
@@ -168,7 +169,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
 			      struct strintmap *relevant_sources,
 			      struct strset *relevant_targets,
-			      struct strintmap *dirs_removed);
+			      struct strintmap *dirs_removed,
+			      struct strmap *dir_rename_count);
 void diffcore_merge_broken(void);
 void diffcore_pickaxe(struct diff_options *);
 void diffcore_order(const char *orderfile);

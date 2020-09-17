@@ -52,6 +52,7 @@ struct rename_info {
 	struct diff_queue_struct pairs[3]; /* input to & output from diffcore_rename */
 	struct strintmap relevant_sources[3];  /* filepath => enum relevance */
 	struct strintmap dirs_removed[3];      /* directory => bool */
+	struct strmap dir_rename_count[3];     /* old_dir => {new_dir => int} */
 	struct strintmap possible_trivial_merges[3]; /* dirname->dir_rename_mask */
 	struct strset target_dirs[3];             /* set of directory paths */
 	unsigned trivial_merges_okay[3];          /* 0 = no, 1 = maybe */
@@ -2988,7 +2989,8 @@ static int detect_regular_renames(struct merge_options *opt,
 #endif
 				 &renames->relevant_sources[side_index],
 				 NULL,
-				 &renames->dirs_removed[side_index]);
+				 &renames->dirs_removed[side_index],
+				 &renames->dir_rename_count[side_index]);
 	trace2_region_leave("diff", "diffcore_rename", opt->repo);
 	resolve_diffpair_statuses(&diff_queued_diff);
 	dump_pairs(&diff_queued_diff, "After diffcore_rename");
@@ -4366,6 +4368,8 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 						     pool, 0);
 			strintmap_init_with_mem_pool(&renames->dirs_removed[i],
 						     pool, 0);
+			strmap_init_with_mem_pool(&renames->dir_rename_count[i],
+						  pool, 1);
 			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
 						  pool, 0);
 			strset_init_with_mem_pool(&renames->target_dirs[i],
@@ -4373,6 +4377,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 #else
 			strintmap_init(&renames->relevant_sources[i], 0);
 			strintmap_init(&renames->dirs_removed[i], 0);
+			strmap_init(&renames->dir_rename_count[i], 1);
 			strintmap_init(&renames->possible_trivial_merges[i], 0);
 			strset_init(&renames->target_dirs[i], 1);
 #endif
@@ -4553,6 +4558,9 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
+		struct hashmap_iter iter;
+		struct str_entry *e;
+
 		strintmap_func(&renames->relevant_sources[i]);
 		strintmap_func(&renames->dirs_removed[i]);
 		strintmap_func(&renames->possible_trivial_merges[i]);
@@ -4563,6 +4571,13 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 			strset_func(&renames->cached_target_names[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
 		}
+
+		/* dir_rename_count */
+		strmap_for_each_entry(&renames->dir_rename_count[i], &iter, e) {
+			struct strintmap *counts = e->item.util;
+			strintmap_free(counts);
+		}
+		strmap_func(&renames->dir_rename_count[i], 1);
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
