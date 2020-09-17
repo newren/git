@@ -962,7 +962,12 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 	return 1;
 }
 
-static int find_renames(struct diff_score *mx, int dst_cnt, int minimum_score, int copies)
+static int find_renames(struct diff_score *mx,
+			int dst_cnt,
+			int minimum_score,
+			int copies,
+			struct dir_rename_info *info,
+			struct strintmap *dirs_removed)
 {
 	int count = 0, i;
 
@@ -980,11 +985,14 @@ static int find_renames(struct diff_score *mx, int dst_cnt, int minimum_score, i
 #ifdef VERBOSE_DEBUG
 		printf("  Exhaustively-matched rename: %s -> %s (%d)\n",
 		       rename_src[mx[i].src].p->one->path,
-		       rename_dst[mx[i].dst].two->path,
+		       rename_dst[mx[i].dst].p->two->path,
 		       mx[i].score);
 #endif
 		record_rename_pair(mx[i].dst, mx[i].src, mx[i].score);
 		count++;
+		update_dir_rename_counts(info, dirs_removed,
+					 rename_src[mx[i].src].p->one->path,
+					 rename_dst[mx[i].dst].p->two->path);
 	}
 	return count;
 }
@@ -1202,8 +1210,10 @@ void diffcore_rename_extended(struct diff_options *options,
 	int num_create, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
 	struct mem_pool local_pool;
+	struct dir_rename_info info;
 
 	trace2_region_enter("diff", "setup", options->repo);
+	info.setup = 0;
 	want_copies = (detect_rename == DIFF_DETECT_COPY);
 	if (want_copies && dirs_removed)
 		BUG("dirs_removed incompatible with copy detection");
@@ -1297,8 +1307,6 @@ void diffcore_rename_extended(struct diff_options *options,
 							 relevant_sources);
 		trace2_region_leave("diff", "cull after exact", options->repo);
 	} else {
-		struct dir_rename_info info;
-
 		/* Cull sources used in exact renames */
 		trace2_region_enter("diff", "cull exact", options->repo);
 		num_src = remove_unneeded_paths_from_src(num_src, want_copies,
@@ -1336,8 +1344,6 @@ void diffcore_rename_extended(struct diff_options *options,
 							 relevant_sources,
 							 dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
-
-		cleanup_dir_rename_info(&info, dirs_removed);
 #ifdef SECTION_LABEL
 		printf("Done.\n");
 #endif
@@ -1470,9 +1476,11 @@ void diffcore_rename_extended(struct diff_options *options,
 	/* cost matrix sorted by most to least similar pair */
 	STABLE_QSORT(mx, dst_cnt * NUM_CANDIDATE_PER_DST, score_compare);
 
-	rename_count += find_renames(mx, dst_cnt, minimum_score, 0);
+	rename_count += find_renames(mx, dst_cnt, minimum_score, 0,
+				     &info, dirs_removed);
 	if (detect_rename == DIFF_DETECT_COPY)
-		rename_count += find_renames(mx, dst_cnt, minimum_score, 1);
+		rename_count += find_renames(mx, dst_cnt, minimum_score, 1,
+					     &info, dirs_removed);
 	free(mx);
 #ifdef SECTION_LABEL
 	printf("Done.\n");
@@ -1562,6 +1570,7 @@ void diffcore_rename_extended(struct diff_options *options,
 				free_filespec(rename_dst[i].filespec_to_free);
 	}
 
+	cleanup_dir_rename_info(&info, dirs_removed);
 	FREE_AND_NULL(rename_dst);
 	rename_dst_nr = rename_dst_alloc = 0;
 	FREE_AND_NULL(rename_src);
