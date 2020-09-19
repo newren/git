@@ -486,6 +486,7 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 {
 	char *old_dir = xstrdup(oldname);
 	char *new_dir = xstrdup(newname);
+	char new_dir_first_char = new_dir[0];
 	int first_time_in_loop = 1;
 
 	if (!info->setup)
@@ -521,8 +522,29 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 		 * Note the when first_time_in_loop, we only strip off the
 		 * basename, and we don't care if that's different.
 		 */
-		if (!first_time_in_loop && strcmp(old_dir+1, new_dir+1))
-			break;
+		if (!first_time_in_loop) {
+			char *old_sub_dir = strchr(old_dir, '\0')+1;
+			char *new_sub_dir = strchr(new_dir, '\0')+1;
+			if (!*new_dir) {
+				/*
+				 * Special case when renaming to root directory,
+				 * i.e. when new_dir == "".  In this case, we had
+				 * something like
+				 *    a/b/subdir => subdir
+				 * and so dirname_munge() sets things up so that
+				 *    old_dir = "a/b\0subdir\0"
+				 *    new_dir = "\0ubdir\0"
+				 * We didn't have a '/' to overwrite a '\0' onto
+				 * in new_dir, so we have to compare differently.
+				 */
+				if (new_dir_first_char != old_sub_dir[0] ||
+				    strcmp(old_sub_dir+1, new_sub_dir))
+					break;
+			} else {
+				if (strcmp(old_sub_dir, new_sub_dir))
+					break;
+			}
+		}
 
 		/*
 		 * When dirs_removed is non-NULL, the value stored for any
@@ -544,6 +566,9 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 
 		first_time_in_loop = 0;
 		if (drd_flag == 0)
+			break;
+		/* If we hit toplevel directory ("") for old or new dir, quit */
+		if (!*old_dir || !*new_dir)
 			break;
 	}
 
