@@ -438,6 +438,8 @@ static char *get_highest_rename_path(struct strintmap *counts)
 	return highest_target_dir;
 }
 
+static char *SENTINEL_DIR = "/"; /* illegal directory */
+
 static int dir_rename_already_determinable(struct strintmap *counts)
 {
 	struct hashmap_iter iter;
@@ -446,7 +448,7 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	strintmap_for_each_entry(counts, &iter, entry) {
 		char *target_dir = entry->item.string;
 		intptr_t count = (intptr_t)entry->item.util;
-		if (*target_dir == '\0') {
+		if (!strcmp(target_dir, SENTINEL_DIR)) {
 			unknown = count;
 		} else if (count >= first) {
 			second = first;
@@ -1130,10 +1132,9 @@ static int handle_early_known_dir_renames(int num_src,
 		old_dir = get_dirname(one->path);
 		while (*old_dir != '\0' &&
 		       0 != strintmap_get(dirs_removed, old_dir, 0)) {
-			char *new_dir = "";
 			char *freeme = old_dir;
 
-			increment_count(info, old_dir, new_dir);
+			increment_count(info, old_dir, SENTINEL_DIR);
 			old_dir = get_dirname(old_dir);
 
 			/* Free resources we don't need anymore */
