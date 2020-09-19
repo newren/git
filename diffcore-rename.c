@@ -688,6 +688,9 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 static void cleanup_dir_rename_info(struct dir_rename_info *info,
 				    struct strintmap *dirs_removed)
 {
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
 	if (!info->setup)
 		return;
 
@@ -708,6 +711,19 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 	if (info->relevant_target_dirs) {
 		strset_free(info->relevant_target_dirs);
 		FREE_AND_NULL(info->relevant_target_dirs);
+	}
+
+	/*
+	 * Although dir_rename_count was passed in to us and we want to return
+	 * it to the caller, we do want to remove any counts in maps associated
+	 * with SENTINEL_DIR entries.
+	 */
+	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
+		/* entry->item.string is source_dir */
+		struct strintmap *counts = entry->item.util;
+
+		if (strintmap_contains(counts, SENTINEL_DIR))
+			strintmap_remove(counts, SENTINEL_DIR);
 	}
 }
 
