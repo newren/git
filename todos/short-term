@@ -1,8 +1,24 @@
+* Need to either cache_irrelevant, or somehow handle it
+  * Maybe just ignored cached_pairs (ignore cached_pairs_valid_side of 1 or 2),
+    and see if that fixes the bug.  If so, it is due to cached pairs.
+
+
+* SENTINEL_DIR stuff
+  * if culling sources before basename matching:
+    * if increment_count() called after handle_early_known_dir_renames(), then
+      decrement SENTINEL_DIR count as well
+
 * Stuff to consider with enum relevance
   * I defined the enum in two places
   * Hard-coded 0/1 values in dirs_removed should be documented somehow/somewhere
   * Should write down notes about why cached_pairs is safe (or is it?)
   * Could potentially cull sources before basename matching too
+
+* caching deletes is NOT safe:
+  * if path shows up as delete
+    * AND dirs_removed[dirname(path)] == 2
+    * AND counts shown that first > second + unknown [maybe store value of 3??]
+    * THEN DO NOT cache the delete
 
 *** Stuff to investigate:
   * If D/F conflict starts but match_mask on dir, does trivial resolve work?

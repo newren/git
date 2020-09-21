@@ -494,6 +494,9 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 	if (!info->setup)
 		return;
 
+#if 0
+	printf("Update_dir_rename_counts(%s, %s):\n", oldname, newname);
+#endif
 	while (1) {
 		int drd_flag = 0;
 		
@@ -524,6 +527,12 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 		 * Note the when first_time_in_loop, we only strip off the
 		 * basename, and we don't care if that's different.
 		 */
+#if 0
+		printf("old_dir, new_dir: %s, %s\n", old_dir, new_dir);
+		printf("after old_dir, after new_dir: %s, %s\n",
+		       strchr(old_dir, '\0')+1,
+		       strchr(new_dir, '\0')+(!!*new_dir));
+#endif
 		if (!first_time_in_loop) {
 			char *old_sub_dir = strchr(old_dir, '\0')+1;
 			char *new_sub_dir = strchr(new_dir, '\0')+1;
@@ -563,8 +572,12 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 		 */
 		if (dirs_removed)
 			drd_flag = strintmap_get(dirs_removed, old_dir, 0);
-		if (drd_flag == 2 || first_time_in_loop)
+		if (drd_flag == 2 || first_time_in_loop) {
+#if 0
+			printf("increment_count(%s, %s):\n", old_dir, new_dir);
+#endif
 			increment_count(info, old_dir, new_dir);
+		}
 
 		first_time_in_loop = 0;
 		if (drd_flag == 0)
@@ -1067,6 +1080,7 @@ static void dump_unmatched(int num_src)
 }
 
 enum relevance {
+	RELEVANT_NO_MORE = 0,
 	RELEVANT_CONTENT = 1,
 	RELEVANT_LOCATION = 2,
 	RELEVANT_BOTH = 3
@@ -1209,8 +1223,11 @@ static int handle_early_known_dir_renames(int num_src,
 				free(freeme);
 			}
 			free(dir);
-			if (removable)
+			if (removable) {
+				strintmap_set(relevant_sources, one->path,
+					      RELEVANT_NO_MORE);
 				continue;
+			}
 		}
 
 		if (new_num_src < i)
