@@ -2651,6 +2651,11 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 static inline int possible_renames(struct rename_info *renames,
 				   unsigned side_index)
 {
+	printf("*** renames->pairs[%d].nr = %d\n",
+	       side_index, renames->pairs[side_index].nr);
+	printf("*** strintmap_size(&renames->relevant_sources[%d]): %d\n",
+	       side_index,
+	       strintmap_get_size(&renames->relevant_sources[side_index]));
 	return renames->pairs[side_index].nr > 0 &&
 	       !strintmap_empty(&renames->relevant_sources[side_index]);
 }
@@ -2800,6 +2805,7 @@ static int detect_regular_renames(struct merge_options *opt,
 		 * to make sure 'adds' are marked correctly in case the other
 		 * side had directory renames.
 		 */
+		printf("Skipping rename detection on side %d\n", side_index);
 		resolve_diffpair_statuses(&renames->pairs[side_index]);
 		return 0;
 	}
@@ -2977,11 +2983,14 @@ static int detect_and_process_renames(struct merge_options *opt,
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
 		goto diff_filepair_cleanup;
-	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
+	if (!possible_renames(renames, 1) && !possible_renames(renames, 2)) {
+		printf("Super skipping!!\n");
 		goto diff_filepair_cleanup;
+	}
 	dump_info(opt, "initial check");
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
+	printf("detection_run at start: %d\n", detection_run);
 	detection_run |= detect_regular_renames(opt, 1);
 	printf("detection_run: %d\n", detection_run);
 	dump_info(opt, "detect_regular_renames_1");
