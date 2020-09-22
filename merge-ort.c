@@ -680,11 +680,6 @@ static int collect_merge_info_callback(int n,
 	 */
 	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
-#ifdef VERBOSE_DEBUG
-	printf("Called collect_merge_info_callback on %s, %s\n",
-	       info->traverse_path, names[0].path);
-#endif
-
 	/* n = 3 is a fundamental assumption. */
 	if (n != 3)
 		BUG("Called collect_merge_info_callback wrong");
@@ -711,6 +706,11 @@ static int collect_merge_info_callback(int n,
 	while (!p->mode)
 		p++;
 	len = traverse_path_len(info, p->pathlen);
+#ifdef VERBOSE_DEBUG
+	printf("Called collect_merge_info_callback on %s, %s\n",
+	       info->traverse_path, p->path);
+#endif
+
 	/* +1 in both of the following lines to include the NUL byte */
 #if USE_MEMORY_POOL
 	fullpath = mem_pool_alloc(&opt->priv->pool, len+1);
@@ -2950,6 +2950,19 @@ static int collect_renames(struct merge_options *opt,
 	return clean;
 }
 
+static void dump_info(struct merge_options *opt, char *location)
+{
+	struct conflict_info *ci;
+	char *path = "drivers/hwmon/hwmon.c";
+
+	ci = strmap_get(&opt->priv->paths, path);
+	printf("After %s:\n", location);
+	if (!ci)
+		printf("conflict_info for %s is NULL!!!\n", path);
+	else
+		dump_conflict_info(ci, path);
+}
+
 static int detect_and_process_renames(struct merge_options *opt,
 				      struct diff_queue_struct *combined,
 				      struct tree *merge_base,
@@ -2966,10 +2979,17 @@ static int detect_and_process_renames(struct merge_options *opt,
 		goto diff_filepair_cleanup;
 	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
 		goto diff_filepair_cleanup;
+	dump_info(opt, "initial check");
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
 	detection_run |= detect_regular_renames(opt, 1);
+	printf("detection_run: %d\n", detection_run);
+	dump_info(opt, "detect_regular_renames_1");
 	detection_run |= detect_regular_renames(opt, 2);
+	printf("detection_run: %d\n", detection_run);
+	dump_info(opt, "detect_regular_renames_2");
+	printf("renames->redo_after_renames: %d\n",
+	       renames->redo_after_renames);
 	if (renames->redo_after_renames && detection_run) {
 		trace2_region_leave("merge", "regular renames", opt->repo);
 		printf("GOT HERE 1; renames->redo_after_renames = %d\n",
@@ -2979,6 +2999,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	printf("GOT HERE 2\n");
 	use_cached_pairs(opt, &renames->cached_pairs[1], &renames->pairs[1]);
 	use_cached_pairs(opt, &renames->cached_pairs[2], &renames->pairs[2]);
+	dump_info(opt, "use_cached_pairs");
 	trace2_region_leave("merge", "regular renames", opt->repo);
 
 	trace2_region_enter("merge", "directory renames", opt->repo);
@@ -3023,6 +3044,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 				 dir_renames[2], dir_renames[1]);
 	clean &= collect_renames(opt, combined, 2,
 				 dir_renames[1], dir_renames[2]);
+	dump_info(opt, "collect_renames");
 	QSORT(combined->queue, combined->nr, compare_pairs);
 	trace2_region_leave("merge", "directory renames", opt->repo);
 
@@ -3032,6 +3054,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	trace2_region_enter("merge", "process renames", opt->repo);
 	printf("About to call process_renames\n");
 	clean &= process_renames(opt, combined);
+	dump_info(opt, "process_renames");
 	trace2_region_leave("merge", "process renames", opt->repo);
 
 	/*
@@ -3987,11 +4010,13 @@ redo:
 		result->clean = -1;
 		return;
 	}
+	dump_info(opt, "collect_merge_info");
 	trace2_region_leave("merge", "collect_merge_info", opt->repo);
 
 	trace2_region_enter("merge", "renames", opt->repo);
 	result->clean = detect_and_process_renames(opt, &pairs, merge_base,
 						   head, merge);
+	dump_info(opt, "detect_and_process_renames");
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
@@ -4002,6 +4027,7 @@ redo:
 
 	trace2_region_enter("merge", "process_entries", opt->repo);
 	process_entries(opt, &working_tree_oid);
+	dump_info(opt, "process_entries");
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
 	/* FIXME: Only show this if showing hints, and only after other output */
