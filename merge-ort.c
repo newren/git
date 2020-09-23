@@ -1160,6 +1160,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		int wanted_factor = 10;
 
 		/* We should only redo collect_merge_info one time */
+		fflush(stdout);
 		assert(renames->redo_after_renames == 0);
 
 		if (path_count_after / path_count_before > wanted_factor) {
@@ -2391,7 +2392,7 @@ static char *check_for_directory_rename(struct merge_options *opt,
 
 static void dump_conflict_info(struct conflict_info *ci, char *name)
 {
-	printf("conflict_info for %s (at %p):\n", name, ci);
+	printf("conflict_info for %s:\n", name);
 	printf("  ci->merged.directory_name: %s\n",
 	       ci->merged.directory_name);
 	printf("  ci->merged.basename_offset: %lu\n",

@@ -148,7 +148,7 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	while ((commit = get_revision(&revs))) {
 		struct commit *base;
 
-		fprintf(stderr, "Rebasing %s...\r",
+		fprintf(stdout, "### Rebasing %s...\n",
 			oid_to_hex(&commit->object.oid));
 		assert(commit->parents && !commit->parents->next);
 		base = commit->parents->item;
