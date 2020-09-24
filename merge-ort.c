@@ -1005,6 +1005,9 @@ static int handle_deferred_entries(struct merge_options *opt,
 			 * then we need to recurse into all trees to get all
 			 * adds to make sure we have it.
 			 */
+			if (strset_contains(&renames->cached_irrelevant[side],
+					    entry->item.string))
+				continue;
 			item = strmap_get_item(&renames->cached_pairs[side],
 					       entry->item.string);
 			if (!item) {
@@ -2211,27 +2214,30 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 
 	strmap_for_each_entry(side_dir_renames, &iter, entry) {
 		ci = strmap_get(&opt->priv->paths, entry->item.string);
-		if (!ci) {
+		if (!ci ||
+		    ci->merged.clean ||
+		    (ci->dirmask & side_mask)) {
 			/*
-			 * This rename came from a directory that was unchanged
-			 * on the other side of history, and NULL on our side.
-			 * We don't need to detect a directory rename for it.
+			 * !ci: This rename came from a directory that was
+			 * unchanged on the other side of history, and NULL on
+			 * our side.  No directory rename detection needed.
+			 *
+			 * ci->merged.clean: Due to redo_after_renames, on the
+			 * second run, collect_merge_info_callback was able to
+			 * cleanly resolve the trivial directory merge without
+			 * recursing.  As such, we know we don't need directory
+			 * rename detection for it.
+			 *
+			 * ci->dirmask & side_mask: this directory "rename" isn't
+			 * valid because the source directory name still exists
+			 * on the destination side.
 			 */
 			string_list_append(&removable, entry->item.string);
-			continue;
 		}
-		assert(!ci->merged.clean);
-		if (ci->dirmask & side_mask)
-			/*
-			 * This directory "rename" isn't valid because the
-			 * source directory name still exists on the destination
-			 * side.
-			 */
-			string_list_append(&removable, entry->item.string);
 	}
 
 	for (int i=0; i<removable.nr; ++i)
-		strmap_remove(side_dir_renames, removable.items[i].string, 1);
+		strmap_remove(side_dir_renames, removable.items[i].string, 0);
 	string_list_clear(&removable, 0);
 }
 
@@ -2959,8 +2965,10 @@ static int collect_renames(struct merge_options *opt,
 
 static void dump_info(struct merge_options *opt, char *location)
 {
+#ifndef VERBOSE_DEBUG
 	struct conflict_info *ci;
-	char *path = "drivers/hwmon/hwmon.c";
+	//char *path = "drivers/hwmon/hwmon.c";
+	char *path = "drivers/hwmon/max31730.c";
 
 	ci = strmap_get(&opt->priv->paths, path);
 	printf("After %s:\n", location);
@@ -2968,6 +2976,7 @@ static void dump_info(struct merge_options *opt, char *location)
 		printf("conflict_info for %s is NULL!!!\n", path);
 	else
 		dump_conflict_info(ci, path);
+#endif
 }
 
 static int detect_and_process_renames(struct merge_options *opt,
@@ -4440,18 +4449,22 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		strintmap_func(&renames->possible_trivial_merges[i]);
 		strset_func(&renames->target_dirs[i]);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
-		if (-1 != renames->cached_pairs_valid_side) {
+		if (i != renames->cached_pairs_valid_side &&
+		    -1 != renames->cached_pairs_valid_side) {
 			strset_func(&renames->cached_target_names[i]);
 			strset_func(&renames->cached_irrelevant[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
 		}
 
 		/* dir_rename_count */
-		strmap_for_each_entry(&renames->dir_rename_count[i], &iter, e) {
-			struct strintmap *counts = e->item.util;
-			strintmap_free(counts);
+		if (-1 != renames->cached_pairs_valid_side) {
+			strmap_for_each_entry(&renames->dir_rename_count[i],
+					      &iter, e) {
+				struct strintmap *counts = e->item.util;
+				strintmap_free(counts);
+			}
+			strmap_func(&renames->dir_rename_count[i], 1);
 		}
-		strmap_func(&renames->dir_rename_count[i], 1);
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
