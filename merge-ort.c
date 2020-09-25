@@ -2683,6 +2683,7 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 		strintmap_remove(&renames->relevant_sources[side],
 				 entry->item.string);
 	}
+	/* FIXME FIXME FIXME: I'm not so sure we really want to do this... */
 	/* Remove from relevant_sources all entries in cached_irrelevant[side] */
 	strset_for_each_entry(&renames->cached_irrelevant[side], &iter, entry) {
 		strintmap_remove(&renames->relevant_sources[side],
