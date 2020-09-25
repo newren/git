@@ -1,5 +1,4 @@
 * compare-rebased-hwmon-updates is created with bad trees (not valid sort order)
-* why is drivers/hwmon/max31730.c being created?
 * Persist cached_irrelevant for next pick?
   * Maybe just ignored cached_pairs (ignore cached_pairs_valid_side of 1 or 2),
     and see if that fixes the bug.  If so, it is due to cached pairs.
