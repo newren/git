@@ -2817,6 +2817,7 @@ static int detect_regular_renames(struct merge_options *opt,
 		return 0;
 	}
 
+	clear_dir_rename_count(&renames->dir_rename_count[side_index]);
 	repo_diff_setup(opt->repo, &diff_opts);
 	diff_opts.flags.recursive = 1;
 	diff_opts.flags.rename_empty = 0;
@@ -4250,22 +4251,20 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 						     pool, 0);
 			strintmap_init_with_mem_pool(&renames->dirs_removed[i],
 						     pool, 0);
-			strmap_init_with_mem_pool(&renames->dir_rename_count[i],
-						  pool, 1);
 			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
-						  pool, 0);
+						     pool, 0);
 			strset_init_with_mem_pool(&renames->target_dirs[i],
 						  pool, 1);
 #else
 			strintmap_init(&renames->relevant_sources[i], 0);
 			strintmap_init(&renames->dirs_removed[i], 0);
-			strmap_init(&renames->dir_rename_count[i], 1);
 			strintmap_init(&renames->possible_trivial_merges[i], 0);
 			strset_init(&renames->target_dirs[i], 1);
 #endif
 			strmap_init(&renames->cached_pairs[i], 1);
 			strset_init(&renames->cached_irrelevant[i], 1);
 			strset_init(&renames->cached_target_names[i], 0);
+			strmap_init(&renames->dir_rename_count[i], 1);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
@@ -4441,9 +4440,6 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
-		struct hashmap_iter iter;
-		struct str_entry *e;
-
 		strintmap_func(&renames->relevant_sources[i]);
 		strintmap_func(&renames->dirs_removed[i]);
 		strintmap_func(&renames->possible_trivial_merges[i]);
@@ -4454,16 +4450,9 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 			strset_func(&renames->cached_target_names[i]);
 			strset_func(&renames->cached_irrelevant[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
-		}
-
-		/* dir_rename_count */
-		if (-1 != renames->cached_pairs_valid_side) {
-			strmap_for_each_entry(&renames->dir_rename_count[i],
-					      &iter, e) {
-				struct strintmap *counts = e->item.util;
-				strintmap_free(counts);
-			}
-			strmap_func(&renames->dir_rename_count[i], 1);
+			clear_dir_rename_count(&renames->dir_rename_count[i]);
+			if (!reinitialize)
+				strmap_free(&renames->dir_rename_count[i], 1);
 		}
 	}
 	renames->cached_pairs_valid_side = 0;

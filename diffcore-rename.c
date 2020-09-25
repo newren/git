@@ -609,6 +609,10 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	info->setup = 1;
 
 	info->dir_rename_count = dir_rename_count;
+	if (!info->dir_rename_count) {
+		info->dir_rename_count = xmalloc(sizeof(*dir_rename_count));
+		strmap_init(info->dir_rename_count, 1);
+	}
 	strintmap_init(&info->idx_map, 0);
 	strmap_init(&info->dir_rename_guess, 0);
 
@@ -698,8 +702,21 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	}
 }
 
+void clear_dir_rename_count(struct strmap *dir_rename_count)
+{
+	struct hashmap_iter iter;
+	struct str_entry *entry;
+
+	strmap_for_each_entry(dir_rename_count, &iter, entry) {
+		struct strintmap *counts = entry->item.util;
+		strintmap_free(counts);
+	}
+	strmap_clear(dir_rename_count, 1);
+}
+
 static void cleanup_dir_rename_info(struct dir_rename_info *info,
-				    struct strintmap *dirs_removed)
+				    struct strintmap *dirs_removed,
+				    int keep_dir_rename_count)
 {
 	struct hashmap_iter iter;
 	struct str_entry *entry;
@@ -726,17 +743,36 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		FREE_AND_NULL(info->relevant_target_dirs);
 	}
 
-	/*
-	 * Although dir_rename_count was passed in to us and we want to return
-	 * it to the caller, we do want to remove any counts in maps associated
-	 * with SENTINEL_DIR entries.
-	 */
-	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
-		/* entry->item.string is source_dir */
-		struct strintmap *counts = entry->item.util;
+	if (!keep_dir_rename_count) {
+		clear_dir_rename_count(info->dir_rename_count);
+		strmap_free(info->dir_rename_count, 1);
+		FREE_AND_NULL(info->dir_rename_count);
+	} else {
+		/*
+		 * Although dir_rename_count was passed in
+		 * diffcore_rename_extended() and we want to keep it around and
+		 * return it to that caller, we first want to remove any counts
+		 * in the maps associated with SENTINEL_DIR entries and any
+		 * data associated with directories that weren't renamed.
+		 */
+		struct string_list to_remove = STRING_LIST_INIT_NODUP;
+		strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
+			char *source_dir = entry->item.string;
+			struct strintmap *counts = entry->item.util;
 
-		if (strintmap_contains(counts, SENTINEL_DIR))
-			strintmap_remove(counts, SENTINEL_DIR);
+			if (!strintmap_get(dirs_removed, source_dir, 0)) {
+				string_list_append(&to_remove, source_dir);
+				strintmap_free(counts);
+				continue;
+			}
+
+			if (strintmap_contains(counts, SENTINEL_DIR))
+				strintmap_remove(counts, SENTINEL_DIR);
+		}
+		for (int i=0; i<to_remove.nr; ++i)
+			strmap_remove(info->dir_rename_count,
+				      to_remove.items[i].string, 1);
+		string_list_clear(&to_remove, 0);
 	}
 }
 
@@ -1277,6 +1313,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 	trace2_region_enter("diff", "setup", options->repo);
 	info.setup = 0;
+	assert(!dir_rename_count || strmap_empty(dir_rename_count));
 	want_copies = (detect_rename == DIFF_DETECT_COPY);
 	if (want_copies && dirs_removed)
 		BUG("dirs_removed incompatible with copy detection");
@@ -1634,7 +1671,7 @@ void diffcore_rename_extended(struct diff_options *options,
 				free_filespec(rename_dst[i].filespec_to_free);
 	}
 
-	cleanup_dir_rename_info(&info, dirs_removed);
+	cleanup_dir_rename_info(&info, dirs_removed, dir_rename_count != NULL);
 	FREE_AND_NULL(rename_dst);
 	rename_dst_nr = rename_dst_alloc = 0;
 	FREE_AND_NULL(rename_src);
