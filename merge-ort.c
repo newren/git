@@ -1163,7 +1163,6 @@ static int handle_deferred_entries(struct merge_options *opt,
 		int wanted_factor = 10;
 
 		/* We should only redo collect_merge_info one time */
-		fflush(stdout);
 		assert(renames->redo_after_renames == 0);
 
 		if (path_count_after / path_count_before > wanted_factor) {
@@ -1685,7 +1684,6 @@ static int process_renames(struct merge_options *opt,
 {
 	int clean_merge = 1, i;
 
-	printf("renames->nr = %d\n", renames->nr);
 	for (i = 0; i < renames->nr; ++i) {
 		const char *oldpath, *newpath;
 		struct diff_filepair *pair = renames->queue[i];
@@ -1699,8 +1697,6 @@ static int process_renames(struct merge_options *opt,
 		newpath = pair->two->path;
 		oldinfo = strmap_get(&opt->priv->paths, pair->one->path);
 		newinfo = strmap_get(&opt->priv->paths, pair->two->path);
-
-		printf("Processing %s -> %s\n", oldpath, newpath);
 
 		/*
 		 * If oldpath isn't in opt->priv->paths, that means that a
@@ -2158,16 +2154,10 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		int bad_max = 0;
 		char *best = NULL;
 
-#if 0
-		printf("Looking at renames of %s:\n", source_dir);
-#endif
 		strintmap_for_each_entry(counts, &count_iter, count_entry) {
 			char *target_dir = count_entry->item.string;
 			intptr_t count = (intptr_t)count_entry->item.util;
-#if 0
-			printf("  %s -> %s: %ld\n",
-			       source_dir, target_dir, count);
-#endif
+
 			if (count == max)
 				bad_max = max;
 			else if (count > max) {
@@ -2179,9 +2169,6 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 		if (max == 0)
 			continue;
 
-#if 0
-		printf("  max = %d, bad_max = %d\n", max, bad_max);
-#endif
 		if (bad_max == max) {
 			path_msg(opt, source_dir, 0,
 			       _("CONFLICT (directory rename split): "
@@ -2396,6 +2383,7 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	return new_path;
 }
 
+#ifdef VERBOSE_DEBUG
 static void dump_conflict_info(struct conflict_info *ci, char *name)
 {
 	printf("conflict_info for %s:\n", name);
@@ -2421,6 +2409,7 @@ static void dump_conflict_info(struct conflict_info *ci, char *name)
 	printf("  ci->match_mask:    %d\n", ci->match_mask);
 	printf("  ci->processed:     %d\n", ci->processed);
 }
+#endif
 
 static void dump_pairs(struct diff_queue_struct *pairs, char *label)
 {
@@ -2658,11 +2647,6 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 static inline int possible_renames(struct rename_info *renames,
 				   unsigned side_index)
 {
-	printf("*** renames->pairs[%d].nr = %d\n",
-	       side_index, renames->pairs[side_index].nr);
-	printf("*** strintmap_size(&renames->relevant_sources[%d]): %d\n",
-	       side_index,
-	       strintmap_get_size(&renames->relevant_sources[side_index]));
 	return renames->pairs[side_index].nr > 0 &&
 	       !strintmap_empty(&renames->relevant_sources[side_index]);
 }
@@ -2701,7 +2685,6 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 	}
 	/* Remove from relevant_sources all entries in cached_irrelevant[side] */
 	strset_for_each_entry(&renames->cached_irrelevant[side], &iter, entry) {
-		printf("REMOVING %s\n", entry->item.string);
 		strintmap_remove(&renames->relevant_sources[side],
 				 entry->item.string);
 	}
@@ -2754,8 +2737,6 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 					p->one->path, -1);
 		if (val == 0) {
 			assert(p->status == 'D');
-			printf("Adding %s to cached_irrelevant[%d]\n",
-			       p->one->path, side);
 			strset_add(&renames->cached_irrelevant[side],
 				   p->one->path);
 		}
@@ -2767,20 +2748,14 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 		 * If we already had this delete, we'll just set it's value
 		 * to NULL again, so no harm.
 		 */
-		printf("Adding %s to cached_pairs[%d] as a DELETE\n",
-		       p->one->path, side);
 		strmap_put(&renames->cached_pairs[side], p->one->path, NULL);
 	} else if (p->status == 'R') {
 		if (!new_path)
 			new_path = p->two->path;
-		printf("Adding %s->%s to cached_pairs[%d]\n",
-		       p->one->path, new_path, side);
 		old_value = strmap_put(&renames->cached_pairs[side],
 				       p->one->path, xstrdup(new_path));
 		free(old_value);
 	} else if (p->status == 'A' && new_path) {
-		printf("Due to dir rename, adding %s->%s to cached_pairs[%d]\n",
-		       p->two->path, new_path, side);
 		old_value = strmap_put(&renames->cached_pairs[side],
 				       p->two->path, xstrdup(new_path));
 		assert(!old_value);
@@ -2812,7 +2787,6 @@ static int detect_regular_renames(struct merge_options *opt,
 		 * to make sure 'adds' are marked correctly in case the other
 		 * side had directory renames.
 		 */
-		printf("Skipping rename detection on side %d\n", side_index);
 		resolve_diffpair_statuses(&renames->pairs[side_index]);
 		return 0;
 	}
@@ -2964,9 +2938,9 @@ static int collect_renames(struct merge_options *opt,
 	return clean;
 }
 
+#ifdef VERBOSE_DEBUG
 static void dump_info(struct merge_options *opt, char *location)
 {
-#ifndef VERBOSE_DEBUG
 	struct conflict_info *ci;
 	//char *path = "drivers/hwmon/hwmon.c";
 	char *path = "drivers/hwmon/max31730.c";
@@ -2977,8 +2951,8 @@ static void dump_info(struct merge_options *opt, char *location)
 		printf("conflict_info for %s is NULL!!!\n", path);
 	else
 		dump_conflict_info(ci, path);
-#endif
 }
+#endif
 
 static int detect_and_process_renames(struct merge_options *opt,
 				      struct diff_queue_struct *combined,
@@ -2994,32 +2968,18 @@ static int detect_and_process_renames(struct merge_options *opt,
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
 		goto diff_filepair_cleanup;
-	if (!possible_renames(renames, 1) && !possible_renames(renames, 2)) {
-		printf("Super skipping!!\n");
+	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
 		goto diff_filepair_cleanup;
-	}
-	dump_info(opt, "initial check");
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
-	printf("detection_run at start: %d\n", detection_run);
 	detection_run |= detect_regular_renames(opt, 1);
-	printf("detection_run: %d\n", detection_run);
-	dump_info(opt, "detect_regular_renames_1");
 	detection_run |= detect_regular_renames(opt, 2);
-	printf("detection_run: %d\n", detection_run);
-	dump_info(opt, "detect_regular_renames_2");
-	printf("renames->redo_after_renames: %d\n",
-	       renames->redo_after_renames);
 	if (renames->redo_after_renames && detection_run) {
 		trace2_region_leave("merge", "regular renames", opt->repo);
-		printf("GOT HERE 1; renames->redo_after_renames = %d\n",
-			renames->redo_after_renames);
 		goto diff_filepair_cleanup;
 	}
-	printf("GOT HERE 2\n");
 	use_cached_pairs(opt, &renames->cached_pairs[1], &renames->pairs[1]);
 	use_cached_pairs(opt, &renames->cached_pairs[2], &renames->pairs[2]);
-	dump_info(opt, "use_cached_pairs");
 	trace2_region_leave("merge", "regular renames", opt->repo);
 
 	trace2_region_enter("merge", "directory renames", opt->repo);
@@ -3064,7 +3024,6 @@ static int detect_and_process_renames(struct merge_options *opt,
 				 dir_renames[2], dir_renames[1]);
 	clean &= collect_renames(opt, combined, 2,
 				 dir_renames[1], dir_renames[2]);
-	dump_info(opt, "collect_renames");
 	QSORT(combined->queue, combined->nr, compare_pairs);
 	trace2_region_leave("merge", "directory renames", opt->repo);
 
@@ -3072,9 +3031,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	printf("=== Processing %d renames ===\n", combined->nr);
 #endif
 	trace2_region_enter("merge", "process renames", opt->repo);
-	printf("About to call process_renames\n");
 	clean &= process_renames(opt, combined);
-	dump_info(opt, "process_renames");
 	trace2_region_leave("merge", "process renames", opt->repo);
 
 	/*
@@ -4030,13 +3987,11 @@ redo:
 		result->clean = -1;
 		return;
 	}
-	dump_info(opt, "collect_merge_info");
 	trace2_region_leave("merge", "collect_merge_info", opt->repo);
 
 	trace2_region_enter("merge", "renames", opt->repo);
 	result->clean = detect_and_process_renames(opt, &pairs, merge_base,
 						   head, merge);
-	dump_info(opt, "detect_and_process_renames");
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
@@ -4047,7 +4002,6 @@ redo:
 
 	trace2_region_enter("merge", "process_entries", opt->repo);
 	process_entries(opt, &working_tree_oid);
-	dump_info(opt, "process_entries");
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
 	/* FIXME: Only show this if showing hints, and only after other output */
@@ -4534,7 +4488,8 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	merge_ort_nonrecursive_internal(opt, merge_base, side1, side2, result);
 	trace2_region_leave("merge", "inmemory_nonrecursive", opt->repo);
 
-#ifndef VERBOSE_DEBUGGING
+#ifdef VERBOSE_DEBUG
+	/* Print out information about any conflicting paths */
 	{
 	struct merge_options_internal *opti = result->priv;
 	if (!strmap_empty(&opti->unmerged)) {
@@ -4555,19 +4510,6 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 				       side, path, val);
 			}
 		}
-#if 0
-		for (int i=0; i<index->cache_nr; ++i) {
-			fprintf(stderr, "  cache[%d] = (%s, %s, %o, %d, %u, %d)\n",
-				i,
-				index->cache[i]->name,
-				oid_to_hex(&index->cache[i]->oid),
-				index->cache[i]->ce_mode,
-				ce_stage(index->cache[i]),
-				index->cache[i]->ce_flags,
-				index->cache[i]->index);
-		}
-		fprintf(stderr, "... AFTER ...\n");
-#endif
 	}
 	}
 #endif
