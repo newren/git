@@ -4400,6 +4400,8 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		strintmap_func(&renames->possible_trivial_merges[i]);
 		strset_func(&renames->target_dirs[i]);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
+		if (!reinitialize)
+			assert(renames->cached_pairs_valid_side == 0);
 		if (i != renames->cached_pairs_valid_side &&
 		    -1 != renames->cached_pairs_valid_side) {
 			strset_func(&renames->cached_target_names[i]);
