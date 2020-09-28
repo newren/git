@@ -1400,9 +1400,11 @@ void diffcore_rename_extended(struct diff_options *options,
 							 NULL);
 		trace2_region_leave("diff", "cull exact", options->repo);
 
+		trace2_region_enter("diff", "dir rename setup", options->repo);
 		initialize_dir_rename_info(&info, relevant_sources,
 					   relevant_targets, dirs_removed,
 					   cached_pairs, dir_rename_count);
+		trace2_region_leave("diff", "dir rename setup", options->repo);
 
 #ifdef SECTION_LABEL
 		printf("Looking for basename-based renames...\n");
