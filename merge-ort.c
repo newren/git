@@ -2683,7 +2683,6 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 		strintmap_remove(&renames->relevant_sources[side],
 				 entry->item.string);
 	}
-	/* FIXME FIXME FIXME: I'm not so sure we really want to do this... */
 	/* Remove from relevant_sources all entries in cached_irrelevant[side] */
 	strset_for_each_entry(&renames->cached_irrelevant[side], &iter, entry) {
 		strintmap_remove(&renames->relevant_sources[side],
@@ -4405,12 +4404,13 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		if (i != renames->cached_pairs_valid_side &&
 		    -1 != renames->cached_pairs_valid_side) {
 			strset_func(&renames->cached_target_names[i]);
-			strset_func(&renames->cached_irrelevant[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
 			clear_dir_rename_count(&renames->dir_rename_count[i]);
 			if (!reinitialize)
 				strmap_free(&renames->dir_rename_count[i], 1);
 		}
+		if (-1 != renames->cached_pairs_valid_side)
+			strset_func(&renames->cached_irrelevant[i]);
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
