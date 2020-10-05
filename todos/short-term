@@ -1,30 +1,7 @@
-* Existing or latent bugs:
-  * spurious directory rename split messages (dir_rename_count contains entries
-    for directories that exist on both sides, and has e.g. 1 rename on each
-    side).  Should prune keys of dir_rename_count down to those corresponding
-    to those for which strintmap_get(dirs_removed[side], directory, 0) > 0.
-    * However, this modifies testcases 12b and 12c of t6423 slightly.  12b was
-      already modified for optimization purposes -- if no new files exist in the
-      directory to be renamed, we won't bother detecting the rename.  Now, if
-      there are no new files exist in the directory to be renamed, even if we
-      detected the individual renames we'll ignore the directory rename.  Can
-      either just modify the test for the new expectation, or add new files into
-      each of the directories to show the weirdness -- or split the test into
-      both ones with and without new files within the directories.
-  * Removing cached_irrelevant entries from relevant_sources _might_ be okay
-    when RELEVANT_LOCATION, but NOT when RELEVANT_CONTENT or RELEVANT_BOTH.
-    Not sure if it's okay for RELEVANT_LOCATION either.
-       Maybe cached_irrelevant should be cleared whenever -1 !=
-       renames->cached_pairs_valid_side instead of also keeping it when
-       it has a value matching our current side.
-  * Need to really explain 12b and 12c changed behavior better.  Maybe even split
-    the testcases
+* Need to really explain 12b and 12c changed behavior better.  Maybe even split
+  the testcases
 
 * compare-rebased-hwmon-updates is created with bad trees (not valid sort order)
-* Persist cached_irrelevant for next pick?
-  * Maybe just ignored cached_pairs (ignore cached_pairs_valid_side of 1 or 2),
-    and see if that fixes the bug.  If so, it is due to cached pairs.
-
 
 * SENTINEL_DIR stuff
   * if culling sources before basename matching:
@@ -36,12 +13,6 @@
   * Hard-coded 0/1 values in dirs_removed should be documented somehow/somewhere
   * Should write down notes about why cached_pairs is safe (or is it?)
   * Could potentially cull sources before basename matching too
-
-* caching deletes is NOT safe:
-  * if path shows up as delete
-    * AND dirs_removed[dirname(path)] == 2
-    * AND counts shown that first > second + unknown [maybe store value of 3??]
-    * THEN DO NOT cache the delete
 
 *** Stuff to investigate:
   * If D/F conflict starts but match_mask on dir, does trivial resolve work?
