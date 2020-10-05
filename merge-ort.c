@@ -500,6 +500,7 @@ static void add_pair(struct merge_options *opt,
 		     const char *pathname,
 		     unsigned side,
 		     unsigned is_add /* if false, is_delete */,
+		     unsigned match_mask,
 		     unsigned dir_rename_mask)
 {
 	struct diff_filespec *one, *two;
@@ -510,13 +511,47 @@ static void add_pair(struct merge_options *opt,
 	int names_idx = is_add ? side : 0;
 
 	if (is_add) {
+		assert(match_mask == 0 || match_mask == 6);
 		if (strset_contains(&renames->cached_target_names[side],
 				    pathname))
 			return;
 	} else {
-		strintmap_set(&renames->relevant_sources[side], pathname,
-			      (dir_rename_mask == 0x07) ? RELEVANT_BOTH :
-							  RELEVANT_CONTENT);
+		unsigned content_relevant = (match_mask == 0);
+		unsigned location_relevant = (dir_rename_mask == 0x07);
+
+		assert(match_mask == 0 || match_mask == 3 || match_mask == 5);
+
+		/*
+		 * If pathname is found in cached_irrelevant[side] due to
+		 * previous pick but for this commit content is relevant,
+		 * then we need to remove it from cached_irrelevant.
+		 */
+		if (content_relevant)
+			/* strset_remove is no-op if strset doesn't have key */
+			strset_remove(&renames->cached_irrelevant[side],
+				      pathname);
+
+		/*
+		 * We do not need to re-detect renames for paths that we already
+		 * know the pairing, i.e. for cached_pairs (or
+		 * cached_irrelevant).  However, handle_deferred_entries() needs
+		 * to loop over the union of keys from relevant_sources[side] and
+		 * cached_pairs[side], so for simplicity we set relevant_sources
+		 * for all the cached_pairs too and then strip them back out in
+		 * prune_cached_from_relevant() at the beginning of
+		 * detect_regular_renames().
+		 */
+		if (content_relevant || location_relevant) {
+			/* content_relevant trumps location_relevant */
+			strintmap_set(&renames->relevant_sources[side], pathname,
+				      content_relevant ? RELEVANT_CONTENT : RELEVANT_LOCATION);
+		}
+
+		/*
+		 * Avoid creating pair if we've already cached rename results.
+		 * Note that we do this after setting relevant_sources[side]
+		 * as noted in the comment above.
+		 */
 		if (strmap_contains(&renames->cached_pairs[side], pathname) ||
 		    strset_contains(&renames->cached_irrelevant[side], pathname))
 			return;
@@ -543,7 +578,8 @@ static void collect_rename_info(struct merge_options *opt,
 				const char *dirname,
 				const char *fullname,
 				unsigned filemask,
-				unsigned dirmask)
+				unsigned dirmask,
+				unsigned match_mask)
 {
 	struct rename_info *renames = opt->priv->renames;
 	unsigned side;
@@ -624,13 +660,13 @@ static void collect_rename_info(struct merge_options *opt,
 		if ((filemask & 1) && !(filemask & side_mask)) {
 			// fprintf(stderr, "Side %d deletion: %s\n", side, fullname);
 			add_pair(opt, names, fullname, side, 0 /* delete */,
-				 renames->dir_rename_mask);
+				 match_mask & filemask, renames->dir_rename_mask);
 		}
 
 		if (!(filemask & 1) && (filemask & side_mask)) {
 			// fprintf(stderr, "Side %d addition: %s\n", side, fullname);
 			add_pair(opt, names, fullname, side, 1 /* add */,
-				 renames->dir_rename_mask);
+				 match_mask & filemask, renames->dir_rename_mask);
 		}
 	}
 }
@@ -658,11 +694,10 @@ static int collect_merge_info_callback(int n,
 	const char *dirname = opti->current_dir_name;
 	unsigned prev_dir_rename_mask = renames->dir_rename_mask;
 	unsigned filemask = mask & ~dirmask;
+	unsigned match_mask = 0; /* will be updated below */
 	unsigned mbase_null = !(mask & 1);
 	unsigned side1_null = !(mask & 2);
 	unsigned side2_null = !(mask & 4);
-	unsigned side1_is_tree = (dirmask & 2);
-	unsigned side2_is_tree = (dirmask & 4);
 	unsigned side1_matches_mbase = (!side1_null && !mbase_null &&
 					names[0].mode == names[1].mode &&
 					oideq(&names[0].oid, &names[1].oid));
@@ -697,6 +732,14 @@ static int collect_merge_info_callback(int n,
 
 	/* Other invariant checks, mostly for documentation purposes. */
 	assert(mask == (dirmask | filemask));
+
+	/* Determine match_mask */
+	if (side1_matches_mbase)
+		match_mask = (side2_matches_mbase ? 7 : 3);
+	else if (side2_matches_mbase)
+		match_mask = 5;
+	else if (sides_match)
+		match_mask = 6;
 
 	/*
 	 * Get the name of the relevant filepath, which we'll pass to
@@ -760,87 +803,37 @@ static int collect_merge_info_callback(int n,
 	 * a source and destination path.  We'll cull the unneeded sources
 	 * later.
 	 */
-	collect_rename_info(opt, names, dirname, fullpath, filemask, dirmask);
+	collect_rename_info(opt, names, dirname, fullpath,
+			    filemask, dirmask, match_mask);
 
 	/*
-	 * If side1 matches mbase, then we have some simplifications.  In
-	 * particular, we can ignore mbase as a rename source because
-	 *   - side1 has no interesting contents or changes (use side2 versions)
-	 *   - side1 has no content changes to include in renames on side2 side
-	 *   - side1 contains no new files to move with side2's directory renames
-	 * Note that if side2 is a tree, there may be new files on side2's side
-	 * that are rename targets that need to be merged with changes from
-	 * elsewhere on side1's side of history.  Also, if side2 is a file
-	 * (and side1 is a tree), the path on side2 is an add that may
-	 * correspond to a rename target so we have to mark that as conflicted.
+	 * If side1 matches mbase and this is a file, we can early resolve.
+	 * We cannot necessarily do so for trees, because trees may have
+	 * rename targets on side2.
 	 */
-	if (side1_matches_mbase) {
-		if (side2_null && filemask) {
-			/*
-			 * This path was in relevant_sources, but
-			 * RELEVANT_CONTENT is no longer true.  Remove that
-			 * flag for the path, and if that makes the path no
-			 * longer relevant, remove it from relevant_sources.
-			 */
+	if (side1_matches_mbase && filemask == 0x07) {
+		/* use side2 version as resolution */
+		setup_path_info(opt, &pi, dirname, info->pathlen,
+				fullpath, names, names+2, side2_null, 0,
+				filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
-			printf("Path 1.A for %s\n", names[0].path);
+		printf("Path 1.C for %s\n", pi.string);
 #endif
-			if (renames->dir_rename_mask == 0x07)
-				strintmap_set(&renames->relevant_sources[2],
-					      fullpath, RELEVANT_LOCATION);
-			else
-				strintmap_remove(&renames->relevant_sources[2],
-						 fullpath);
-		} else if (!side1_is_tree && !side2_is_tree) {
-			/* use side2 version as resolution */
-			assert(filemask == 0x07);
-			assert(dirmask == 0x0);
-			setup_path_info(opt, &pi, dirname, info->pathlen,
-					fullpath, names, names+2, side2_null, 0,
-					filemask, dirmask, 1);
-#ifdef VERBOSE_DEBUG
-			printf("Path 1.C for %s\n", pi.string);
-#endif
-			strmap_put(&opti->paths, pi.string, pi.util);
-			return mask;
-		}
+		strmap_put(&opti->paths, pi.string, pi.util);
+		return mask;
 	}
 
-	/*
-	 * If side2 matches mbase, then we have some simplifications.  In
-	 * particular, we can ignore mbase as a rename source.  Same
-	 * reasoning as for above but with side1 and side2 swapped.
-	 */
-	if (side2_matches_mbase) {
-		if (side1_null && filemask) {
-			/*
-			 * This path was in relevant_sources, but
-			 * RELEVANT_CONTENT is no longer true.  Remove that
-			 * flag for the path, and if that makes the path no
-			 * longer relevant, remove it from relevant_sources.
-			 */
+	/* Similar to above but swapping sides 1 and 2 */
+	if (side2_matches_mbase && filemask == 0x07) {
+		/* use side1 version as resolution */
+		setup_path_info(opt, &pi, dirname, info->pathlen,
+				fullpath, names, names+1, side1_null, 0,
+				filemask, dirmask, 1);
 #ifdef VERBOSE_DEBUG
-			printf("Path 2.A for %s\n", names[0].path);
+		printf("Path 2.C for %s\n", pi.string);
 #endif
-			if (renames->dir_rename_mask == 0x07)
-				strintmap_set(&renames->relevant_sources[1],
-					      fullpath, RELEVANT_LOCATION);
-			else
-				strintmap_remove(&renames->relevant_sources[1],
-						 fullpath);
-		} else if (!side1_is_tree && !side2_is_tree) {
-			/* use side1 version as resolution */
-			assert(filemask == 0x07);
-			assert(dirmask == 0x0);
-			setup_path_info(opt, &pi, dirname, info->pathlen,
-					fullpath, names, names+1, side1_null, 0,
-					filemask, dirmask, 1);
-#ifdef VERBOSE_DEBUG
-			printf("Path 2.C for %s\n", pi.string);
-#endif
-			strmap_put(&opti->paths, pi.string, pi.util);
-			return mask;
-		}
+		strmap_put(&opti->paths, pi.string, pi.util);
+		return mask;
 	}
 
 	/*
@@ -857,13 +850,7 @@ static int collect_merge_info_callback(int n,
 	printf("Stats:\n");
 #endif
 	ci = pi.util;
-	if (side1_matches_mbase)
-		ci->match_mask = 3;
-	else if (side2_matches_mbase)
-		ci->match_mask = 5;
-	else if (sides_match)
-		ci->match_mask = 6;
-	/* else ci->match_mask is already 0; no need to set it */
+	ci->match_mask = match_mask;
 #ifdef VERBOSE_DEBUG
 	printf("  matchmask: %u\n", ci->match_mask);
 #endif
@@ -872,8 +859,6 @@ static int collect_merge_info_callback(int n,
 	       renames->dir_rename_mask);
 	printf("  side1_null: %d\n", side1_null);
 	printf("  side2_null: %d\n", side2_null);
-	printf("  side1_is_tree: %d\n", side1_is_tree);
-	printf("  side2_is_tree: %d\n", side2_is_tree);
 	printf("  side1_matches_mbase: %d\n", side1_matches_mbase);
 	printf("  side2_matches_mbase: %d\n", side2_matches_mbase);
 	printf("  filemask: %u\n", filemask);
@@ -2643,12 +2628,19 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 }
 
 /*** Rename stuff ***/
-
-static inline int possible_renames(struct rename_info *renames,
-				   unsigned side_index)
+static inline int possible_uncached_renames(struct rename_info *renames,
+					    unsigned side_index)
 {
 	return renames->pairs[side_index].nr > 0 &&
 	       !strintmap_empty(&renames->relevant_sources[side_index]);
+}
+
+static inline int possible_renames(struct rename_info *renames)
+{
+	return possible_uncached_renames(renames, 1) ||
+	       possible_uncached_renames(renames, 2) ||
+	       !strmap_empty(&renames->cached_pairs[1]) ||
+	       !strmap_empty(&renames->cached_pairs[2]);
 }
 
 static void resolve_diffpair_statuses(struct diff_queue_struct *q)
@@ -2675,6 +2667,7 @@ static void resolve_diffpair_statuses(struct diff_queue_struct *q)
 static void prune_cached_from_relevant(struct rename_info *renames,
 				       unsigned side)
 {
+	/* Reason for this function described in add_pair() */
 	struct hashmap_iter iter;
 	struct str_entry *entry;
 
@@ -2781,7 +2774,7 @@ static int detect_regular_renames(struct merge_options *opt,
 	struct rename_info *renames = opt->priv->renames;
 
 	prune_cached_from_relevant(renames, side_index);
-	if (!possible_renames(renames, side_index)) {
+	if (!possible_uncached_renames(renames, side_index)) {
 		/*
 		 * No rename detection needed for this side, but we still need
 		 * to make sure 'adds' are marked correctly in case the other
@@ -2968,7 +2961,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	memset(combined, 0, sizeof(*combined));
 	if (!merge_detect_rename(opt))
 		goto diff_filepair_cleanup;
-	if (!possible_renames(renames, 1) && !possible_renames(renames, 2))
+	if (!possible_renames(renames))
 		goto diff_filepair_cleanup;
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
@@ -4405,12 +4398,11 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 		    -1 != renames->cached_pairs_valid_side) {
 			strset_func(&renames->cached_target_names[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
+			strset_func(&renames->cached_irrelevant[i]);
 			clear_dir_rename_count(&renames->dir_rename_count[i]);
 			if (!reinitialize)
 				strmap_free(&renames->dir_rename_count[i], 1);
 		}
-		if (-1 != renames->cached_pairs_valid_side)
-			strset_func(&renames->cached_irrelevant[i]);
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
