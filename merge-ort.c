@@ -970,7 +970,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 {
 	struct rename_info *renames = opt->priv->renames;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	int side, ret = 0;
 	int path_count_before, path_count_after = 0;
 
@@ -983,7 +983,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		strset_for_each_entry(&renames->relevant_sources[side],
 				      &iter, entry) {
 			char *rename_target, *dir, *dir_marker;
-			struct string_list_item *item;
+			struct strmap_entry *e;
 
 			/*
 			 * if we don't know delete/rename info for this path,
@@ -991,17 +991,17 @@ static int handle_deferred_entries(struct merge_options *opt,
 			 * adds to make sure we have it.
 			 */
 			if (strset_contains(&renames->cached_irrelevant[side],
-					    entry->item.string))
+					    entry->key))
 				continue;
-			item = strmap_get_item(&renames->cached_pairs[side],
-					       entry->item.string);
-			if (!item) {
+			e = strmap_get_entry(&renames->cached_pairs[side],
+					     entry->key);
+			if (!e) {
 				optimization_okay = 0;
 				break;
 			}
 
 			/* If this is a delete, we have enough info already */
-			rename_target = item->util;
+			rename_target = e->value;
 			if (!rename_target)
 				continue;
 
@@ -1044,8 +1044,8 @@ static int handle_deferred_entries(struct merge_options *opt,
 #endif
 				   0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
-			char *path = entry->item.string;
-			unsigned dir_rename_mask = (intptr_t)entry->item.util;
+			char *path = entry->key;
+			unsigned dir_rename_mask = (intptr_t)entry->value;
 			struct conflict_info *ci;
 			unsigned dirmask;
 			struct tree_desc t[3];
@@ -1108,7 +1108,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		strintmap_free(&copy);
 		strintmap_for_each_entry(&renames->possible_trivial_merges[side],
 				      &iter, entry) {
-			char *path = entry->item.string;
+			char *path = entry->key;
 			struct conflict_info *ci;
 
 			ci = strmap_get(&opt->priv->paths, path);
@@ -1984,17 +1984,17 @@ struct collision_info {
 
 /*
  * Return a new string that replaces the beginning portion (which matches
- * rename_info->item.string), with rename_info->util.new_dir.  In perl-speak:
- *   new_path_name = (old_path =~ s/rename_info->item.string/rename_info->util.new_dir/);
+ * rename_info->key), with rename_info->util.new_dir.  In perl-speak:
+ *   new_path_name = (old_path =~ s/rename_info->key/rename_info->value/);
  * NOTE:
- *   Caller must ensure that old_path starts with rename_info->string + '/'.
+ *   Caller must ensure that old_path starts with rename_info->key + '/'.
  */
-static char *apply_dir_rename(struct string_list_item *rename_info,
+static char *apply_dir_rename(struct strmap_entry *rename_info,
 			      const char *old_path)
 {
 	struct strbuf new_path = STRBUF_INIT;
-	const char *old_dir = rename_info->string;
-	const char *new_dir = rename_info->util;
+	const char *old_dir = rename_info->key;
+	const char *new_dir = rename_info->value;
 	int oldlen, newlen, new_dir_len;
 
 	oldlen = strlen(old_dir);
@@ -2046,7 +2046,7 @@ static int path_in_way(struct strmap *paths, const char *path, unsigned side_mas
 static char *handle_path_level_conflicts(struct merge_options *opt,
 					 const char *path,
 					 unsigned side_index,
-					 struct string_list_item *rename_info,
+					 struct strmap_entry *rename_info,
 					 struct strmap *collisions)
 {
 	char *new_path = NULL;
@@ -2118,7 +2118,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 {
 	struct strmap *dir_renames;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	struct rename_info *renames = opt->priv->renames;
 
 	dir_renames = xmalloc(sizeof(*dir_renames));
@@ -2132,17 +2132,17 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	 * where best_new_directory is the one with the unique highest count.
 	 */
 	strmap_for_each_entry(&renames->dir_rename_count[side], &iter, entry) {
-		char *source_dir = entry->item.string;
-		struct strintmap *counts = entry->item.util;
+		char *source_dir = entry->key;
+		struct strintmap *counts = entry->value;
 		struct hashmap_iter count_iter;
-		struct str_entry *count_entry;
+		struct strmap_entry *count_entry;
 		int max = 0;
 		int bad_max = 0;
 		char *best = NULL;
 
 		strintmap_for_each_entry(counts, &count_iter, count_entry) {
-			char *target_dir = count_entry->item.string;
-			intptr_t count = (intptr_t)count_entry->item.util;
+			char *target_dir = count_entry->key;
+			intptr_t count = (intptr_t)count_entry->value;
 
 			if (count == max)
 				bad_max = max;
@@ -2168,7 +2168,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			strmap_put(dir_renames, source_dir, best);
 #ifdef VERBOSE_DEBUG
 			fprintf(stderr, "Dir rename %s -> %s\n",
-				entry->item.string, best);
+				entry->key, best);
 #endif
 		}
 	}
@@ -2181,12 +2181,12 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 				       unsigned side_mask)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	struct conflict_info *ci;
 	struct string_list removable = STRING_LIST_INIT_NODUP;
 
 	strmap_for_each_entry(side_dir_renames, &iter, entry) {
-		ci = strmap_get(&opt->priv->paths, entry->item.string);
+		ci = strmap_get(&opt->priv->paths, entry->key);
 		if (!ci ||
 		    ci->merged.clean ||
 		    (ci->dirmask & side_mask)) {
@@ -2205,7 +2205,7 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 			 * valid because the source directory name still exists
 			 * on the destination side.
 			 */
-			string_list_append(&removable, entry->item.string);
+			string_list_append(&removable, entry->key);
 		}
 	}
 
@@ -2219,12 +2219,12 @@ static void handle_directory_level_conflicts(struct merge_options *opt,
 					     struct strmap *side2_dir_renames)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	struct string_list duplicated = STRING_LIST_INIT_NODUP;
 
 	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
-		if (strmap_contains(side2_dir_renames, entry->item.string))
-			string_list_append(&duplicated, entry->item.string);
+		if (strmap_contains(side2_dir_renames, entry->key))
+			string_list_append(&duplicated, entry->key);
 	}
 
 	for (int i=0; i<duplicated.nr; ++i) {
@@ -2237,21 +2237,21 @@ static void handle_directory_level_conflicts(struct merge_options *opt,
 	remove_invalid_dir_renames(opt, side2_dir_renames, 4);
 }
 
-static struct string_list_item *check_dir_renamed(const char *path,
-						  struct strmap *dir_renames)
+static struct strmap_entry *check_dir_renamed(const char *path,
+					      struct strmap *dir_renames)
 {
 	char *temp = xstrdup(path);
 	char *end;
-	struct string_list_item *item = NULL;
+	struct strmap_entry *e = NULL;
 
 	while ((end = strrchr(temp, '/'))) {
 		*end = '\0';
-		item = strmap_get_item(dir_renames, temp);
-		if (item)
+		e = strmap_get_entry(dir_renames, temp);
+		if (e)
 			break;
 	}
 	free(temp);
-	return item;
+	return e;
 }
 
 static void compute_collisions(struct strmap *collisions,
@@ -2281,7 +2281,7 @@ static void compute_collisions(struct strmap *collisions,
 	 * See testcases 9e and all of section 5 from t6043 for examples.
 	 */
 	for (i = 0; i < pairs->nr; ++i) {
-		struct string_list_item *rename_info;
+		struct strmap_entry *rename_info;
 		struct collision_info *collision_info;
 		char *new_path;
 		struct diff_filepair *pair = pairs->queue[i];
@@ -2317,8 +2317,8 @@ static char *check_for_directory_rename(struct merge_options *opt,
 					int *clean_merge)
 {
 	char *new_path = NULL;
-	struct string_list_item *rename_info;
-	struct string_list_item *otherinfo = NULL;
+	struct strmap_entry *rename_info;
+	struct strmap_entry *otherinfo = NULL;
 	const char *new_dir;
 
 	if (strmap_empty(dir_renames))
@@ -2326,8 +2326,8 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	rename_info = check_dir_renamed(path, dir_renames);
 	if (!rename_info)
 		return new_path;
-	/* old_dir = rename_info->string; */
-	new_dir = rename_info->util;
+	/* old_dir = rename_info->key; */
+	new_dir = rename_info->value;
 
 	/*
 	 * This next part is a little weird.  We do not want to do an
@@ -2353,12 +2353,12 @@ static char *check_for_directory_rename(struct merge_options *opt,
 	 * As it turns out, this also prevents N-way transient rename
 	 * confusion; See testcases 9c and 9d of t6043.
 	 */
-	otherinfo = strmap_get_item(dir_rename_exclusions, new_dir);
+	otherinfo = strmap_get_entry(dir_rename_exclusions, new_dir);
 	if (otherinfo) {
-		path_msg(opt, rename_info->string, 1,
+		path_msg(opt, rename_info->key, 1,
 			 _("WARNING: Avoiding applying %s -> %s rename "
 			   "to %s, because %s itself was renamed."),
-			 rename_info->string, new_dir, path, new_dir);
+			 rename_info->key, new_dir, path, new_dir);
 		return NULL;
 	}
 
@@ -2453,16 +2453,16 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	 */
 	struct string_list dirs_to_insert = STRING_LIST_INIT_NODUP;
 	struct conflict_info *ci, *new_ci;
-	struct string_list_item *item;
+	struct strmap_entry *entry;
 	const char *branch_with_new_path, *branch_with_dir_rename;
 	char *old_path = pair->two->path;
 	char *parent_name;
 	char *cur_path;
 	int i, len;
 
-	item = strmap_get_item(&opt->priv->paths, old_path);
-	old_path = item->string;
-	ci = item->util;
+	entry = strmap_get_entry(&opt->priv->paths, old_path);
+	old_path = entry->key;
+	ci = entry->value;
 #ifdef VERBOSE_DEBUG
 	dump_conflict_info(ci, old_path);
 #endif
@@ -2492,12 +2492,12 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		}
 
 		/* Look it up in opt->priv->paths */
-		item = strmap_get_item(&opt->priv->paths, parent_name);
-		if (item) {
+		entry = strmap_get_entry(&opt->priv->paths, parent_name);
+		if (entry) {
 #if !USE_MEMORY_POOL
 			free(parent_name);
 #endif
-			parent_name = item->string; /* reuse known pointer */
+			parent_name = entry->key; /* reuse known pointer */
 			break;
 		}
 
@@ -2670,17 +2670,17 @@ static void prune_cached_from_relevant(struct rename_info *renames,
 {
 	/* Reason for this function described in add_pair() */
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 
 	/* Remove from relevant_sources all entries in cached_pairs[side] */
 	strmap_for_each_entry(&renames->cached_pairs[side], &iter, entry) {
 		strintmap_remove(&renames->relevant_sources[side],
-				 entry->item.string);
+				 entry->key);
 	}
 	/* Remove from relevant_sources all entries in cached_irrelevant[side] */
 	strset_for_each_entry(&renames->cached_irrelevant[side], &iter, entry) {
 		strintmap_remove(&renames->relevant_sources[side],
-				 entry->item.string);
+				 entry->key);
 	}
 }
 
@@ -2689,7 +2689,7 @@ static void use_cached_pairs(struct merge_options *opt,
 			     struct diff_queue_struct *pairs)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 #if USE_MEMORY_POOL
 	struct mem_pool *pool = &opt->priv->pool;
 #endif
@@ -2700,8 +2700,8 @@ static void use_cached_pairs(struct merge_options *opt,
 	 */
 	strmap_for_each_entry(cached_pairs, &iter, entry) {
 		struct diff_filespec *one, *two;
-		char *old_name = entry->item.string;
-		char *new_name = entry->item.util;
+		char *old_name = entry->key;
+		char *new_name = entry->value;
 		if (!new_name)
 			new_name = old_name;
 
@@ -2715,7 +2715,7 @@ static void use_cached_pairs(struct merge_options *opt,
 		two = alloc_filespec(new_name);
 		diff_queue(pairs, one, two);
 #endif
-		pairs->queue[pairs->nr-1]->status = entry->item.util ? 'R' : 'D';
+		pairs->queue[pairs->nr-1]->status = entry->value ? 'R' : 'D';
 	}
 }
 
@@ -2865,7 +2865,7 @@ static int collect_renames(struct merge_options *opt,
 	struct strmap collisions;
 	struct diff_queue_struct *side_pairs;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	struct rename_info *renames = opt->priv->renames;
 
 	side_pairs = &renames->pairs[side_index];
@@ -2916,7 +2916,7 @@ static int collect_renames(struct merge_options *opt,
 	}
 
 	strmap_for_each_entry(&collisions, &iter, entry) {
-		struct collision_info *info = entry->item.util;
+		struct collision_info *info = entry->value;
 		string_list_clear(&info->source_files, 0);
 	}
 	/*
@@ -2985,7 +2985,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	if (need_dir_renames) {
 #ifdef VERBOSE_DEBUG
 		struct hashmap_iter iter;
-		struct str_entry *entry;
+		struct strmap_entry *entry;
 #endif
 
 		for (s = 1; s <= 2; s++)
@@ -2994,9 +2994,9 @@ static int detect_and_process_renames(struct merge_options *opt,
 		for (s = 1; s <= 2; s++) {
 			fprintf(stderr, "dir renames[%d]:\n", s);
 			strmap_for_each_entry(dir_renames[s], &iter, entry) {
-				struct dir_rename_info *info = entry->item.util;
+				struct dir_rename_info *info = entry->value;
 				fprintf(stderr, "    %s -> %s:\n",
-					entry->item.string, info->new_dir.buf);
+					entry->key, info->new_dir.buf);
 			}
 		}
 		fprintf(stderr, "Done.\n");
@@ -3680,7 +3680,7 @@ static void process_entries(struct merge_options *opt,
 			    struct object_id *result_oid)
 {
 	struct hashmap_iter iter;
-	struct str_entry *e;
+	struct strmap_entry *e;
 	struct string_list plist = STRING_LIST_INIT_NODUP;
 	struct string_list_item *entry;
 	struct directory_versions dir_metadata;
@@ -3699,7 +3699,7 @@ static void process_entries(struct merge_options *opt,
 	/* Put every entry from paths into plist, then sort */
 	trace2_region_enter("merge", "plist copy", opt->repo);
 	strmap_for_each_entry(&opt->priv->paths, &iter, e) {
-		string_list_append(&plist, e->item.string)->util = e->item.util;
+		string_list_append(&plist, e->key)->util = e->value;
 	}
 	trace2_region_leave("merge", "plist copy", opt->repo);
 
@@ -3819,7 +3819,7 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 					 struct strmap *unmerged)
 {
 	struct hashmap_iter iter;
-	struct str_entry *e;
+	struct strmap_entry *e;
 	struct checkout state = CHECKOUT_INIT;
 	int errs = 0;
 	int original_cache_nr;
@@ -3850,8 +3850,8 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 
 	/* Put every entry from paths into plist, then sort */
 	strmap_for_each_entry(unmerged, &iter, e) {
-		const char *path = e->item.string;
-		struct conflict_info *ci = e->item.util;
+		const char *path = e->key;
+		struct conflict_info *ci = e->value;
 		int pos;
 		struct cache_entry *ce;
 		int i;
@@ -4266,7 +4266,7 @@ void merge_switch_to_result(struct merge_options *opt,
 	if (display_update_msgs) {
 		struct merge_options_internal *opti = result->priv;
 		struct hashmap_iter iter;
-		struct str_entry *e;
+		struct strmap_entry *e;
 		struct string_list olist = STRING_LIST_INIT_NODUP;
 		int i;
 
@@ -4278,7 +4278,7 @@ void merge_switch_to_result(struct merge_options *opt,
 
 		/* Put every entry from output into olist, then sort */
 		strmap_for_each_entry(&opti->output, &iter, e) {
-			string_list_append(&olist, e->item.string)->util = e->item.util;
+			string_list_append(&olist, e->key)->util = e->value;
 		}
 		string_list_sort(&olist);
 
@@ -4346,11 +4346,11 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 
 	if (!reinitialize) {
 		struct hashmap_iter iter;
-		struct str_entry *e;
+		struct strmap_entry *e;
 
 		/* Put every entry from output into olist, then sort */
 		strmap_for_each_entry(&opti->output, &iter, e) {
-			struct strbuf *sb = e->item.util;
+			struct strbuf *sb = e->value;
 			strbuf_release(sb);
 			/*
 			 * We don't need to free(sb) here; we could pass
@@ -4413,7 +4413,7 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	struct rename_info *renames;
 	struct tree **merge_trees;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	int s;
 
 	if (!result->priv)
@@ -4441,9 +4441,9 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	/* Populate cache_target_names from cached_pairs */
 	s = renames->cached_pairs_valid_side;
 	strmap_for_each_entry(&renames->cached_pairs[s], &iter, entry)
-		if (entry->item.util)
+		if (entry->value)
 			strset_add(&renames->cached_target_names[s],
-				   entry->item.util);
+				   entry->value);
 }
 
 void merge_inmemory_nonrecursive(struct merge_options *opt,
@@ -4477,11 +4477,11 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	struct merge_options_internal *opti = result->priv;
 	if (!strmap_empty(&opti->unmerged)) {
 		struct hashmap_iter iter;
-		struct str_entry *entry;
+		struct strmap_entry *entry;
 
 		strmap_for_each_entry(&opti->unmerged, &iter, entry) {
-			char *path = entry->item.string;
-			struct conflict_info *ci = entry->item.util;
+			char *path = entry->key;
+			struct conflict_info *ci = entry->value;
 			int side;
 
 			printf("Unmerged path: %s\n", path);

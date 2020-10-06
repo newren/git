@@ -425,11 +425,11 @@ static char *get_highest_rename_path(struct strintmap *counts)
 	int highest_count = 0;
 	char *highest_target_dir = NULL;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 
 	strintmap_for_each_entry(counts, &iter, entry) {
-		char *target_dir = entry->item.string;
-		intptr_t count = (intptr_t)entry->item.util;
+		char *target_dir = entry->key;
+		intptr_t count = (intptr_t)entry->value;
 		if (count > highest_count) {
 			highest_count = count;
 			highest_target_dir = target_dir;
@@ -443,11 +443,11 @@ static char *SENTINEL_DIR = "/"; /* illegal directory */
 static int dir_rename_already_determinable(struct strintmap *counts)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	int first = 0, second = 0, unknown = 0;
 	strintmap_for_each_entry(counts, &iter, entry) {
-		char *target_dir = entry->item.string;
-		intptr_t count = (intptr_t)entry->item.util;
+		char *target_dir = entry->key;
+		intptr_t count = (intptr_t)entry->value;
 		if (!strcmp(target_dir, SENTINEL_DIR)) {
 			unknown = count;
 		} else if (count >= first) {
@@ -465,12 +465,12 @@ static void increment_count(struct dir_rename_info *info,
 			    char *new_dir)
 {
 	struct strintmap *counts;
-	struct string_list_item *e;
+	struct strmap_entry *e;
 
 	/* Get the {new_dirs -> counts} mapping using old_dir */
-	e = strmap_get_item(info->dir_rename_count, old_dir);
+	e = strmap_get_entry(info->dir_rename_count, old_dir);
 	if (e) {
-		counts = e->util;
+		counts = e->value;
 	} else {
 		counts = xmalloc(sizeof(*counts));
 		strintmap_ocd_init(counts, NULL, 1);
@@ -587,7 +587,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 				       struct strmap *dir_rename_count)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 	int i;
 
 	info->setup = 0;
@@ -609,7 +609,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		info->relevant_target_dirs = xmalloc(sizeof(struct strset));
 		strset_init(info->relevant_target_dirs);
 		strset_for_each_entry(relevant_targets, &iter, entry) {
-			char *dirname = get_dirname(entry->item.string);
+			char *dirname = get_dirname(entry->key);
 			strset_add(info->relevant_target_dirs, dirname);
 			free(dirname);
 		}
@@ -623,7 +623,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		info->relevant_source_dirs = xmalloc(sizeof(struct strintmap));
 		strintmap_init(info->relevant_source_dirs);
 		strset_for_each_entry(relevant_sources, &iter, entry) {
-			char *dirname = get_dirname(entry->item.string);
+			char *dirname = get_dirname(entry->key);
 			if (!dirs_removed ||
 			    strintmap_contains(dirs_removed, dirname))
 				strintmap_set(info->relevant_source_dirs,
@@ -662,8 +662,8 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 
 	/* Add cached_pairs to counts */
 	strmap_for_each_entry(cached_pairs, &iter, entry) {
-		char *old_name = entry->item.string;
-		char *new_name = entry->item.util;
+		char *old_name = entry->key;
+		char *new_name = entry->value;
 		if (!new_name)
 			/* known delete; ignore it */
 			continue;
@@ -679,12 +679,12 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	 * where best_new_directory is the one with the highest count.
 	 */
 	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
-		/* entry->item.string is source_dir */
-		struct strintmap *counts = entry->item.util;
+		/* entry->key is source_dir */
+		struct strintmap *counts = entry->value;
 		char *best_newdir;
 
 		best_newdir = xstrdup(get_highest_rename_path(counts));
-		strmap_put(&info->dir_rename_guess, entry->item.string,
+		strmap_put(&info->dir_rename_guess, entry->key,
 			   best_newdir);
 	}
 }
@@ -692,10 +692,10 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 void clear_dir_rename_count(struct strmap *dir_rename_count)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 
 	strmap_for_each_entry(dir_rename_count, &iter, entry) {
-		struct strintmap *counts = entry->item.util;
+		struct strintmap *counts = entry->value;
 		strintmap_free(counts);
 	}
 	strmap_clear(dir_rename_count, 1);
@@ -706,7 +706,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 				    int keep_dir_rename_count)
 {
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 
 	if (!info->setup)
 		return;
@@ -744,8 +744,8 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		 */
 		struct string_list to_remove = STRING_LIST_INIT_NODUP;
 		strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
-			char *source_dir = entry->item.string;
-			struct strintmap *counts = entry->item.util;
+			char *source_dir = entry->key;
+			struct strintmap *counts = entry->value;
 
 			if (!strintmap_get(dirs_removed, source_dir, 0)) {
 				string_list_append(&to_remove, source_dir);
@@ -1165,7 +1165,7 @@ static int handle_early_known_dir_renames(int num_src,
 {
 	int i, new_num_src;
 	struct hashmap_iter iter;
-	struct str_entry *entry;
+	struct strmap_entry *entry;
 
 	if (!dirs_removed || !relevant_sources)
 		return num_src; /* nothing to cull */
@@ -1203,12 +1203,12 @@ static int handle_early_known_dir_renames(int num_src,
 	}
 
 	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
-		/* entry->item.string is source_dir */
-		struct strintmap *counts = entry->item.util;
+		/* entry->key is source_dir */
+		struct strintmap *counts = entry->value;
 
-		if (strintmap_get(dirs_removed, entry->item.string, 0) == 2 &&
+		if (strintmap_get(dirs_removed, entry->key, 0) == 2 &&
 		    dir_rename_already_determinable(counts)) {
-			strintmap_set(dirs_removed, entry->item.string, 1);
+			strintmap_set(dirs_removed, entry->key, 1);
 		}
 	}
 
@@ -1460,7 +1460,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 	if (dirs_removed) {
 		struct hashmap_iter iter;
-		struct str_entry *entry;
+		struct strmap_entry *entry;
 		struct string_list olist = STRING_LIST_INIT_NODUP;
 
 		/* Hack to Pre-allocate olist to the desired size */
@@ -1469,7 +1469,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		/* Put every entry from output into olist, then sort */
 		strset_for_each_entry(dirs_removed, &iter, entry) {
-			string_list_append(&olist, entry->item.string);
+			string_list_append(&olist, entry->key);
 		}
 		string_list_sort(&olist);
 
