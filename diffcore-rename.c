@@ -406,7 +406,7 @@ struct dir_rename_info {
 	unsigned setup;
 };
 
-static char *get_dirname(char *filename)
+static char *get_dirname(const char *filename)
 {
 	char *slash = strrchr(filename, '/');
 	return slash ? xstrndup(filename, slash-filename) : xstrdup("");
@@ -420,15 +420,15 @@ static void dirname_munge(char *filename)
 	*slash = '\0';
 }
 
-static char *get_highest_rename_path(struct strintmap *counts)
+static const char *get_highest_rename_path(struct strintmap *counts)
 {
 	int highest_count = 0;
-	char *highest_target_dir = NULL;
+	const char *highest_target_dir = NULL;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 
 	strintmap_for_each_entry(counts, &iter, entry) {
-		char *target_dir = entry->key;
+		const char *target_dir = entry->key;
 		intptr_t count = (intptr_t)entry->value;
 		if (count > highest_count) {
 			highest_count = count;
@@ -446,7 +446,7 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	struct strmap_entry *entry;
 	int first = 0, second = 0, unknown = 0;
 	strintmap_for_each_entry(counts, &iter, entry) {
-		char *target_dir = entry->key;
+		const char *target_dir = entry->key;
 		intptr_t count = (intptr_t)entry->value;
 		if (!strcmp(target_dir, SENTINEL_DIR)) {
 			unknown = count;
@@ -483,8 +483,8 @@ static void increment_count(struct dir_rename_info *info,
 
 static void update_dir_rename_counts(struct dir_rename_info *info,
 				     struct strintmap *dirs_removed,
-				     char *oldname,
-				     char *newname)
+				     const char *oldname,
+				     const char *newname)
 {
 	char *old_dir = xstrdup(oldname);
 	char *new_dir = xstrdup(newname);
@@ -662,8 +662,8 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 
 	/* Add cached_pairs to counts */
 	strmap_for_each_entry(cached_pairs, &iter, entry) {
-		char *old_name = entry->key;
-		char *new_name = entry->value;
+		const char *old_name = entry->key;
+		const char *new_name = entry->value;
 		if (!new_name)
 			/* known delete; ignore it */
 			continue;
@@ -744,7 +744,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		 */
 		struct string_list to_remove = STRING_LIST_INIT_NODUP;
 		strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
-			char *source_dir = entry->key;
+			const char *source_dir = entry->key;
 			struct strintmap *counts = entry->value;
 
 			if (!strintmap_get(dirs_removed, source_dir, 0)) {

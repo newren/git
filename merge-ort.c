@@ -1044,7 +1044,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 #endif
 				   0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
-			char *path = entry->key;
+			const char *path = entry->key;
 			unsigned dir_rename_mask = (intptr_t)entry->value;
 			struct conflict_info *ci;
 			unsigned dirmask;
@@ -1108,7 +1108,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		strintmap_free(&copy);
 		strintmap_for_each_entry(&renames->possible_trivial_merges[side],
 				      &iter, entry) {
-			char *path = entry->key;
+			const char *path = entry->key;
 			struct conflict_info *ci;
 
 			ci = strmap_get(&opt->priv->paths, path);
@@ -2132,16 +2132,16 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	 * where best_new_directory is the one with the unique highest count.
 	 */
 	strmap_for_each_entry(&renames->dir_rename_count[side], &iter, entry) {
-		char *source_dir = entry->key;
+		const char *source_dir = entry->key;
 		struct strintmap *counts = entry->value;
 		struct hashmap_iter count_iter;
 		struct strmap_entry *count_entry;
 		int max = 0;
 		int bad_max = 0;
-		char *best = NULL;
+		const char *best = NULL;
 
 		strintmap_for_each_entry(counts, &count_iter, count_entry) {
-			char *target_dir = count_entry->key;
+			const char *target_dir = count_entry->key;
 			intptr_t count = (intptr_t)count_entry->value;
 
 			if (count == max)
@@ -2165,7 +2165,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			       source_dir);
 			*clean &= 0;
 		} else {
-			strmap_put(dir_renames, source_dir, best);
+			strmap_put(dir_renames, source_dir, (void*)best);
 #ifdef VERBOSE_DEBUG
 			fprintf(stderr, "Dir rename %s -> %s\n",
 				entry->key, best);
@@ -2455,9 +2455,9 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	struct conflict_info *ci, *new_ci;
 	struct strmap_entry *entry;
 	const char *branch_with_new_path, *branch_with_dir_rename;
-	char *old_path = pair->two->path;
-	char *parent_name;
-	char *cur_path;
+	const char *old_path = pair->two->path;
+	const char *parent_name;
+	const char *cur_path;
 	int i, len;
 
 	entry = strmap_get_entry(&opt->priv->paths, old_path);
@@ -2470,8 +2470,8 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	/* Find parent directories missing from opt->priv->paths */
 #if USE_MEMORY_POOL
 	cur_path = mem_pool_strdup(&opt->priv->pool, new_path);
-	free(new_path);
-	new_path = cur_path;
+	free((char*)new_path);
+	new_path = (char *)cur_path;
 #else
 	cur_path = new_path;
 #endif
@@ -2495,7 +2495,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		entry = strmap_get_entry(&opt->priv->paths, parent_name);
 		if (entry) {
 #if !USE_MEMORY_POOL
-			free(parent_name);
+			free((char*)parent_name);
 #endif
 			parent_name = entry->key; /* reuse known pointer */
 			break;
@@ -2700,8 +2700,8 @@ static void use_cached_pairs(struct merge_options *opt,
 	 */
 	strmap_for_each_entry(cached_pairs, &iter, entry) {
 		struct diff_filespec *one, *two;
-		char *old_name = entry->key;
-		char *new_name = entry->value;
+		const char *old_name = entry->key;
+		const char *new_name = entry->value;
 		if (!new_name)
 			new_name = old_name;
 
