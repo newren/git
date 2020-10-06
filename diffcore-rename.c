@@ -74,7 +74,7 @@ static void register_rename_src(struct diff_filepair *p)
 	if (p->broken_pair) {
 		if (!break_idx) {
 			break_idx = xmalloc(sizeof(*break_idx));
-			strintmap_init(break_idx, 0);
+			strintmap_ocd_init(break_idx, NULL, 0);
 		}
 		strintmap_set(break_idx, p->one->path, rename_dst_nr);
 	}
@@ -473,7 +473,7 @@ static void increment_count(struct dir_rename_info *info,
 		counts = e->util;
 	} else {
 		counts = xmalloc(sizeof(*counts));
-		strintmap_init(counts, 1);
+		strintmap_ocd_init(counts, NULL, 1);
 		strmap_put(info->dir_rename_count, old_dir, counts);
 	}
 
@@ -598,16 +598,16 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	info->dir_rename_count = dir_rename_count;
 	if (!info->dir_rename_count) {
 		info->dir_rename_count = xmalloc(sizeof(*dir_rename_count));
-		strmap_init(info->dir_rename_count, 1);
+		strmap_init(info->dir_rename_count);
 	}
-	strintmap_init(&info->idx_map, 0);
-	strmap_init(&info->dir_rename_guess, 0);
+	strintmap_ocd_init(&info->idx_map, NULL, 0);
+	strmap_ocd_init(&info->dir_rename_guess, NULL, 0);
 
 	/* Setup info->relevant_target_dirs */
 	info->relevant_target_dirs = NULL;
 	if (relevant_targets) {
 		info->relevant_target_dirs = xmalloc(sizeof(struct strset));
-		strset_init(info->relevant_target_dirs, 1);
+		strset_init(info->relevant_target_dirs);
 		strset_for_each_entry(relevant_targets, &iter, entry) {
 			char *dirname = get_dirname(entry->item.string);
 			strset_add(info->relevant_target_dirs, dirname);
@@ -621,7 +621,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		info->relevant_source_dirs = dirs_removed; /* might be NULL */
 	} else {
 		info->relevant_source_dirs = xmalloc(sizeof(struct strintmap));
-		strintmap_init(info->relevant_source_dirs, 1);
+		strintmap_init(info->relevant_source_dirs);
 		strset_for_each_entry(relevant_sources, &iter, entry) {
 			char *dirname = get_dirname(entry->item.string);
 			if (!dirs_removed ||
@@ -876,8 +876,8 @@ static int find_basename_matches(struct diff_options *options,
 	skip_unmodified = 0;
 
 	/* Create maps of basename -> fullname(s) for sources and dests */
-	strintmap_init(&sources, 0);
-	strintmap_init(&dests, 0);
+	strintmap_ocd_init(&sources, NULL, 0);
+	strintmap_ocd_init(&dests, NULL, 0);
 	for (i = 0; i < num_src; ++i) {
 		char *filename = rename_src[i].p->one->path;
 		char *base;

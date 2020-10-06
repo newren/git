@@ -1036,12 +1036,13 @@ static int handle_deferred_entries(struct merge_options *opt,
 		 * possible_trivial_merges[side] once this loop is done.
 		 */
 		copy = renames->possible_trivial_merges[side];
+		strintmap_ocd_init(&renames->possible_trivial_merges[side],
 #if USE_MEMORY_POOL
-		strintmap_init_with_mem_pool(&renames->possible_trivial_merges[side],
-					     &opt->priv->pool, 0);
+				   &opt->priv->pool,
 #else
-		strintmap_init(&renames->possible_trivial_merges[side], 0);
+				   NULL,
 #endif
+				   0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
 			char *path = entry->item.string;
 			unsigned dir_rename_mask = (intptr_t)entry->item.util;
@@ -2121,7 +2122,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	struct rename_info *renames = opt->priv->renames;
 
 	dir_renames = xmalloc(sizeof(*dir_renames));
-	strmap_init(dir_renames, 0);
+	strmap_ocd_init(dir_renames, NULL, 0);
 
 	/*
 	 * Collapse
@@ -2259,7 +2260,7 @@ static void compute_collisions(struct strmap *collisions,
 {
 	int i;
 
-	strmap_init(collisions, 0);
+	strmap_ocd_init(collisions, NULL, 0);
 	if (strmap_empty(dir_renames))
 		return;
 
@@ -3006,7 +3007,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	} else {
 		for (s = 1; s <= 2; s++) {
 			dir_renames[s] = xmalloc(sizeof(*dir_renames[s]));
-			strmap_init(dir_renames[s], 0);
+			strmap_ocd_init(dir_renames[s], NULL, 0);
 		}
 	}
 
@@ -4181,9 +4182,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	} else {
 		struct rename_info *renames;
 		int i;
-#if USE_MEMORY_POOL
-		struct mem_pool *pool;
-#endif
+		struct mem_pool *pool = NULL;
 
 		trace2_region_enter("merge", "allocate/init", opt->repo);
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
@@ -4193,34 +4192,23 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 #endif
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
-#if USE_MEMORY_POOL
-			strintmap_init_with_mem_pool(&renames->relevant_sources[i],
-						     pool, 0);
-			strintmap_init_with_mem_pool(&renames->dirs_removed[i],
-						     pool, 0);
-			strintmap_init_with_mem_pool(&renames->possible_trivial_merges[i],
-						     pool, 0);
-			strset_init_with_mem_pool(&renames->target_dirs[i],
-						  pool, 1);
-#else
-			strintmap_init(&renames->relevant_sources[i], 0);
-			strintmap_init(&renames->dirs_removed[i], 0);
-			strintmap_init(&renames->possible_trivial_merges[i], 0);
-			strset_init(&renames->target_dirs[i], 1);
-#endif
-			strmap_init(&renames->cached_pairs[i], 1);
-			strset_init(&renames->cached_irrelevant[i], 1);
-			strset_init(&renames->cached_target_names[i], 0);
-			strmap_init(&renames->dir_rename_count[i], 1);
+			strintmap_ocd_init(&renames->relevant_sources[i],
+					   pool, 0);
+			strintmap_ocd_init(&renames->dirs_removed[i],
+					   pool, 0);
+			strintmap_ocd_init(&renames->possible_trivial_merges[i],
+					   pool, 0);
+			strset_ocd_init(&renames->target_dirs[i], pool, 1);
+			strmap_ocd_init(&renames->cached_pairs[i], NULL, 1);
+			strset_ocd_init(&renames->cached_irrelevant[i], NULL, 1);
+			strset_ocd_init(&renames->cached_target_names[i], NULL, 0);
+			strmap_ocd_init(&renames->dir_rename_count[i], NULL, 1);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
-#if USE_MEMORY_POOL
-		strmap_init_with_mem_pool(&opt->priv->paths, pool, 0);
-		strmap_init_with_mem_pool(&opt->priv->unmerged, pool, 0);
-#else
-		strmap_init(&opt->priv->paths, 0);
-		strmap_init(&opt->priv->unmerged, 0);
+		strmap_ocd_init(&opt->priv->paths, pool, 0);
+		strmap_ocd_init(&opt->priv->unmerged, pool, 0);
+#if !USE_MEMORY_POOL
 		/*
 		 * Although we initialize opt->priv->paths_to_free and
 		 * opt->priv->paths with strdup_strings = 0, that's just to
@@ -4229,7 +4217,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		 */
 		string_list_init(&opt->priv->paths_to_free, 0);
 #endif
-		strmap_init(&opt->priv->output, 1);
+		strmap_init(&opt->priv->output);
 		trace2_region_leave("merge", "allocate/init", opt->repo);
 	}
 
