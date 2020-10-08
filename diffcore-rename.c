@@ -689,16 +689,16 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	}
 }
 
-void clear_dir_rename_count(struct strmap *dir_rename_count)
+void partial_clear_dir_rename_count(struct strmap *dir_rename_count)
 {
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 
 	strmap_for_each_entry(dir_rename_count, &iter, entry) {
 		struct strintmap *counts = entry->value;
-		strintmap_free(counts);
+		strintmap_clear(counts);
 	}
-	strmap_clear(dir_rename_count, 1);
+	strmap_partial_clear(dir_rename_count, 1);
 }
 
 static void cleanup_dir_rename_info(struct dir_rename_info *info,
@@ -712,27 +712,27 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		return;
 
 	/* idx_map */
-	strintmap_free(&info->idx_map);
+	strintmap_clear(&info->idx_map);
 
 	/* dir_rename_guess */
-	strmap_free(&info->dir_rename_guess, 1);
+	strmap_clear(&info->dir_rename_guess, 1);
 
 	/* relevant_source_dirs */
 	if (info->relevant_source_dirs &&
 	    info->relevant_source_dirs != dirs_removed) {
-		strintmap_free(info->relevant_source_dirs);
+		strintmap_clear(info->relevant_source_dirs);
 		FREE_AND_NULL(info->relevant_source_dirs);
 	}
 
 	/* relevant_target_dirs */
 	if (info->relevant_target_dirs) {
-		strset_free(info->relevant_target_dirs);
+		strset_clear(info->relevant_target_dirs);
 		FREE_AND_NULL(info->relevant_target_dirs);
 	}
 
 	if (!keep_dir_rename_count) {
-		clear_dir_rename_count(info->dir_rename_count);
-		strmap_free(info->dir_rename_count, 1);
+		partial_clear_dir_rename_count(info->dir_rename_count);
+		strmap_clear(info->dir_rename_count, 1);
 		FREE_AND_NULL(info->dir_rename_count);
 	} else {
 		/*
@@ -749,7 +749,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 
 			if (!strintmap_get(dirs_removed, source_dir, 0)) {
 				string_list_append(&to_remove, source_dir);
-				strintmap_free(counts);
+				strintmap_clear(counts);
 				continue;
 			}
 
@@ -974,8 +974,8 @@ static int find_basename_matches(struct diff_options *options,
 		}
 	}
 
-	strintmap_free(&sources);
-	strintmap_free(&dests);
+	strintmap_clear(&sources);
+	strintmap_clear(&dests);
 
 	return renames;
 }
@@ -1666,7 +1666,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	FREE_AND_NULL(rename_src);
 	rename_src_nr = rename_src_alloc = 0;
 	if (break_idx) {
-		strintmap_free(break_idx);
+		strintmap_clear(break_idx);
 		FREE_AND_NULL(break_idx);
 	}
 	trace2_region_leave("diff", "write back to queue", options->repo);

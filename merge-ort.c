@@ -1105,7 +1105,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 			if (ret < 0)
 				return ret;
 		}
-		strintmap_free(&copy);
+		strintmap_clear(&copy);
 		strintmap_for_each_entry(&renames->possible_trivial_merges[side],
 				      &iter, entry) {
 			const char *path = entry->key;
@@ -2785,7 +2785,7 @@ static int detect_regular_renames(struct merge_options *opt,
 		return 0;
 	}
 
-	clear_dir_rename_count(&renames->dir_rename_count[side_index]);
+	partial_clear_dir_rename_count(&renames->dir_rename_count[side_index]);
 	repo_diff_setup(opt->repo, &diff_opts);
 	diff_opts.flags.recursive = 1;
 	diff_opts.flags.rename_empty = 0;
@@ -2928,7 +2928,7 @@ static int collect_renames(struct merge_options *opt,
 	 * before the strmaps is cleared.
 	 */
 	collisions.strdup_strings = 1;
-	strmap_free(&collisions, 1);
+	strmap_clear(&collisions, 1);
 	return clean;
 }
 
@@ -3032,7 +3032,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	 * Free memory for side[12]_dir_renames.
 	 */
 	for (s = 1; s <= 2; s++) {
-		strmap_free(dir_renames[s], 0);
+		strmap_clear(dir_renames[s], 0);
 		FREE_AND_NULL(dir_renames[s]);
 	}
 
@@ -4315,11 +4315,11 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 	struct rename_info *renames = opti->renames;
 	int i;
 	void (*strmap_func)(struct strmap *, int) =
-		reinitialize ? strmap_clear : strmap_free;
+		reinitialize ? strmap_partial_clear : strmap_clear;
 	void (*strintmap_func)(struct strintmap *) =
-		reinitialize ? strintmap_clear : strintmap_free;
+		reinitialize ? strintmap_partial_clear : strintmap_clear;
 	void (*strset_func)(struct strset *) =
-		reinitialize ? strset_clear : strset_free;
+		reinitialize ? strset_partial_clear : strset_clear;
 
 	/*
 	 * We marked opti->paths with strdup_strings = 0, so that we
@@ -4360,7 +4360,7 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 			 */
 			free(sb);
 		}
-		strmap_free(&opti->output, 0);
+		strmap_clear(&opti->output, 0);
 	}
 	if (opti->attr_index.cache_nr) /* true iff opt->renormalize */
 		discard_index(&opti->attr_index);
@@ -4387,9 +4387,9 @@ static void reset_maps(struct merge_options_internal *opti, int reinitialize)
 			strset_func(&renames->cached_target_names[i]);
 			strmap_func(&renames->cached_pairs[i], 1);
 			strset_func(&renames->cached_irrelevant[i]);
-			clear_dir_rename_count(&renames->dir_rename_count[i]);
+			partial_clear_dir_rename_count(&renames->dir_rename_count[i]);
 			if (!reinitialize)
-				strmap_free(&renames->dir_rename_count[i], 1);
+				strmap_clear(&renames->dir_rename_count[i], 1);
 		}
 	}
 	renames->cached_pairs_valid_side = 0;
