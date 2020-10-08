@@ -1,5 +1,3 @@
-* compare-rebased-hwmon-updates is created with bad trees (not valid sort order)
-
 * SENTINEL_DIR stuff
   * if culling sources before basename matching:
     * if increment_count() called after handle_early_known_dir_renames(), then
