@@ -1,4 +1,4 @@
-Current count: 30
+Current count: 32
 
 * Avoid small wasted effort (3)
   * avoid unnecessary discard and re-read of cache [b]
@@ -10,9 +10,13 @@ Current count: 30
   * trivial tree merges, when one side matches (if renames cached or not needed)
     * trivial tree merges for new trees
     * trivial tree merges even when renames not cached and needed
-* Directory rename related (2)
+* Directory rename related (4)
   * track dirs added/removed and only do directory rename detection for them
   * only do directory rename detection when dirmask is 3 or 5 (not when it is 1)
+  * caching directory rename detection from previous pick
+  * If exact renames provide enough info for directory rename detection, avoid
+    detecting renames for other paths within directory unless needed for content
+    merge
 * Basic rename detection algorithm (7)
   * Don't find match better than exact
   * Don't do rename detection for non-relevant paths (other side didn't change),
@@ -22,7 +26,7 @@ Current count: 30
     * when non-unique (e.g. Makefile, .gitignore), guide guess about which
       to compare to based on guess at directory renames via exact renames
   * Apply exact matches first, then basename matches on remaining set
-  * Remember renames for subsequent sequencer operations
+  * Remember renames (& deletes) for subsequent sequencer operations
 * Optimize diffcore_rename logic (6)
   * Filter rename_src list
   * Short-circuit diffcore_rename if no sources (in addition to if no targets)
@@ -35,12 +39,12 @@ Current count: 30
   * avoid reading/writing rebase metadata until conflict or completion
   * replace string_list_df_name_compare with faster/clearer alternative
   * drop merged_info size by 8 bytes
-  * Create a smarter strmap_clear() by adding a hashmap_clear
+  * Create a smarter strmap_partial_clear() by adding a hashmap_partial_clear
   * avoid recomparing hashes (use match_masks)
   * use memory pools
 
 
-Unimplemented optimizations (5):
+Unimplemented optimizations (6):
   * avoid checking unmerged_index() in checkout() (& maybe refresh_index?)
   * hashmap -> khash (see commit 8b2f8cbcb1 ("oidset: use khash", 2018-10-04))
   * default allocation sizes for strmaps/pairs (e.g. 2*index entries for path)
@@ -48,17 +52,11 @@ Unimplemented optimizations (5):
     * reuse check_dir_renamed() results from compute_collisions()
       in collect_renames() instead of calling it again for all pairs
     * memoize check_dir_renamed() [augment dir_renames with non-renames]
-    * cache directory rename info (if dirs_removed[] is identical to
-      last picked commit and cached_pairs is same size, then re-use).
-      If some directory was renamed previously and dirs_removed still
-      includes that directory, then it's still a directory rename.  If
-      some directory was not renamed previously and cached_pairs does
-      not increase in size (i.e. no new renames or deletes), then the
-      directory is still not renamed.  Thus, just check if
-      dirs_removed is the same as the previous round AND cached_pairs
-      does not increase in size.
+  * avoid finding basename-directed renames for paths that aren't
+    content-relevant when exact renames provide enough information to determine
+    directory renames
 
-Rejected optimizations (3):
+Rejected optimizations (5):
   * Turning off asserts (saves about a third of a percent of runtime)
   * Switching back from histogram to myers diff (saves about a percent)
   * Running under jemalloc (saved a percent in the past, though)
