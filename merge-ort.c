@@ -3581,7 +3581,6 @@ static void process_entry(struct merge_options *opt,
 			strmap_put(&opt->priv->unmerged, b_path, new_ci);
 			record_entry_for_tree(dir_metadata, b_path, new_ci);
 
-
 			/*
 			 * Remaining code for processing this entry should
 			 * think in terms of processing a_path.
