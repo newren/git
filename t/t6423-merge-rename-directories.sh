@@ -4495,7 +4495,7 @@ test_setup_12f () {
 	)
 }
 
-test_expect_failure '12f: Trivial directory resolve, caching, all kinds of fun' '
+test_expect_success '12f: Trivial directory resolve, caching, all kinds of fun' '
 	test_setup_12f &&
 	(
 		cd 12f &&
@@ -4503,7 +4503,7 @@ test_expect_failure '12f: Trivial directory resolve, caching, all kinds of fun' 
 		git checkout A^0 &&
 		git branch Bmod B &&
 
-		git -c merge.directoryRenames=true rebase A Bmod &&
+		GIT_TRACE2_PERF="$(pwd)/trace.output" git -c merge.directoryRenames=true rebase A Bmod &&
 
 		echo Checking the pick of B1... &&
 
@@ -4584,7 +4584,10 @@ test_expect_failure '12f: Trivial directory resolve, caching, all kinds of fun' 
 		test_seq  2 12 >e_Merge2 &&
 		git hash-object e_Merge2 >expect &&
 		git rev-parse Bmod:folder/subdir/newsubdir/e >actual &&
-		test_cmp expect actual
+		test_cmp expect actual &&
+
+		grep region_enter.*collect_merge_info trace.output >collect &&
+		test_line_count = 4 collect
 	)
 '
 
