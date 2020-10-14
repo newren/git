@@ -34,8 +34,7 @@ void strmap_init_with_options(struct strmap *map,
 {
 	hashmap_init(&map->map, cmp_strmap_entry, NULL, 0);
 	map->pool = pool;
-	//map->strdup_strings = strdup_strings;
-	map->strdup_strings = 1;
+	map->strdup_strings = strdup_strings;
 }
 
 static void strmap_free_entries_(struct strmap *map, int free_values)

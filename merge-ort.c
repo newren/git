@@ -870,7 +870,6 @@ static int collect_merge_info_callback(int n,
 	if (dirmask) {
 		struct traverse_info newinfo;
 		struct tree_desc t[3];
-		struct strmap_entry *entry;
 		void *buf[3] = {NULL,};
 		const char *original_dir_name;
 		int i, ret, side;
@@ -932,8 +931,7 @@ static int collect_merge_info_callback(int n,
 		}
 
 		original_dir_name = opti->current_dir_name;
-		entry = strmap_get_entry(&opt->priv->paths, pi.string);
-		opti->current_dir_name = entry->key;
+		opti->current_dir_name = pi.string;
 		if (renames->dir_rename_mask == 0 ||
 		    renames->dir_rename_mask == 0x07)
 			ret = traverse_trees(NULL, 3, t, &newinfo);
@@ -1046,8 +1044,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 #endif
 				   0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
-			struct strmap_entry *e;
-			const char *path;
+			const char *path = entry->key;
 			unsigned dir_rename_mask = (intptr_t)entry->value;
 			struct conflict_info *ci;
 			unsigned dirmask;
@@ -1055,9 +1052,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 			void *buf[3] = {NULL,};
 			int i;
 
-			e = strmap_get_entry(&opt->priv->paths, entry->key);
-			path = e->key;
-			ci = e->value;
+			ci = strmap_get(&opt->priv->paths, path);
 			dirmask = ci->dirmask;
 
 			if (optimization_okay &&
@@ -2525,7 +2520,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		dir_ci->dirmask = ci->filemask;
 		strmap_put(&opt->priv->paths, cur_dir, dir_ci);
 
-		parent_name = strmap_get_entry(&opt->priv->paths, cur_dir)->key;
+		parent_name = cur_dir;
 	}
 
 #if !USE_MEMORY_POOL
