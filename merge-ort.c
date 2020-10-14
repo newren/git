@@ -35,7 +35,7 @@
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
 
-#define USE_MEMORY_POOL 0 /* faster, but obscures memory leak hunting */
+#define USE_MEMORY_POOL 1 /* faster, but obscures memory leak hunting */
 
 #if 0
 #define VERBOSE_DEBUG
@@ -2630,8 +2630,6 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	/*
 	 * Finally, record the new location.
 	 */
-	// FIXME: Look up copy of new_path from opt->priv->path
-	//pair->two->path = (char*)strmap_get_entry(&opt->priv->paths, new_path)->key;
 	pair->two->path = new_path;
 }
 
@@ -2917,7 +2915,6 @@ static int collect_renames(struct merge_options *opt,
 		possibly_cache_new_pair(renames, p, side_index, new_path);
 		if (new_path)
 			apply_directory_rename_modifications(opt, p, new_path);
-		// FIXME: free(new_path)
 
 		p->score = side_index;
 		result->queue[result->nr++] = p;
