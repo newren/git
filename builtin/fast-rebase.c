@@ -74,7 +74,7 @@ static struct commit *create_commit(struct tree *tree,
 	author = get_author(message);
 	reset_ident_date();
 	if (commit_tree_extended(msg.buf, msg.len, &tree->object.oid, parents,
-				 &ret, author, sign_commit, extra)) {
+				 &ret, author, NULL, sign_commit, extra)) {
 		error(_("failed to write commit object"));
 		return NULL;
 	}
