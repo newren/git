@@ -20,6 +20,6 @@ int merge_ort_recursive(struct merge_options *opt,
 			struct commit *h1,
 			struct commit *h2,
 			struct commit_list *ancestors,
-			struct tree **result);
+			struct commit **result);
 
 #endif

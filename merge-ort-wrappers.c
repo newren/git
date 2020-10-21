@@ -45,7 +45,7 @@ int merge_ort_recursive(struct merge_options *opt,
 			struct commit *side1,
 			struct commit *side2,
 			struct commit_list *merge_bases,
-			struct tree **result)
+			struct commit **result)
 {
 	struct tree *head = repo_get_commit_tree(opt->repo, side1);
 	struct merge_result tmp;
@@ -56,7 +56,7 @@ int merge_ort_recursive(struct merge_options *opt,
 	memset(&tmp, 0, sizeof(tmp));
 	merge_inmemory_recursive(opt, merge_bases, side1, side2, &tmp);
 	merge_switch_to_result(opt, head, &tmp, 1, 1);
-	*result = tmp.tree;
+	*result = NULL;
 
 	return tmp.clean;
 }

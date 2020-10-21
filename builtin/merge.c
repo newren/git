@@ -708,7 +708,6 @@ static int try_merge_strategy(const char *strategy, struct commit_list *common,
 		struct lock_file lock = LOCK_INIT;
 		int clean, x;
 		struct commit *result;
-		struct tree *result_tree;
 		struct commit_list *reversed = NULL;
 		struct merge_options o;
 		struct commit_list *j;
@@ -738,7 +737,7 @@ static int try_merge_strategy(const char *strategy, struct commit_list *common,
 		hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
 		if (!strcmp(strategy, "ort") || 1)
 			clean = merge_ort_recursive(&o, head, remoteheads->item,
-						    reversed, &result_tree);
+						    reversed, &result);
 		else
 			clean = merge_recursive(&o, head, remoteheads->item,
 						reversed, &result);
