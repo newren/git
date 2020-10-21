@@ -15,7 +15,7 @@ struct merge_result {
 
 	/*
 	 * Additional metadata used by merge_switch_to_result() or future calls
-	 * to merge_ort_inmemory_*().
+	 * to merge_inmemory_*().
 	 */
 	void *priv;
 };
