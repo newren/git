@@ -532,9 +532,14 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool file1 file2 spaced\ name subdir/file3 &&
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
-	yes "c" | git mergetool submod~HEAD &&
-	git rm submod &&
-	git mv submod~HEAD submod &&
+	if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+	then
+		yes "c" | git mergetool submod~HEAD &&
+		git rm submod &&
+		git mv submod~HEAD submod
+	else
+		yes "l" | git mergetool submod
+	fi &&
 	git submodule update -N &&
 	echo "not a submodule" >expect &&
 	test_cmp expect submod &&
@@ -551,11 +556,15 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool file1 file2 spaced\ name subdir/file3 &&
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
-	mv submod submod.orig &&
-	git rm --cached submod &&
-	#yes "r" | git mergetool submod &&
-	yes "c" | git mergetool submod~test19 &&
-	git mv submod~test19 submod &&
+	if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+	then
+		mv submod submod.orig &&
+		git rm --cached submod &&
+		yes "c" | git mergetool submod~test19 &&
+		git mv submod~test19 submod
+	else
+		yes "r" | git mergetool submod
+	fi &&
 	test -d submod.orig &&
 	git submodule update -N &&
 	echo "not a submodule" >expect &&
@@ -573,7 +582,10 @@ test_expect_success 'file vs modified submodule' '
 	yes "" | git mergetool both &&
 	yes "d" | git mergetool file11 file12 &&
 	yes "l" | git mergetool submod &&
-	yes "d" | git mergetool submod~test19 &&
+	if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+	then
+		yes "d" | git mergetool submod~test19
+	fi &&
 	echo "master submodule" >expect &&
 	test_cmp expect submod/bar &&
 	git submodule update -N &&
@@ -671,9 +683,14 @@ test_expect_success 'directory vs modified submodule' '
 	test_must_fail git merge master &&
 	test -n "$(git ls-files -u)" &&
 	test ! -e submod.orig &&
-	yes "r" | git mergetool submod~master &&
-	git mv submod submod.orig &&
-	git mv submod~master submod &&
+	if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+	then
+		yes "r" | git mergetool submod~master &&
+		git mv submod submod.orig &&
+		git mv submod~master submod
+	else
+		yes "r" | git mergetool submod
+	fi &&
 	test -d submod.orig &&
 	echo "not a submodule" >expect &&
 	test_cmp expect submod.orig/file16 &&

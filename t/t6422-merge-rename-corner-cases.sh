@@ -313,7 +313,12 @@ test_expect_success 'rename/directory conflict + clean content merge' '
 		git ls-files -u >out &&
 		test_line_count = 1 out &&
 		git ls-files -o >out &&
-		test_line_count = 1 out &&
+		if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+		then
+			test_line_count = 1 out
+		else
+			test_line_count = 2 out
+		fi &&
 
 		echo 0 >expect &&
 		git cat-file -p base:file >>expect &&
@@ -342,7 +347,12 @@ test_expect_success 'rename/directory conflict + content merge conflict' '
 		git ls-files -u >out &&
 		test_line_count = 3 out &&
 		git ls-files -o >out &&
-		test_line_count = 1 out &&
+		if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+		then
+			test_line_count = 1 out
+		else
+			test_line_count = 2 out
+		fi &&
 
 		git cat-file -p left-conflict:newfile >left &&
 		git cat-file -p base:file    >base &&
@@ -354,10 +364,16 @@ test_expect_success 'rename/directory conflict + content merge conflict' '
 			left base right &&
 		test_cmp left newfile~HEAD &&
 
-		git rev-parse >expect                                 \
+		git rev-parse >expect   \
 			base:file       left-conflict:newfile right:file &&
-		git rev-parse >actual                                 \
-			:1:newfile~HEAD :2:newfile~HEAD       :3:newfile~HEAD &&
+		if test "$GIT_TEST_MERGE_ALGORITHM" = ort
+		then
+			git rev-parse >actual \
+				:1:newfile~HEAD :2:newfile~HEAD :3:newfile~HEAD
+		else
+			git rev-parse >actual \
+				:1:newfile      :2:newfile      :3:newfile
+		fi &&
 		test_cmp expect actual &&
 
 		test_path_is_file newfile/realfile &&
