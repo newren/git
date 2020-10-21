@@ -3952,6 +3952,8 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 
 static void reset_maps(struct merge_options_internal *opt, int reinitialize);
 
+static unsigned RESULT_INITIALIZED = 0x1abe11ed; /* unlikely accidental value */
+
 /*
  * Originally from merge_trees_internal(); heavily adapted, though.
  */
@@ -4021,6 +4023,7 @@ redo:
 	result->tree = parse_tree_indirect(&working_tree_oid);
 	if (!opt->priv->call_depth) {
 		result->priv = opt->priv;
+		result->ate = RESULT_INITIALIZED;
 		opt->priv = NULL;
 	}
 }
@@ -4160,6 +4163,9 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	assert(opt->obuf.len == 0);
 
 	assert(opt->priv == NULL);
+	if (result->ate != 0 && result->ate != RESULT_INITIALIZED) {
+		BUG("struct merge_result passed to merge_inmemory_*recursive() must be zeroed or filled with values from a previous run");
+	}
 	if (result->priv) {
 		/*
 		 * result->priv non-NULL means results from previous run; do a

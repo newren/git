@@ -15,9 +15,10 @@ struct merge_result {
 
 	/*
 	 * Additional metadata used by merge_switch_to_result() or future calls
-	 * to merge_inmemory_*().
+	 * to merge_inmemory_*().  Not for external use.
 	 */
 	void *priv;
+	unsigned ate;
 };
 
 /* rename-detecting three-way merge, no recursion. */
