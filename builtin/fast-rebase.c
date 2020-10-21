@@ -102,9 +102,15 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	struct strbuf branch_name = STRBUF_INIT;
 
 	if (argc == 2 && !strcmp(argv[1], "-h")) {
-		printf("usage: read the code, figure out how to use it, then do so\n");
+		printf("Sorry, I am not a psychiatrist; I can not give you the help you need.  Oh, you meant usage...\n");
 		exit(129);
 	}
+
+	if (!getenv("GIT_TEST_MERGE_ALGORITHM")) {
+		fprintf_ln(stderr, _("git: 'fast-rebase' is not a git command. See 'git --help'."));
+		exit(1);
+	}
+
 	if (argc != 5 || strcmp(argv[1], "--onto"))
 		die("usage: read the code, figure out how to use it, then do so");
 
