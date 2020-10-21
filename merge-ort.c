@@ -206,7 +206,7 @@ static int err(struct merge_options *opt, const char *err, ...)
 	va_list params;
 	struct strbuf sb = STRBUF_INIT;
 
-	strbuf_addf(&sb, "error: ");
+	strbuf_addstr(&sb, "error: ");
 	va_start(params, err);
 	strbuf_vaddf(&sb, err, params);
 	va_end(params);
@@ -353,8 +353,8 @@ static int traverse_trees_wrapper_callback(int n,
 		   renames->callback_data_alloc);
 	renames->callback_data[renames->callback_data_nr].mask = mask;
 	renames->callback_data[renames->callback_data_nr].dirmask = dirmask;
-	memcpy(renames->callback_data[renames->callback_data_nr].names, names,
-	       3*sizeof(*names));
+	COPY_ARRAY(renames->callback_data[renames->callback_data_nr].names,
+		   names, 3);
 	renames->callback_data_nr++;
 
 	return mask;
