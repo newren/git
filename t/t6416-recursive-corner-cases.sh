@@ -3,6 +3,7 @@
 test_description='recursive merge corner cases involving criss-cross merges'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-merge.sh
 
 #
 #  L1  L2
@@ -704,7 +705,7 @@ test_expect_success 'merge of D1 & E3 succeeds' '
 	)
 '
 
-test_expect_success 'merge of D1 & E4 puts merge of a and a2 in both a and a2' '
+test_expect_merge_algorithm failure success 'merge of D1 & E4 puts merge of a and a2 in both a and a2' '
 	test_when_finished "git -C directory-file reset --hard" &&
 	test_when_finished "git -C directory-file clean -fdqx" &&
 	(
@@ -1067,7 +1068,7 @@ test_expect_success 'setup symlink modify/modify' '
 	)
 '
 
-test_expect_success 'check symlink modify/modify' '
+test_expect_merge_algorithm failure success 'check symlink modify/modify' '
 	(
 		cd symlink-modify-modify &&
 
@@ -1133,7 +1134,7 @@ test_expect_success 'setup symlink add/add' '
 	)
 '
 
-test_expect_success 'check symlink add/add' '
+test_expect_merge_algorithm failure success 'check symlink add/add' '
 	(
 		cd symlink-add-add &&
 
@@ -1221,7 +1222,7 @@ test_expect_success 'setup submodule modify/modify' '
 	)
 '
 
-test_expect_success 'check submodule modify/modify' '
+test_expect_merge_algorithm failure success 'check submodule modify/modify' '
 	(
 		cd submodule-modify-modify &&
 
@@ -1309,7 +1310,7 @@ test_expect_success 'setup submodule add/add' '
 	)
 '
 
-test_expect_success 'check submodule add/add' '
+test_expect_merge_algorithm failure success 'check submodule add/add' '
 	(
 		cd submodule-add-add &&
 
@@ -1384,7 +1385,7 @@ test_expect_success 'setup conflicting entry types (submodule vs symlink)' '
 	)
 '
 
-test_expect_success 'check conflicting entry types (submodule vs symlink)' '
+test_expect_merge_algorithm failure success 'check conflicting entry types (submodule vs symlink)' '
 	(
 		cd submodule-symlink-add-add &&
 

@@ -4,6 +4,7 @@ test_description="recursive merge corner cases w/ renames but not criss-crosses"
 # t6036 has corner cases that involve both criss-cross merges and renames
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-merge.sh
 
 test_setup_rename_delete_untracked () {
 	test_create_repo rename-delete-untracked &&
@@ -876,7 +877,7 @@ test_setup_rad () {
 	)
 }
 
-test_expect_success 'rad-check: rename/add/delete conflict' '
+test_expect_merge_algorithm failure success 'rad-check: rename/add/delete conflict' '
 	test_setup_rad &&
 	(
 		cd rad &&
@@ -949,7 +950,7 @@ test_setup_rrdd () {
 	)
 }
 
-test_expect_success 'rrdd-check: rename/rename(2to1)/delete/delete conflict' '
+test_expect_merge_algorithm failure success 'rrdd-check: rename/rename(2to1)/delete/delete conflict' '
 	test_setup_rrdd &&
 	(
 		cd rrdd &&
@@ -1038,7 +1039,7 @@ test_setup_mod6 () {
 	)
 }
 
-test_expect_success 'mod6-check: chains of rename/rename(1to2) and rename/rename(2to1)' '
+test_expect_merge_algorithm failure success 'mod6-check: chains of rename/rename(1to2) and rename/rename(2to1)' '
 	test_setup_mod6 &&
 	(
 		cd mod6 &&
