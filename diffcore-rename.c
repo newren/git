@@ -1489,7 +1489,7 @@ void diffcore_rename_extended(struct diff_options *options,
 #endif
 	/* Avoid other code trying to use invalidated entries */
 	rename_src_nr = num_src;
-	
+
 	/* All done? */
 	if (!num_create || !num_src)
 		goto cleanup;
