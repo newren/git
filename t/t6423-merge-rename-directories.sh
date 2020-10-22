@@ -4889,7 +4889,9 @@ test_expect_merge_algorithm failure success '12f: Trivial directory resolve, cac
 		test_cmp expect actual &&
 
 		grep region_enter.*collect_merge_info trace.output >collect &&
-		test_line_count = 4 collect
+		test_line_count = 4 collect &&
+		grep region_enter.*process_entries$ trace.output >process &&
+		test_line_count = 2 process
 	)
 '
 
