@@ -957,9 +957,6 @@ static void resolve_trivial_directory_merge(struct conflict_info *ci, int side)
 	oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 	ci->merged.result.mode = ci->stages[side].mode;
 	ci->merged.is_null = is_null_oid(&ci->stages[side].oid);
-	/* FIXME: Do I need to worry about the next 5 lines?? */
-	/* ci->dirmask &= ~ci->match_mask; */
-	/* ci->df_conflict = 0; */
 	ci->match_mask = 0;
 	ci->merged.clean = 1; /* (ci->filemask == 0); */
 	ci->processed = 1; /* ci->merged.clean; */
@@ -1581,7 +1578,8 @@ static int handle_content_merge(struct merge_options *opt,
 		 * canon_mode() will just normalize that to 100644 for us and
 		 * thus not solve anything.
 		 *
-		 * Not sure if there's anything we can do...
+		 * Figure out if there's some kind of way we can work around
+		 * this...
 		 */
 	}
 
@@ -3999,10 +3997,6 @@ redo:
 	process_entries(opt, &working_tree_oid);
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
-	/* FIXME: Only show this if showing hints, and only after other output */
-	diff_warn_rename_limit("merge.renamelimit",
-			       opt->priv->needed_rename_limit, 0);
-
 	trace2_region_enter("merge", "cleanup", opt->repo);
 	/* unmerged entries => unclean */
 	result->clean &= strmap_empty(&opt->priv->unmerged);
@@ -4163,17 +4157,18 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	assert(opt->obuf.len == 0);
 
 	assert(opt->priv == NULL);
+	assert(!!result->priv == !!result->ate);
 	if (result->ate != 0 && result->ate != RESULT_INITIALIZED) {
 		BUG("struct merge_result passed to merge_inmemory_*recursive() must be zeroed or filled with values from a previous run");
 	}
 	if (result->priv) {
-		/*
-		 * result->priv non-NULL means results from previous run; do a
-		 * few sanity checks that user didn't just give us
-		 * uninitialized garbage.
-		 */
 		opt->priv = result->priv;
 		result->priv = NULL;
+		/*
+		 * opt->priv non-NULL means we had results from a previous
+		 * run; do a few sanity checks that user didn't mess with
+		 * it in an obvious fashion.
+		 */
 		assert(opt->priv->call_depth == 0);
 		assert(!opt->priv->toplevel_dir ||
 		       0 == strlen(opt->priv->toplevel_dir));
@@ -4294,6 +4289,10 @@ void merge_switch_to_result(struct merge_options *opt,
 			printf("%s", sb->buf);
 		}
 		string_list_clear(&olist, 0);
+
+		/* Also include needed rename limit adjustment now */
+		diff_warn_rename_limit("merge.renamelimit",
+				       opti->needed_rename_limit, 0);
 
 		trace2_region_leave("merge", "display messages", opt->repo);
 	}
