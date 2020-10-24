@@ -1441,7 +1441,6 @@ static void initialize_attr_index(struct merge_options *opt)
 			if (!(ci->filemask & stage_mask))
 				continue;
 			len = strlen(GITATTRIBUTES_FILE);
-			// make_empty_transient_cache_entry(len)
 			ce = make_empty_cache_entry(attr_index, len);
 			ce->ce_mode = create_ce_mode(ci->stages[stage].mode);
 			ce->ce_flags = create_ce_flags(stage);
