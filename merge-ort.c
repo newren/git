@@ -3947,26 +3947,26 @@ static unsigned RESULT_INITIALIZED = 0x1abe11ed; /* unlikely accidental value */
  */
 static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 					    struct tree *merge_base,
-					    struct tree *head,
-					    struct tree *merge,
+					    struct tree *side1,
+					    struct tree *side2,
 					    struct merge_result *result)
 {
 	struct diff_queue_struct pairs;
 	struct object_id working_tree_oid;
 
 	if (opt->subtree_shift) {
-		merge = shift_tree_object(opt->repo, head, merge,
+		side2 = shift_tree_object(opt->repo, side1, side2,
 					  opt->subtree_shift);
-		merge_base = shift_tree_object(opt->repo, head, merge_base,
+		merge_base = shift_tree_object(opt->repo, side1, merge_base,
 					       opt->subtree_shift);
 	}
 
 redo:
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
-	if (collect_merge_info(opt, merge_base, head, merge) != 0) {
+	if (collect_merge_info(opt, merge_base, side1, side2) != 0) {
 		err(opt, _("collecting merge info for trees %s and %s failed"),
-		    oid_to_hex(&head->object.oid),
-		    oid_to_hex(&merge->object.oid));
+		    oid_to_hex(&side1->object.oid),
+		    oid_to_hex(&side2->object.oid));
 		result->clean = -1;
 		return;
 	}
@@ -3974,7 +3974,7 @@ redo:
 
 	trace2_region_enter("merge", "renames", opt->repo);
 	result->clean = detect_and_process_renames(opt, &pairs, merge_base,
-						   head, merge);
+						   side1, side2);
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
