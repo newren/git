@@ -149,11 +149,6 @@ struct conflict_info {
 	unsigned processed:1;
 };
 
-struct oidmap_string_list_entry {
-	struct oidmap_entry entry;
-	struct string_list fullpaths;
-};
-
 /***** Copy-paste static functions from merge-recursive.c *****/
 
 /*
