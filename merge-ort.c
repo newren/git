@@ -3738,8 +3738,8 @@ static void process_entries(struct merge_options *opt,
 	    (uintptr_t)dir_metadata.offsets.items[0].util != 0) {
 		printf("dir_metadata.offsets.nr = %d (should be 1)\n",
 		       dir_metadata.offsets.nr);
-		printf("dir_metadata.offsets.items[0].util = %lu (should be 0)\n",
-		       (uintptr_t)dir_metadata.offsets.items[0].util);
+		printf("dir_metadata.offsets.items[0].util = %u (should be 0)\n",
+		       (unsigned)(uintptr_t)dir_metadata.offsets.items[0].util);
 		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
