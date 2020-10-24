@@ -146,7 +146,6 @@ struct conflict_info {
 	unsigned filemask:3;
 	unsigned dirmask:3;
 	unsigned match_mask:3;
-	unsigned processed:1;
 };
 
 /***** Copy-paste static functions from merge-recursive.c *****/
@@ -954,7 +953,6 @@ static void resolve_trivial_directory_merge(struct conflict_info *ci, int side)
 	ci->merged.is_null = is_null_oid(&ci->stages[side].oid);
 	ci->match_mask = 0;
 	ci->merged.clean = 1; /* (ci->filemask == 0); */
-	ci->processed = 1; /* ci->merged.clean; */
 }
 
 static int handle_deferred_entries(struct merge_options *opt,
@@ -2386,7 +2384,6 @@ static void dump_conflict_info(struct conflict_info *ci, char *name)
 	printf("  ci->filemask:      %d\n", ci->filemask);
 	printf("  ci->dirmask:       %d\n", ci->dirmask);
 	printf("  ci->match_mask:    %d\n", ci->match_mask);
-	printf("  ci->processed:     %d\n", ci->processed);
 }
 #endif
 
@@ -3343,8 +3340,7 @@ static void process_entry(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
 #endif
-	assert(!ci->merged.clean && !ci->processed);
-	ci->processed = 1;
+	assert(!ci->merged.clean);
 	assert(ci->filemask >= 0 && ci->filemask <= 7);
 	if (ci->filemask == 0) {
 		/*
