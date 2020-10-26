@@ -638,7 +638,7 @@ static int do_recursive_merge(struct repository *r,
 
 	if (opts->strategy && !strcmp(opts->strategy, "ort")) {
 		memset(&result, 0, sizeof(result));
-		merge_inmemory_nonrecursive(&o, base_tree, head_tree, next_tree,
+		merge_incore_nonrecursive(&o, base_tree, head_tree, next_tree,
 					    &result);
 		show_output = !is_rebase_i(opts) || !result.clean;
 		/*
@@ -3761,7 +3761,7 @@ static int do_merge(struct repository *r,
 
 	if (opts->strategy && !strcmp(opts->strategy, "ort")) {
 		/*
-		 * TODO: Should use merge_inmemory_recursive() and
+		 * TODO: Should use merge_incore_recursive() and
 		 * merge_switch_to_result(), skipping the call to
 		 * merge_switch_to_result() when we don't actually need to
 		 * update the index and working copy immediately.

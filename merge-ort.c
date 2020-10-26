@@ -277,52 +277,6 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 	return next;
 }
 
-static int sort_dirs_next_to_their_children(const void *a, const void *b)
-{
-	/*
-	 * Here we only care that entries for directories appear adjacent
-	 * to and before files underneath the directory.  In other words,
-	 * we do not want the natural sorting of
-	 *     foo
-	 *     foo.txt
-	 *     foo/bar
-	 * Instead, we want "foo" to sort as though it were "foo/", so that
-	 * we instead get
-	 *     foo.txt
-	 *     foo
-	 *     foo/bar
-	 * To achieve this, we basically implement our own strcmp, except that
-	 * if we get to the end of either string instead of comparing NUL to
-	 * another character, we compare '/' to it.
-	 *
-	 * The reason to not use df_name_compare directly was that it was
-	 * just too bloody expensive, so I had to reimplement it.
-	 */
-	const char *one = ((struct string_list_item *)a)->string;
-	const char *two = ((struct string_list_item *)b)->string;
-	unsigned char c1, c2;
-
-	while (*one && (*one == *two)) {
-		one++;
-		two++;
-	}
-
-	c1 = *one;
-	if (!c1)
-		c1 = '/';
-
-	c2 = *two;
-	if (!c2)
-		c2 = '/';
-
-	if (c1 == c2) {
-		/* Getting here means one is a leading directory of the other */
-		return (*one) ? 1 : -1;
-	}
-	else
-		return c1-c2;
-}
-
 /***** End copy-paste static functions from merge-recursive.c *****/
 
 static int traverse_trees_wrapper_callback(int n,
@@ -1179,11 +1133,11 @@ static int collect_merge_info(struct merge_options *opt,
 	init_tree_desc(t+1, side1->buffer, side1->size);
 	init_tree_desc(t+2, side2->buffer, side2->size);
 
-	trace_performance_enter();
+	trace2_region_enter("merge", "traverse_trees", opt->repo);
 	ret = traverse_trees(NULL, 3, t, &info);
 	if (ret == 0)
 		ret = handle_deferred_entries(opt, &info);
-	trace_performance_leave("traverse_trees");
+	trace2_region_leave("merge", "traverse_trees", opt->repo);
 
 	return ret;
 }
@@ -3061,6 +3015,52 @@ static int detect_and_process_renames(struct merge_options *opt,
 	return clean;
 }
 
+static int sort_dirs_next_to_their_children(const void *a, const void *b)
+{
+	/*
+	 * Here we only care that entries for directories appear adjacent
+	 * to and before files underneath the directory.  In other words,
+	 * we do not want the natural sorting of
+	 *     foo
+	 *     foo.txt
+	 *     foo/bar
+	 * Instead, we want "foo" to sort as though it were "foo/", so that
+	 * we instead get
+	 *     foo.txt
+	 *     foo
+	 *     foo/bar
+	 * To achieve this, we basically implement our own strcmp, except that
+	 * if we get to the end of either string instead of comparing NUL to
+	 * another character, we compare '/' to it.
+	 *
+	 * The reason to not use df_name_compare directly was that it was
+	 * just too bloody expensive, so I had to reimplement it.
+	 */
+	const char *one = ((struct string_list_item *)a)->string;
+	const char *two = ((struct string_list_item *)b)->string;
+	unsigned char c1, c2;
+
+	while (*one && (*one == *two)) {
+		one++;
+		two++;
+	}
+
+	c1 = *one;
+	if (!c1)
+		c1 = '/';
+
+	c2 = *two;
+	if (!c2)
+		c2 = '/';
+
+	if (c1 == c2) {
+		/* Getting here means one is a leading directory of the other */
+		return (*one) ? 1 : -1;
+	}
+	else
+		return c1-c2;
+}
+
 static int read_oid_strbuf(struct merge_options *opt,
 			   const struct object_id *oid,
 			   struct strbuf *dst)
@@ -3329,15 +3329,14 @@ static void write_completed_directories(struct merge_options *opt,
 
 /* Per entry merge function */
 static void process_entry(struct merge_options *opt,
-			  struct string_list_item *e,
+			  const char *path,
+			  struct conflict_info *ci,
 			  struct directory_versions *dir_metadata)
 {
-	char *path = e->string;
-	struct conflict_info *ci = e->util;
 	int df_file_index = 0;
 
 #ifdef VERBOSE_DEBUG
-	printf("Processing %s; filemask = %d\n", e->string, ci->filemask);
+	printf("Processing %s; filemask = %d\n", path, ci->filemask);
 #endif
 	assert(!ci->merged.clean);
 	assert(ci->filemask >= 0 && ci->filemask <= 7);
@@ -3378,6 +3377,7 @@ static void process_entry(struct merge_options *opt,
 		 */
 		struct conflict_info *new_ci;
 		const char *branch;
+		const char *old_path = path;
 		int i;
 
 		assert(ci->merged.result.mode == S_IFDIR);
@@ -3429,7 +3429,7 @@ static void process_entry(struct merge_options *opt,
 		path_msg(opt, path, 0,
 			 _("CONFLICT (file/directory): directory in the way "
 			   "of %s from %s; moving it to %s instead."),
-			 e->string, branch, path);
+			 old_path, branch, path);
 
 		/*
 		 * Zero out the filemask for the old ci.  At this point, ci
@@ -3438,11 +3438,18 @@ static void process_entry(struct merge_options *opt,
 		 */
 		ci->filemask = 0;
 
-		/* Point e and ci at the new entry so it can be worked on */
-		e->string = path;
-		e->util = new_ci;
+		/*
+		 * Now note that we're working on the new entry (path was
+		 * updated above.
+		 */
 		ci = new_ci;
 	}
+
+	/*
+	 * NOTE: Below there is a long switch-like if-elseif-elseif... block
+	 *       which the code goes through even for the df_conflict cases
+	 *       above.  Well, it will once we don't die-not-implemented above.
+	 */
 	if (ci->match_mask) {
 		ci->merged.clean = 1;
 		if (ci->match_mask == 6) {
@@ -3472,22 +3479,20 @@ static void process_entry(struct merge_options *opt,
 	} else if (ci->filemask >= 6 &&
 		   (S_IFMT & ci->stages[1].mode) !=
 		   (S_IFMT & ci->stages[2].mode)) {
+		/* Two different items from (file/submodule/symlink) */
 		if (opt->priv->call_depth) {
+			/* Just use the version from the merge base */
 			ci->merged.clean = 0;
 			oidcpy(&ci->merged.result.oid, &ci->stages[0].oid);
 			ci->merged.result.mode = ci->stages[0].mode;
 			ci->merged.is_null = (ci->merged.result.mode == 0);
 		} else {
-			/*
-			 * Two different items from (file/submodule/symlink)
-			 *
-			 * Handle by renaming one or both to separate paths.
-			 */
+			/* Handle by renaming one or both to separate paths. */
 			unsigned o_mode = ci->stages[0].mode;
 			unsigned a_mode = ci->stages[1].mode;
 			unsigned b_mode = ci->stages[2].mode;
 			struct conflict_info *new_ci = xmalloc(sizeof(*new_ci));
-			char *a_path = NULL, *b_path = NULL;
+			const char *a_path = NULL, *b_path = NULL;
 			int rename_a = 0, rename_b = 0;
 
 			if (S_ISREG(a_mode))
@@ -3577,6 +3582,7 @@ static void process_entry(struct merge_options *opt,
 				path = a_path;
 		}
 	} else if (ci->filemask >= 6) {
+		/* Need a two-way or three-way content merge */
 		struct version_info merged_file;
 		unsigned clean_merge;
 		struct version_info *o = &ci->stages[0];
@@ -3658,8 +3664,16 @@ static void process_entry(struct merge_options *opt,
 		oidcpy(&ci->merged.result.oid, &null_oid);
 		ci->merged.clean = !ci->path_conflict;
 	}
+
+	/*
+	 * If still unmerged, record it separately.  This allows us to later
+	 * iterate over just unmerged entries when updating the index instead
+	 * of iterating over all entries.
+	 */
 	if (!ci->merged.clean)
 		strmap_put(&opt->priv->unmerged, path, ci);
+
+	/* Record metadata for ci->merged in dir_metadata */
 	record_entry_for_tree(dir_metadata, path, ci);
 }
 
@@ -3694,17 +3708,19 @@ static void process_entries(struct merge_options *opt,
 	QSORT(plist.items, plist.nr, sort_dirs_next_to_their_children);
 	trace2_region_leave("merge", "plist special sort", opt->repo);
 
-	/*
-	 * Iterate over the items in both in reverse order, so we can handle
-	 * contained directories before the containing directory.
-	 */
 	string_list_init(&dir_metadata.versions, 0);
 	string_list_init(&dir_metadata.offsets, 0);
 	dir_metadata.last_directory = NULL;
 	dir_metadata.last_directory_len = 0;
 	trace2_region_leave("merge", "process_entries setup", opt->repo);
+
+	/*
+	 * Iterate over the items in reverse order, so we can handle paths
+	 * below a directory before needing to handle the directory itself.
+	 */
 	trace2_region_enter("merge", "processing", opt->repo);
 	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
+		char *path = entry->string;
 		/*
 		 * WARNING: If ci->merged.clean is true, then ci does not
 		 * actually point to a conflict_info but a struct merge_info.
@@ -3718,11 +3734,12 @@ static void process_entries(struct merge_options *opt,
 		write_completed_directories(opt, ci->merged.directory_name,
 					    &dir_metadata);
 		if (ci->merged.clean)
-			record_entry_for_tree(&dir_metadata, entry->string, ci);
+			record_entry_for_tree(&dir_metadata, path, ci);
 		else
-			process_entry(opt, entry, &dir_metadata);
+			process_entry(opt, path, ci, &dir_metadata);
 	}
 	trace2_region_leave("merge", "processing", opt->repo);
+
 	trace2_region_enter("merge", "finalize", opt->repo);
 	if (dir_metadata.offsets.nr != 1 ||
 	    (uintptr_t)dir_metadata.offsets.items[0].util != 0) {
@@ -3964,7 +3981,8 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 redo:
 	trace2_region_enter("merge", "collect_merge_info", opt->repo);
 	if (collect_merge_info(opt, merge_base, side1, side2) != 0) {
-		err(opt, _("collecting merge info for trees %s and %s failed"),
+		err(opt, _("collecting merge info failed for trees %s, %s, %s"),
+		    oid_to_hex(&merge_base->object.oid),
 		    oid_to_hex(&side1->object.oid),
 		    oid_to_hex(&side2->object.oid));
 		result->clean = -1;
@@ -3988,9 +4006,6 @@ redo:
 	trace2_region_leave("merge", "process_entries", opt->repo);
 
 	trace2_region_enter("merge", "cleanup", opt->repo);
-	/* unmerged entries => unclean */
-	result->clean &= strmap_empty(&opt->priv->unmerged);
-
 	if (pairs.nr) {
 		int i;
 		for (i = 0; i < pairs.nr; i++)
@@ -4005,9 +4020,11 @@ redo:
 
 	/* Set return values */
 	result->tree = parse_tree_indirect(&working_tree_oid);
+	/* existence of unmerged entries implies unclean */
+	result->clean &= strmap_empty(&opt->priv->unmerged);
 	if (!opt->priv->call_depth) {
 		result->priv = opt->priv;
-		result->ate = RESULT_INITIALIZED;
+		result->_properly_initialized = RESULT_INITIALIZED;
 		opt->priv = NULL;
 	}
 }
@@ -4127,29 +4144,32 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 
 	assert(opt->branch1 && opt->branch2);
 
-	assert(opt->detect_renames >= -1 &&
-	       opt->detect_renames <= DIFF_DETECT_COPY);
 	assert(opt->detect_directory_renames >= MERGE_DIRECTORY_RENAMES_NONE &&
 	       opt->detect_directory_renames <= MERGE_DIRECTORY_RENAMES_TRUE);
 	assert(opt->rename_limit >= -1);
 	assert(opt->rename_score >= 0 && opt->rename_score <= MAX_SCORE);
 	assert(opt->show_rename_progress >= 0 && opt->show_rename_progress <= 1);
 
-	/* FIXME: This is a super hacky way to "default" to histogram diff */
-	opt->xdl_opts = DIFF_WITH_ALG(opt, HISTOGRAM_DIFF);
 	assert(opt->xdl_opts >= 0);
 	assert(opt->recursive_variant >= MERGE_VARIANT_NORMAL &&
 	       opt->recursive_variant <= MERGE_VARIANT_THEIRS);
 
-	/* verbosity, buffer_output, and obuf are ignored */
+	/*
+	 * detect_renames, verbosity, buffer_output, and obuf are ignored
+	 * fields that were used by "recursive" rather than "ort" -- but
+	 * sanity check them anyway.
+	 */
+	assert(opt->detect_renames >= -1 &&
+	       opt->detect_renames <= DIFF_DETECT_COPY);
 	assert(opt->verbosity >= 0 && opt->verbosity <= 5);
 	assert(opt->buffer_output <= 2);
 	assert(opt->obuf.len == 0);
 
 	assert(opt->priv == NULL);
-	assert(!!result->priv == !!result->ate);
-	if (result->ate != 0 && result->ate != RESULT_INITIALIZED) {
-		BUG("struct merge_result passed to merge_inmemory_*recursive() must be zeroed or filled with values from a previous run");
+	assert(!!result->priv == !!result->_properly_initialized);
+	if (result->_properly_initialized != 0 &&
+	    result->_properly_initialized != RESULT_INITIALIZED) {
+		BUG("struct merge_result passed to merge_incore_*recursive() must be zeroed or filled with values from a previous run");
 	}
 	if (result->priv) {
 		opt->priv = result->priv;
@@ -4164,6 +4184,9 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		       0 == strlen(opt->priv->toplevel_dir));
 	}
 	trace2_region_leave("merge", "sanity checks", opt->repo);
+
+	/* Default to histogram diff.  Actually, just hardcode it...for now. */
+	opt->xdl_opts = DIFF_WITH_ALG(opt, HISTOGRAM_DIFF);
 
 	if (opt->priv) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
@@ -4440,16 +4463,16 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 				   entry->value);
 }
 
-void merge_inmemory_nonrecursive(struct merge_options *opt,
-				 struct tree *merge_base,
-				 struct tree *side1,
-				 struct tree *side2,
-				 struct merge_result *result)
+void merge_incore_nonrecursive(struct merge_options *opt,
+			       struct tree *merge_base,
+			       struct tree *side1,
+			       struct tree *side2,
+			       struct merge_result *result)
 {
-	trace2_region_enter("merge", "inmemory_nonrecursive", opt->repo);
-	assert(opt->ancestor != NULL);
+	trace2_region_enter("merge", "incore_nonrecursive", opt->repo);
 
 	trace2_region_enter("merge", "merge_start", opt->repo);
+	assert(opt->ancestor != NULL);
 	merge_check_renames_reusable(opt, result, merge_base, side1, side2);
 	merge_start(opt, result);
 	/*
@@ -4463,7 +4486,7 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_nonrecursive_internal(opt, merge_base, side1, side2, result);
-	trace2_region_leave("merge", "inmemory_nonrecursive", opt->repo);
+	trace2_region_leave("merge", "incore_nonrecursive", opt->repo);
 
 #ifdef VERBOSE_DEBUG
 	/* Print out information about any conflicting paths */
@@ -4492,13 +4515,13 @@ void merge_inmemory_nonrecursive(struct merge_options *opt,
 #endif
 }
 
-void merge_inmemory_recursive(struct merge_options *opt,
-			      struct commit_list *merge_bases,
-			      struct commit *side1,
-			      struct commit *side2,
-			      struct merge_result *result)
+void merge_incore_recursive(struct merge_options *opt,
+			    struct commit_list *merge_bases,
+			    struct commit *side1,
+			    struct commit *side2,
+			    struct merge_result *result)
 {
-	trace2_region_enter("merge", "inmemory_recursive", opt->repo);
+	trace2_region_enter("merge", "incore_recursive", opt->repo);
 	assert(opt->ancestor == NULL ||
 	       !strcmp(opt->ancestor, "constructed merge base"));
 
@@ -4507,5 +4530,5 @@ void merge_inmemory_recursive(struct merge_options *opt,
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_internal(opt, merge_bases, side1, side2, result);
-	trace2_region_leave("merge", "inmemory_recursive", opt->repo);
+	trace2_region_leave("merge", "incore_recursive", opt->repo);
 }
