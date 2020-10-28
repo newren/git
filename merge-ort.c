@@ -1617,16 +1617,24 @@ static int process_renames(struct merge_options *opt,
 	for (i = 0; i < renames->nr; ++i) {
 		const char *oldpath, *newpath;
 		struct diff_filepair *pair = renames->queue[i];
-		struct conflict_info *oldinfo, *newinfo;
+		struct conflict_info *oldinfo = NULL, *newinfo = NULL;
+		struct strmap_entry *old_ent, *new_ent;
 		unsigned int old_sidemask;
 		int target_index, other_source_index;
 		int source_deleted, collision, type_changed;
 		const char *rename_branch = NULL, *delete_branch = NULL;
 
-		oldpath = pair->one->path;
+		old_ent = strmap_get_entry(&opt->priv->paths, pair->one->path);
+		new_ent = strmap_get_entry(&opt->priv->paths, pair->two->path);
+		if (old_ent) {
+			oldpath = old_ent->key;
+			oldinfo = old_ent->value;
+		}
 		newpath = pair->two->path;
-		oldinfo = strmap_get(&opt->priv->paths, pair->one->path);
-		newinfo = strmap_get(&opt->priv->paths, pair->two->path);
+		if (new_ent) {
+			newpath = new_ent->key;
+			newinfo = new_ent->value;
+		}
 
 		/*
 		 * If oldpath isn't in opt->priv->paths, that means that a
@@ -2892,28 +2900,28 @@ static void dump_info(struct merge_options *opt, char *location)
 #endif
 
 static int detect_and_process_renames(struct merge_options *opt,
-				      struct diff_queue_struct *combined,
 				      struct tree *merge_base,
 				      struct tree *side1,
 				      struct tree *side2)
 {
+	struct diff_queue_struct combined;
 	struct strmap *dir_renames[3]; /* Entry 0 unused */
 	struct rename_info *renames = opt->priv->renames;
 	int need_dir_renames, s, clean = 1;
 	unsigned detection_run = 0;
 
-	memset(combined, 0, sizeof(*combined));
+	memset(&combined, 0, sizeof(combined));
 	if (!merge_detect_rename(opt))
-		goto diff_filepair_cleanup;
+		goto cleanup;
 	if (!possible_renames(renames))
-		goto diff_filepair_cleanup;
+		goto cleanup;
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
 	detection_run |= detect_regular_renames(opt, 1);
 	detection_run |= detect_regular_renames(opt, 2);
 	if (renames->redo_after_renames && detection_run) {
 		trace2_region_leave("merge", "regular renames", opt->repo);
-		goto diff_filepair_cleanup;
+		goto more_involved_cleanup;
 	}
 	use_cached_pairs(opt, &renames->cached_pairs[1], &renames->pairs[1]);
 	use_cached_pairs(opt, &renames->cached_pairs[2], &renames->pairs[2]);
@@ -2954,21 +2962,21 @@ static int detect_and_process_renames(struct merge_options *opt,
 		}
 	}
 
-	ALLOC_GROW(combined->queue,
+	ALLOC_GROW(combined.queue,
 		   renames->pairs[1].nr + renames->pairs[2].nr,
-		   combined->alloc);
-	clean &= collect_renames(opt, combined, 1,
+		   combined.alloc);
+	clean &= collect_renames(opt, &combined, 1,
 				 dir_renames[2], dir_renames[1]);
-	clean &= collect_renames(opt, combined, 2,
+	clean &= collect_renames(opt, &combined, 2,
 				 dir_renames[1], dir_renames[2]);
-	QSORT(combined->queue, combined->nr, compare_pairs);
+	QSORT(combined.queue, combined.nr, compare_pairs);
 	trace2_region_leave("merge", "directory renames", opt->repo);
 
 #ifdef VERBOSE_DEBUG
 	printf("=== Processing %d renames ===\n", combined->nr);
 #endif
 	trace2_region_enter("merge", "process renames", opt->repo);
-	clean &= process_renames(opt, combined);
+	clean &= process_renames(opt, &combined);
 	trace2_region_leave("merge", "process renames", opt->repo);
 
 	/*
@@ -2979,9 +2987,9 @@ static int detect_and_process_renames(struct merge_options *opt,
 		FREE_AND_NULL(dir_renames[s]);
 	}
 
-	goto cleanup; /* collect_renames() handles diff_filepair_cleanup */
+	goto cleanup; /* collect_renames() handles more_involved_cleanup stuff */
 
- diff_filepair_cleanup:
+ more_involved_cleanup:
 	/*
 	 * Free now unneeded filepairs, which would have been handled
 	 * in collect_renames() normally but we're about to skip that
@@ -3002,10 +3010,20 @@ static int detect_and_process_renames(struct merge_options *opt,
 		}
 	}
  cleanup:
-	/* Free memory for renames->pairs[] */
+	/* Free memory for renames->pairs[] and combined */
 	for (s = 1; s <= 2; s++) {
 		free(renames->pairs[s].queue);
 		DIFF_QUEUE_CLEAR(&renames->pairs[s]);
+	}
+	if (combined.nr) {
+		int i;
+		for (i = 0; i < combined.nr; i++)
+#if USE_MEMORY_POOL
+			diff_free_filepair_data(combined.queue[i]);
+#else
+			diff_free_filepair(combined.queue[i]);
+#endif
+		free(combined.queue);
 	}
 
 	/*
@@ -3968,7 +3986,6 @@ static void merge_ort_nonrecursive_internal(struct merge_options *opt,
 					    struct tree *side2,
 					    struct merge_result *result)
 {
-	struct diff_queue_struct pairs;
 	struct object_id working_tree_oid;
 
 	if (opt->subtree_shift) {
@@ -3991,7 +4008,7 @@ redo:
 	trace2_region_leave("merge", "collect_merge_info", opt->repo);
 
 	trace2_region_enter("merge", "renames", opt->repo);
-	result->clean = detect_and_process_renames(opt, &pairs, merge_base,
+	result->clean = detect_and_process_renames(opt, merge_base,
 						   side1, side2);
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
@@ -4004,19 +4021,6 @@ redo:
 	trace2_region_enter("merge", "process_entries", opt->repo);
 	process_entries(opt, &working_tree_oid);
 	trace2_region_leave("merge", "process_entries", opt->repo);
-
-	trace2_region_enter("merge", "cleanup", opt->repo);
-	if (pairs.nr) {
-		int i;
-		for (i = 0; i < pairs.nr; i++)
-#if USE_MEMORY_POOL
-			diff_free_filepair_data(pairs.queue[i]);
-#else
-			diff_free_filepair(pairs.queue[i]);
-#endif
-		free(pairs.queue);
-	}
-	trace2_region_leave("merge", "cleanup", opt->repo);
 
 	/* Set return values */
 	result->tree = parse_tree_indirect(&working_tree_oid);
