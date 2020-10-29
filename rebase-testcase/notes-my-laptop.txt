@@ -49,6 +49,8 @@ latest results:   5.424         10.402     0.543
                   255.3±3.2   967.5±12.6   320.6±2.8  after 2.29.0 rebase
                     249.9…258.6  952.1…998.2  315.6…324.4
 
+                  214.5±4.6   935.7±7.5    285.9±3.3  remove cache refresh
+                    209.0…222.3  926.6…952.0  281.2…290.3
 
 
    Other Notes: rebase --merge rename: 5964.448 s, 5899.473 in diffcore_rename
