@@ -3794,17 +3794,14 @@ static int checkout(struct merge_options *opt,
 #endif
 	setup_unpack_trees_porcelain(&unpack_opts, "merge");
 
-	/* FIXME: Do I need to refresh the index?? */
-	refresh_index(opt->repo->index, REFRESH_QUIET, NULL, NULL, NULL);
-
 	/*
-	 * FIXME: Isn't checking for an unmerged_index unnecessary overhead if
-	 * sequencer/merge check that index is clean first?
+	 * NOTE: if this were just "git checkout" code, we would probably
+	 * read or refresh the cache and check for an unmerged index, but
+	 * builtin/merge.c or sequencer.c really needs to read the index
+	 * and check for unmerged entries before starting merging for a
+	 * good user experience (no sense waiting for merges/rebases before
+	 * erroring out), so there's no reason to duplicate that work here.
 	 */
-	if (unmerged_index(opt->repo->index)) {
-		error(_("you need to resolve your current index first"));
-		return -1;
-	}
 
 	/* 2-way merge to the new branch */
 	unpack_opts.update = 1;

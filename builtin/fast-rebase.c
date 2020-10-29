@@ -117,13 +117,16 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	onto = peel_committish(argv[2]);
 	strbuf_addf(&branch_name, "refs/heads/%s", argv[4]);
 
-	/* Sanity check */
+	/* Sanity checks */
 	if (get_oid("HEAD", &head))
 		die(_("Cannot read HEAD"));
 	assert(oideq(&onto->object.oid, &head));
 
 	hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
-	assert(repo_read_index(the_repository) >= 0);
+	if (repo_read_index_unmerged(the_repository)) {
+		error(_("you need to resolve your current index first"));
+		return -1;
+	}
 
 	repo_init_revisions(the_repository, &revs, NULL);
 	revs.verbose_header = 1;
