@@ -152,7 +152,8 @@ struct conflict_info {
 
 /*** Function Grouping: various utility functions ***/
 
-static void reset_maps(struct merge_options_internal *opti, int reinitialize)
+static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
+					  int reinitialize)
 {
 	struct rename_info *renames = opti->renames;
 	int i;
@@ -4102,7 +4103,7 @@ void merge_finalize(struct merge_options *opt,
 		git_attr_set_direction(GIT_ATTR_CHECKIN);
 	assert(opt->priv == NULL);
 
-	reset_maps(opti, 0);
+	clear_or_reinit_internal_opts(opti, 0);
 	FREE_AND_NULL(opti->renames);
 	FREE_AND_NULL(opti);
 }
@@ -4208,7 +4209,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 
 	if (opt->priv) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
-		reset_maps(opt->priv, 1);
+		clear_or_reinit_internal_opts(opt->priv, 1);
 		trace2_region_leave("merge", "reset_maps", opt->repo);
 	} else {
 		struct rename_info *renames;
@@ -4336,7 +4337,7 @@ redo:
 	trace2_region_leave("merge", "renames", opt->repo);
 	if (opt->priv->renames->redo_after_renames == 2) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
-		reset_maps(opt->priv, 1);
+		clear_or_reinit_internal_opts(opt->priv, 1);
 		trace2_region_leave("merge", "reset_maps", opt->repo);
 		goto redo;
 	}
@@ -4449,7 +4450,7 @@ static void merge_ort_internal(struct merge_options *opt,
 		commit_list_insert(iter->item,
 				   &merged_merge_bases->parents->next);
 
-		reset_maps(opt->priv, 1);
+		clear_or_reinit_internal_opts(opt->priv, 1);
 	}
 
 	opt->ancestor = ancestor_name;
