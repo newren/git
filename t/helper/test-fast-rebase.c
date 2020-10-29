@@ -11,7 +11,7 @@
  */
 
 #define USE_THE_INDEX_COMPATIBILITY_MACROS
-#include "builtin.h"
+#include "test-tool.h"
 
 #include "cache-tree.h"
 #include "commit.h"
@@ -85,7 +85,7 @@ static struct commit *create_commit(struct tree *tree,
 	return (struct commit *)obj;
 }
 
-int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
+int cmd__fast_rebase(int argc, const char **argv)
 {
 	struct commit *onto;
 	struct commit *last_commit = NULL, *last_picked_commit = NULL;
@@ -101,14 +101,15 @@ int cmd_fast_rebase(int argc, const char **argv, const char *prefix)
 	struct strbuf reflog_msg = STRBUF_INIT;
 	struct strbuf branch_name = STRBUF_INIT;
 
+	/*
+	 * test-tool stuff doesn't set up the git directory by default; need to
+	 * do that manually.
+	 */
+	setup_git_directory();
+
 	if (argc == 2 && !strcmp(argv[1], "-h")) {
 		printf("Sorry, I am not a psychiatrist; I can not give you the help you need.  Oh, you meant usage...\n");
 		exit(129);
-	}
-
-	if (!getenv("GIT_TEST_MERGE_ALGORITHM")) {
-		fprintf_ln(stderr, _("git: 'fast-rebase' is not a git command. See 'git --help'."));
-		exit(1);
 	}
 
 	if (argc != 5 || strcmp(argv[1], "--onto"))
