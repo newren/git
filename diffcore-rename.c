@@ -31,7 +31,7 @@ static struct strintmap *break_idx = NULL;
 
 static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
 {
-	int idx = break_idx ? strintmap_get(break_idx, p->one->path, -1) : -1;
+	int idx = break_idx ? strintmap_get(break_idx, p->one->path) : -1;
 	return (idx == -1) ? NULL : &rename_dst[idx];
 }
 
@@ -74,7 +74,7 @@ static void register_rename_src(struct diff_filepair *p)
 	if (p->broken_pair) {
 		if (!break_idx) {
 			break_idx = xmalloc(sizeof(*break_idx));
-			strintmap_ocd_init(break_idx, NULL, 0);
+			strintmap_init_with_options(break_idx, -1, NULL, 0);
 		}
 		strintmap_set(break_idx, p->one->path, rename_dst_nr);
 	}
@@ -473,7 +473,7 @@ static void increment_count(struct dir_rename_info *info,
 		counts = e->value;
 	} else {
 		counts = xmalloc(sizeof(*counts));
-		strintmap_ocd_init(counts, NULL, 1);
+		strintmap_init_with_options(counts, 0, NULL, 1);
 		strmap_put(info->dir_rename_count, old_dir, counts);
 	}
 
@@ -562,7 +562,7 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 		 * a good pairing.
 		 */
 		if (dirs_removed)
-			drd_flag = strintmap_get(dirs_removed, old_dir, 0);
+			drd_flag = strintmap_get(dirs_removed, old_dir);
 		if (drd_flag == 2 || first_time_in_loop)
 			increment_count(info, old_dir, new_dir);
 
@@ -600,8 +600,8 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		info->dir_rename_count = xmalloc(sizeof(*dir_rename_count));
 		strmap_init(info->dir_rename_count);
 	}
-	strintmap_ocd_init(&info->idx_map, NULL, 0);
-	strmap_ocd_init(&info->dir_rename_guess, NULL, 0);
+	strintmap_init_with_options(&info->idx_map, -1, NULL, 0);
+	strmap_init_with_options(&info->dir_rename_guess, NULL, 0);
 
 	/* Setup info->relevant_target_dirs */
 	info->relevant_target_dirs = NULL;
@@ -621,7 +621,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 		info->relevant_source_dirs = dirs_removed; /* might be NULL */
 	} else {
 		info->relevant_source_dirs = xmalloc(sizeof(struct strintmap));
-		strintmap_init(info->relevant_source_dirs);
+		strintmap_init(info->relevant_source_dirs, 0 /* unused */);
 		strset_for_each_entry(relevant_sources, &iter, entry) {
 			char *dirname = get_dirname(entry->key);
 			if (!dirs_removed ||
@@ -747,7 +747,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 			const char *source_dir = entry->key;
 			struct strintmap *counts = entry->value;
 
-			if (!strintmap_get(dirs_removed, source_dir, 0)) {
+			if (!strintmap_get(dirs_removed, source_dir)) {
 				string_list_append(&to_remove, source_dir);
 				strintmap_clear(counts);
 				continue;
@@ -819,7 +819,7 @@ static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 	basename = (basename ? basename+1 : filename);
 	new_path = xstrfmt("%s/%s", new_dir, basename);
 
-	idx = strintmap_get(&info->idx_map, new_path, -1);
+	idx = strintmap_get(&info->idx_map, new_path);
 	free(new_path);
 	return idx;
 }
@@ -876,8 +876,8 @@ static int find_basename_matches(struct diff_options *options,
 	skip_unmodified = 0;
 
 	/* Create maps of basename -> fullname(s) for sources and dests */
-	strintmap_ocd_init(&sources, NULL, 0);
-	strintmap_ocd_init(&dests, NULL, 0);
+	strintmap_init_with_options(&sources, -1, NULL, 0);
+	strintmap_init_with_options(&dests, -1, NULL, 0);
 	for (i = 0; i < num_src; ++i) {
 		char *filename = rename_src[i].p->one->path;
 		char *base;
@@ -919,14 +919,14 @@ static int find_basename_matches(struct diff_options *options,
 		base = strrchr(filename, '/');
 		base = (base ? base+1 : filename);
 
-		src_index = strintmap_get(&sources, base, -1);
+		src_index = strintmap_get(&sources, base);
 		assert(src_index == -1 || src_index == i);
 
 		if (strintmap_contains(&dests, base)) {
 			struct diff_filespec *one, *two;
 			int score;
 
-			dst_index = strintmap_get(&dests, base, -1);
+			dst_index = strintmap_get(&dests, base);
 			if (src_index == -1 || dst_index == -1) {
 				src_index = i;
 				dst_index = idx_possible_rename(filename, info);
@@ -1184,7 +1184,7 @@ static int handle_early_known_dir_renames(int num_src,
 
 		old_dir = get_dirname(one->path);
 		while (*old_dir != '\0' &&
-		       0 != strintmap_get(dirs_removed, old_dir, 0)) {
+		       0 != strintmap_get(dirs_removed, old_dir)) {
 			char *freeme = old_dir;
 
 			increment_count(info, old_dir, SENTINEL_DIR);
@@ -1206,7 +1206,7 @@ static int handle_early_known_dir_renames(int num_src,
 		/* entry->key is source_dir */
 		struct strintmap *counts = entry->value;
 
-		if (strintmap_get(dirs_removed, entry->key, 0) == 2 &&
+		if (strintmap_get(dirs_removed, entry->key) == 2 &&
 		    dir_rename_already_determinable(counts)) {
 			strintmap_set(dirs_removed, entry->key, 1);
 		}
@@ -1216,21 +1216,21 @@ static int handle_early_known_dir_renames(int num_src,
 		struct diff_filespec *one = rename_src[i].p->one;
 		int val;
 
-		val = strintmap_get(relevant_sources, one->path, 0);
+		val = strintmap_get(relevant_sources, one->path);
 
 		/*
 		 * sources that were not found in relevant_sources should
 		 * have already been removed by a prior call to
 		 * remove_unneeded_paths_from_src()
 		 */
-		assert(val != 0);
+		assert(val != -1);
 
 		if (val == RELEVANT_LOCATION) {
 			int removable = 1;
 			char *dir = get_dirname(one->path);
 			while (1) {
 				char *freeme = dir;
-				int res = strintmap_get(dirs_removed, dir, 0);
+				int res = strintmap_get(dirs_removed, dir);
 
 				/* Quit if not found or irrelevant */
 				if (res == 0)

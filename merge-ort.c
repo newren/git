@@ -1104,13 +1104,14 @@ static int handle_deferred_entries(struct merge_options *opt,
 		 * possible_trivial_merges[side] once this loop is done.
 		 */
 		copy = renames->possible_trivial_merges[side];
-		strintmap_ocd_init(&renames->possible_trivial_merges[side],
+		strintmap_init_with_options(&renames->possible_trivial_merges[side],
+					    0,
 #if USE_MEMORY_POOL
-				   &opt->priv->pool,
+					    &opt->priv->pool,
 #else
-				   NULL,
+					    NULL,
 #endif
-				   0);
+					    0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
 			const char *path = entry->key;
 			unsigned dir_rename_mask = (intptr_t)entry->value;
@@ -1175,7 +1176,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		}
 		strintmap_clear(&copy);
 		strintmap_for_each_entry(&renames->possible_trivial_merges[side],
-				      &iter, entry) {
+					 &iter, entry) {
 			const char *path = entry->key;
 			struct conflict_info *ci;
 
@@ -1855,7 +1856,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	struct rename_info *renames = opt->priv->renames;
 
 	dir_renames = xmalloc(sizeof(*dir_renames));
-	strmap_ocd_init(dir_renames, NULL, 0);
+	strmap_init_with_options(dir_renames, NULL, 0);
 
 	/*
 	 * Collapse
@@ -1993,7 +1994,7 @@ static void compute_collisions(struct strmap *collisions,
 {
 	int i;
 
-	strmap_ocd_init(collisions, NULL, 0);
+	strmap_init_with_options(collisions, NULL, 0);
 	if (strmap_empty(dir_renames))
 		return;
 
@@ -2725,7 +2726,7 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 
 	if (!new_path) {
 		int val = strintmap_get(&renames->relevant_sources[side],
-					p->one->path, -1);
+					p->one->path);
 		if (val == 0) {
 			assert(p->status == 'D');
 			strset_add(&renames->cached_irrelevant[side],
@@ -3003,7 +3004,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	} else {
 		for (s = 1; s <= 2; s++) {
 			dir_renames[s] = xmalloc(sizeof(*dir_renames[s]));
-			strmap_ocd_init(dir_renames[s], NULL, 0);
+			strmap_init_with_options(dir_renames[s], NULL, 0);
 		}
 	}
 
@@ -4224,22 +4225,27 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 #endif
 		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i=1; i<3; i++) {
-			strintmap_ocd_init(&renames->relevant_sources[i],
-					   pool, 0);
-			strintmap_ocd_init(&renames->dirs_removed[i],
-					   pool, 0);
-			strintmap_ocd_init(&renames->possible_trivial_merges[i],
-					   pool, 0);
-			strset_ocd_init(&renames->target_dirs[i], pool, 1);
-			strmap_ocd_init(&renames->cached_pairs[i], NULL, 1);
-			strset_ocd_init(&renames->cached_irrelevant[i], NULL, 1);
-			strset_ocd_init(&renames->cached_target_names[i], NULL, 0);
-			strmap_ocd_init(&renames->dir_rename_count[i], NULL, 1);
+			strintmap_init_with_options(&renames->relevant_sources[i],
+						    -1, pool, 0);
+			strintmap_init_with_options(&renames->dirs_removed[i],
+						    0, pool, 0);
+			strintmap_init_with_options(&renames->possible_trivial_merges[i],
+						    0, pool, 0);
+			strset_init_with_options(&renames->target_dirs[i],
+						 pool, 1);
+			strmap_init_with_options(&renames->cached_pairs[i],
+						 NULL, 1);
+			strset_init_with_options(&renames->cached_irrelevant[i],
+						 NULL, 1);
+			strset_init_with_options(&renames->cached_target_names[i],
+						 NULL, 0);
+			strmap_init_with_options(&renames->dir_rename_count[i],
+						 NULL, 1);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
-		strmap_ocd_init(&opt->priv->paths, pool, 0);
-		strmap_ocd_init(&opt->priv->unmerged, pool, 0);
+		strmap_init_with_options(&opt->priv->paths, pool, 0);
+		strmap_init_with_options(&opt->priv->unmerged, pool, 0);
 #if !USE_MEMORY_POOL
 		/*
 		 * Although we initialize opt->priv->paths_to_free and
@@ -4506,7 +4512,7 @@ void merge_incore_nonrecursive(struct merge_options *opt,
 			dump_conflict_info(ci, path);
 			for (side = 1; side <= 2; side++) {
 				int val = strintmap_get(&opti->renames->relevant_sources[side],
-							path, -1);
+							path);
 				printf("  relevant_sources[%d][%s] = %d\n",
 				       side, path, val);
 			}
