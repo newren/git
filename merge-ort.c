@@ -563,6 +563,7 @@ static void setup_path_info(struct merge_options *opt,
 		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
 	}
+	strmap_put(&opt->priv->paths, fullpath, path_info);
 	result->string = fullpath;
 	result->util = path_info;
 }
@@ -847,7 +848,6 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 		printf("Path -1 for %s\n", pi.string);
 #endif
-		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -863,7 +863,6 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 		printf("Path 0 for %s\n", pi.string);
 #endif
-		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -891,7 +890,6 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 		printf("Path 1.C for %s\n", pi.string);
 #endif
-		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -904,7 +902,6 @@ static int collect_merge_info_callback(int n,
 #ifdef VERBOSE_DEBUG
 		printf("Path 2.C for %s\n", pi.string);
 #endif
-		strmap_put(&opti->paths, pi.string, pi.util);
 		return mask;
 	}
 
@@ -936,7 +933,6 @@ static int collect_merge_info_callback(int n,
 	printf("  filemask: %u\n", filemask);
 	printf("  dirmask:  %lu\n", dirmask);
 #endif
-	strmap_put(&opti->paths, pi.string, pi.util);
 
 	/* If dirmask, recurse into subdirectories */
 	if (dirmask) {
