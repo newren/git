@@ -2157,7 +2157,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	while (1) {
 		/* Find the parent directory of cur_path */
 		char *last_slash = strrchr(cur_path, '/');
-		if (last_slash)
+		if (last_slash) {
 #if USE_MEMORY_POOL
 			parent_name = mem_pool_strndup(&opt->priv->pool,
 						       cur_path,
@@ -2165,7 +2165,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 #else
 			parent_name = xstrndup(cur_path, last_slash - cur_path);
 #endif
-		else {
+		} else {
 			parent_name = opt->priv->toplevel_dir;
 			break;
 		}
