@@ -3794,7 +3794,9 @@ static void process_entries(struct merge_options *opt,
 		struct conflict_info *ci = entry->util;
 
 #ifdef VERBOSE_DEBUG
-		printf("==>Handling %s\n", entry->string);
+		printf("==>Handling %s (%p), with dir %s (%p)\n",
+		       entry->string, entry->string,
+		       ci->merged.directory_name, ci->merged.directory_name);
 #endif
 
 		write_completed_directories(opt, ci->merged.directory_name,
