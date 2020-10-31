@@ -3313,7 +3313,7 @@ static void write_completed_directories(struct merge_options *opt,
 	/*
 	 * At this point, ne (next entry) is within a different directory
 	 * than the last entry, so we need to create a tree object for all
-	 * the entires in info->versions that are under info->last_directory.
+	 * the entries in info->versions that are under info->last_directory.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
 #ifdef VERBOSE_DEBUG
