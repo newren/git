@@ -152,6 +152,16 @@ struct conflict_info {
 
 /*** Function Grouping: various utility functions ***/
 
+static void free_strmap_strings(struct strmap *map)
+{
+	struct hashmap_iter iter;
+	struct strmap_entry *entry;
+
+	strmap_for_each_entry(map, &iter, entry) {
+		free((char*)entry->key);
+	}
+}
+
 static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 					  int reinitialize)
 {
@@ -169,16 +179,14 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	 * wouldn't have to make another copy of the fullpath created by
 	 * make_traverse_path from setup_path_info().  But, now that we've
 	 * used it and have no other references to these strings, it is time
-	 * to deallocate them, which we do by just setting strdup_string = 1
-	 * before the strmaps are cleared.
+	 * to deallocate them.
 	 */
-	opti->paths.strdup_strings = 1;
 #if USE_MEMORY_POOL
 	strmap_func(&opti->paths, 0);
 #else
+	free_strmap_strings(&opti->paths);
 	strmap_func(&opti->paths, 1);
 #endif
-	opti->paths.strdup_strings = 0;
 
 #if !USE_MEMORY_POOL
 	/* opti->paths_to_free is similar to opti->paths. */
@@ -2933,10 +2941,9 @@ static int collect_renames(struct merge_options *opt,
 	 * so that we wouldn't have to make another copy of the new_path
 	 * allocated by apply_dir_rename().  But now that we've used them
 	 * and have no other references to these strings, it is time to
-	 * deallocate them, which we do by just setting strdup_string = 1
-	 * before the strmaps is cleared.
+	 * deallocate them.
 	 */
-	collisions.strdup_strings = 1;
+	free_strmap_strings(&collisions);
 	strmap_clear(&collisions, 1);
 	return clean;
 }
@@ -4245,12 +4252,6 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		strmap_init_with_options(&opt->priv->paths, pool, 0);
 		strmap_init_with_options(&opt->priv->unmerged, pool, 0);
 #if !USE_MEMORY_POOL
-		/*
-		 * Although we initialize opt->priv->paths_to_free and
-		 * opt->priv->paths with strdup_strings = 0, that's just to
-		 * avoid making an extra copy of an allocated string.  Both
-		 * of these store strings that we will later need to free.
-		 */
 		string_list_init(&opt->priv->paths_to_free, 0);
 #endif
 		strmap_init(&opt->priv->output);
