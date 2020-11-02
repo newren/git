@@ -205,14 +205,14 @@ static int git_sequencer_config(const char *k, const char *v, void *cb)
 		return 0;
 	}
 
-	if (!opts->strategy && !strcmp(k, "pull.twohead")) {
-		int ret = git_config_string((const char**)&opts->strategy, k, v);
+	if (!opts->default_strategy && !strcmp(k, "pull.twohead")) {
+		int ret = git_config_string((const char**)&opts->default_strategy, k, v);
 		if (ret == 0) {
 			/*
 			 * pull.twohead is allowed to be multi-valued; we only
 			 * care about the first value.
 			 */
-			char *tmp = strchr(opts->strategy, ' ');
+			char *tmp = strchr(opts->default_strategy, ' ');
 			if (tmp)
 				*tmp = '\0';
 		}
@@ -332,6 +332,7 @@ int sequencer_remove_state(struct replay_opts *opts)
 	free(opts->committer_name);
 	free(opts->committer_email);
 	free(opts->gpg_sign);
+	free(opts->default_strategy);
 	free(opts->strategy);
 	for (i = 0; i < opts->xopts_nr; i++)
 		free(opts->xopts[i]);

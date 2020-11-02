@@ -172,6 +172,11 @@ static int run_sequencer(int argc, const char **argv, struct replay_opts *opts)
 				NULL);
 	}
 
+	if (!opts->strategy && opts->default_strategy) {
+		opts->strategy = opts->default_strategy;
+		opts->default_strategy = NULL;
+	}
+
 	if (opts->allow_ff)
 		verify_opt_compatible(me, "--ff",
 				"--signoff", opts->signoff,
