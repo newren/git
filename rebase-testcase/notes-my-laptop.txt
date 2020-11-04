@@ -52,6 +52,9 @@ latest results:   5.424         10.402     0.543
                   214.5±4.6   935.7±7.5    285.9±3.3  remove cache refresh
                     209.0…222.3  926.6…952.0  281.2…290.3
 
+                  210.1±5.6   923.2±5.5    281.2±3.3  FLEXPTR_ALLOC_STR, I think
+                    205.2…223.4  914.4…932.2  277.6…286.5
+
 
    Other Notes: rebase --merge rename: 5964.448 s, 5899.473 in diffcore_rename
        111.386 : <unmeasured> ( 1.9%)
