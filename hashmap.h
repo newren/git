@@ -238,6 +238,7 @@ void hashmap_init(struct hashmap *map,
 /* internal functions for clearing or freeing hashmap */
 void hashmap_partial_clear_(struct hashmap *map, ssize_t offset);
 void hashmap_clear_(struct hashmap *map, ssize_t offset);
+#define hashmap_free_(map, offset) hashmap_clear_(map, offset)
 
 /*
  * Frees a hashmap structure and allocated memory for the table, but does not
@@ -268,6 +269,7 @@ void hashmap_clear_(struct hashmap *map, ssize_t offset);
  * hashmap_clear_and_free().
  */
 #define hashmap_clear(map) hashmap_clear_(map, -1)
+#define hashmap_free(map) hashmap_clear(map)
 
 /*
  * Similar to hashmap_clear(), except that the table is no deallocated; it
@@ -286,6 +288,8 @@ void hashmap_clear_(struct hashmap *map, ssize_t offset);
  * See usage note above hashmap_clear().
  */
 #define hashmap_clear_and_free(map, type, member) \
+	hashmap_clear_(map, offsetof(type, member))
+#define hashmap_free_entries(map, type, member) \
 	hashmap_clear_(map, offsetof(type, member))
 
 /*
