@@ -374,6 +374,8 @@ static char *unique_path(struct strmap *existing_paths,
 #ifdef VERBOSE_DEBUG
 static void dump_conflict_info(struct conflict_info *ci, char *name)
 {
+	int i;
+
 	printf("conflict_info for %s:\n", name);
 	printf("  ci->merged.directory_name: %s\n",
 	       ci->merged.directory_name);
@@ -385,7 +387,7 @@ static void dump_conflict_info(struct conflict_info *ci, char *name)
 	       ci->merged.clean);
 	if (ci->merged.clean)
 		return;
-	for (int i=0; i<3; i++) {
+	for (i=0; i<3; i++) {
 		printf("  ci->pathnames[%d]:   %s\n", i, ci->pathnames[i]);
 		printf("  ci->stages[%d].mode: %o\n", i, ci->stages[i].mode);
 		printf("  ci->stages[%d].oid:  %s\n", i, oid_to_hex(&ci->stages[i].oid));
@@ -1922,6 +1924,7 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 	struct strmap_entry *entry;
 	struct conflict_info *ci;
 	struct string_list removable = STRING_LIST_INIT_NODUP;
+	int i;
 
 	strmap_for_each_entry(side_dir_renames, &iter, entry) {
 		ci = strmap_get(&opt->priv->paths, entry->key);
@@ -1947,7 +1950,7 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 		}
 	}
 
-	for (int i=0; i<removable.nr; ++i)
+	for (i=0; i<removable.nr; ++i)
 		strmap_remove(side_dir_renames, removable.items[i].string, 0);
 	string_list_clear(&removable, 0);
 }
@@ -1959,13 +1962,14 @@ static void handle_directory_level_conflicts(struct merge_options *opt,
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 	struct string_list duplicated = STRING_LIST_INIT_NODUP;
+	int i;
 
 	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
 		if (strmap_contains(side2_dir_renames, entry->key))
 			string_list_append(&duplicated, entry->key);
 	}
 
-	for (int i=0; i<duplicated.nr; ++i) {
+	for (i=0; i<duplicated.nr; ++i) {
 		strmap_remove(side1_dir_renames, duplicated.items[i].string, 0);
 		strmap_remove(side2_dir_renames, duplicated.items[i].string, 0);
 	}

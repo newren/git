@@ -743,6 +743,8 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		 * data associated with directories that weren't renamed.
 		 */
 		struct string_list to_remove = STRING_LIST_INIT_NODUP;
+		int i;
+
 		strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
 			const char *source_dir = entry->key;
 			struct strintmap *counts = entry->value;
@@ -756,7 +758,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 			if (strintmap_contains(counts, SENTINEL_DIR))
 				strintmap_remove(counts, SENTINEL_DIR);
 		}
-		for (int i=0; i<to_remove.nr; ++i)
+		for (i=0; i<to_remove.nr; ++i)
 			strmap_remove(info->dir_rename_count,
 				      to_remove.items[i].string, 1);
 		string_list_clear(&to_remove, 0);
