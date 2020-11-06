@@ -372,7 +372,7 @@ static char *unique_path(struct strmap *existing_paths,
 }
 
 #ifdef VERBOSE_DEBUG
-static void dump_conflict_info(struct conflict_info *ci, char *name)
+static void dump_conflict_info(struct conflict_info *ci, const char *name)
 {
 	int i;
 
@@ -403,14 +403,45 @@ static void dump_info(struct merge_options *opt, char *location)
 {
 	struct conflict_info *ci;
 	//char *path = "drivers/hwmon/hwmon.c";
-	char *path = "drivers/hwmon/max31730.c";
+	char *paths[] = {"arch/arm/mach-s5p64x0/include/mach/gpio.h",
+			 "arch/arm/mach-s5p64x0/include/mach/gpio-samsung.h",
+			 "arch/arm/boot/dts/gpio-samsung.h"};
+	int i;
 
-	ci = strmap_get(&opt->priv->paths, path);
 	printf("After %s:\n", location);
-	if (!ci)
-		printf("conflict_info for %s is NULL!!!\n", path);
-	else
+	for (i=0; i<3; i++) {
+		ci = strmap_get(&opt->priv->paths, paths[i]);
+		if (!ci)
+			printf("conflict_info for %s is NULL!!!\n", paths[i]);
+		else
+			dump_conflict_info(ci, paths[i]);
+	}
+}
+
+static void dump_path_info(struct merge_options *opt, char *location)
+{
+	struct string_list path_list = STRING_LIST_INIT_NODUP;
+	struct hashmap_iter iter;
+	struct strmap_entry *e;
+	int i = 0;
+
+	/* Hack to Pre-allocate path_list to the desired size */
+	ALLOC_GROW(path_list.items, strmap_get_size(&opt->priv->paths),
+		   path_list.alloc);
+
+	/* Put every entry from paths into path_list, then sort */
+	strmap_for_each_entry(&opt->priv->paths, &iter, e) {
+		string_list_append(&path_list, e->key)->util = e->value;
+	}
+	string_list_sort(&path_list);
+
+	printf("Dumping path info for %s:\n", location);
+	for (i = 0; i < path_list.nr; i++) {
+		const char *path = path_list.items[i].string;
+		struct conflict_info *ci = path_list.items[i].util;
+		printf("%d: %s\n", i, path);
 		dump_conflict_info(ci, path);
+	}
 }
 #endif
 
