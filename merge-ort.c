@@ -2792,7 +2792,7 @@ static inline int merge_detect_rename(struct merge_options *opt)
 
 /* Call diffcore_rename() to update deleted/added pairs into rename pairs */
 static int detect_regular_renames(struct merge_options *opt,
-				   unsigned side_index)
+				  unsigned side_index)
 {
 	struct diff_options diff_opts;
 	struct rename_info *renames = opt->priv->renames;
