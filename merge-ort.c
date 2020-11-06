@@ -2754,10 +2754,12 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 			new_path = p->two->path;
 		old_value = strmap_put(&renames->cached_pairs[side],
 				       p->one->path, xstrdup(new_path));
+		strset_add(&renames->cached_target_names[side], new_path);
 		free(old_value);
 	} else if (p->status == 'A' && new_path) {
 		old_value = strmap_put(&renames->cached_pairs[side],
 				       p->two->path, xstrdup(new_path));
+		strset_add(&renames->cached_target_names[side], new_path);
 		assert(!old_value);
 	}
 }
@@ -4247,7 +4249,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 			strset_init_with_options(&renames->cached_irrelevant[i],
 						 NULL, 1);
 			strset_init_with_options(&renames->cached_target_names[i],
-						 NULL, 0);
+						 NULL, 1);
 			strmap_init_with_options(&renames->dir_rename_count[i],
 						 NULL, 1);
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
@@ -4274,9 +4276,6 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 {
 	struct rename_info *renames;
 	struct tree **merge_trees;
-	struct hashmap_iter iter;
-	struct strmap_entry *entry;
-	int s;
 
 	if (!result->priv)
 		return;
@@ -4299,13 +4298,6 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	/* If we can't re-use the cache pairs, return now */
 	if (!renames->cached_pairs_valid_side)
 		return;
-
-	/* Populate cache_target_names from cached_pairs */
-	s = renames->cached_pairs_valid_side;
-	strmap_for_each_entry(&renames->cached_pairs[s], &iter, entry)
-		if (entry->value)
-			strset_add(&renames->cached_target_names[s],
-				   entry->value);
 }
 
 /*** Function Grouping: merge_incore_*() and their internal variants ***/
