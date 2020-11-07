@@ -199,15 +199,17 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 		struct hashmap_iter iter;
 		struct strmap_entry *e;
 
-		/* Put every entry from output into olist, then sort */
+		/* Release and free each strbuf found in output */
 		strmap_for_each_entry(&opti->output, &iter, e) {
 			struct strbuf *sb = e->value;
 			strbuf_release(sb);
 			/*
-			 * We don't need to free(sb) here; we could pass
-			 * free_util=1 when free'ing opti->output instead, but
-			 * that's require another strmap_for_each_entry() loop,
-			 * and it's cheaper to free it here while we have it.
+			 * While strictly speaking we don't need to free(sb)
+			 * here because we could pass free_util=1 when
+			 * calling strmap_clear() on opti->output, that would
+			 * require strmap_clear to do another
+			 * strmap_for_each_entry() loop, so we just free it
+			 * while we're iterating anyway.
 			 */
 			free(sb);
 		}
