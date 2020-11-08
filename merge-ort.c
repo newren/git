@@ -3599,9 +3599,16 @@ static void process_entry(struct merge_options *opt,
 			unsigned o_mode = ci->stages[0].mode;
 			unsigned a_mode = ci->stages[1].mode;
 			unsigned b_mode = ci->stages[2].mode;
-			struct conflict_info *new_ci = xmalloc(sizeof(*new_ci));
+			struct conflict_info *new_ci;
 			const char *a_path = NULL, *b_path = NULL;
 			int rename_a = 0, rename_b = 0;
+
+#if USE_MEMORY_POOL
+			new_ci = mem_pool_alloc(&opt->priv->pool,
+						sizeof(*new_ci));
+#else
+			new_ci = xmalloc(sizeof(*new_ci));
+#endif
 
 			if (S_ISREG(a_mode))
 				rename_a = 1;
