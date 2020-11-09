@@ -37,7 +37,7 @@ time_run() {
     cmd="test-tool fast-rebase"
     test-tool fast-rebase 2>&1 | grep -q 'read.*code' || die "Wrong git version"
   else
-    test "$(git --version)" = "git version 2.27.0.dirty" || die "Wrong git version"
+    test "$(git --version)" = "git version 2.29.0" || die "Wrong git version"
   fi
 
   git checkout -q $base
