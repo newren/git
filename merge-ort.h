@@ -28,7 +28,8 @@ struct merge_result {
 
 /*
  * rename-detecting three-way merge with recursive ancestor consolidation.
- * working tree and index are untouched.
+ * working tree and index are untouched.  merge_bases will be consumed
+ * (emptied) so make a copy if you need it.
  */
 void merge_incore_recursive(struct merge_options *opt,
 			    struct commit_list *merge_bases,
