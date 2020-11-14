@@ -295,7 +295,7 @@ static void format_commit(struct strbuf *sb,
 __attribute__((format (printf, 4, 5)))
 static void path_msg(struct merge_options *opt,
 		     const char *path,
-		     int is_hint, /* hints can be omitted */
+		     int omittable_hint, /* skippable under --remerge-diff */
 		     const char *fmt, ...)
 {
 	va_list ap;
