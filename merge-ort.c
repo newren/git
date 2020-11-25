@@ -103,8 +103,53 @@ struct traversal_callback_data {
 };
 
 struct merge_options_internal {
-	struct strmap paths;    /* maps path -> (merged|conflict)_info */
-	struct strmap unmerged; /* maps path -> conflict_info */
+	/*
+	 * paths: primary data structure in all of merge ort.
+	 *
+	 * The keys of paths:
+	 *   * are full relative paths from the toplevel of the repository
+	 *     (e.g. "drivers/firmware/raspberrypi.c").
+	 *   * store all relevant paths in the repo, both directories and
+	 *     files (e.g. drivers, drivers/firmware would also be included)
+	 *   * these keys serve to intern all the path strings, which allows
+	 *     us to do pointer comparison on directory names instead of
+	 *     strcmp; we just have to be careful to use the interned strings.
+	 *     (Technically paths_to_free may track some strings that were
+	 *      removed from froms paths.)
+	 *
+	 * The values of paths:
+	 *   * either a pointer to a merged_info, or a conflict_info struct
+	 *   * merged_info contains all relevant information for a
+	 *     non-conflicted entry.
+	 *   * conflict_info contains a merged_info, plus any additional
+	 *     information about a conflict such as the higher orders stages
+	 *     involved and the names of the paths those came from (handy
+	 *     once renames get involved).
+	 *   * a path may start "conflicted" (i.e. point to a conflict_info)
+	 *     and then a later step (e.g. three-way content merge) determines
+	 *     it can be cleanly merged, at which point it'll be marked clean
+	 *     and the algorithm will ignore any data outside the contained
+	 *     merged_info for that entry
+	 *   * If an entry remains conflicted, the merged_info portion of a
+	 *     conflict_info will later be filled with whatever version of
+	 *     the file should be placed in the working directory (e.g. an
+	 *     as-merged-as-possible variation that contains conflict markers).
+	 */
+	struct strmap paths;
+
+	/*
+	 * conflicted: a subset of keys->values from "paths"
+	 *
+	 * conflicted is basically an optimization between process_entries()
+	 * and record_conflicted_index_entries(); the latter could loop over
+	 * ALL the entries in paths AGAIN and look for the ones that are
+	 * still conflicted, but since process_entries() has to loop over
+	 * all of them, it saves the ones it couldn't resolve in this strmap
+	 * so that record_conflicted_index_entries() can iterate just the
+	 * relevant entries.
+	 */
+	struct strmap conflicted;
+
 #if USE_MEMORY_POOL
 	struct mem_pool pool;
 #else
@@ -113,8 +158,19 @@ struct merge_options_internal {
 	struct rename_info *renames;
 	struct index_state attr_index; /* renormalization weirdly needs one... */
 	struct strmap output;  /* maps path -> conflict messages */
+
+	/*
+	 * current_dir_name, toplevel_dir: temporary vars
+	 *
+	 * These are used in collect_merge_info_callback(), and will set the
+	 * various merged_info.directory_name for the various paths we get;
+	 * see documentation for that variable and the requirements placed on
+	 * that field.
+	 */
 	const char *current_dir_name;
-	char *toplevel_dir; /* see merge_info.directory_name comment */
+	const char *toplevel_dir;
+
+	/* call_depth: recursion level counter for merging merge bases */
 	int call_depth;
 	int needed_rename_limit;
 };
@@ -125,13 +181,29 @@ struct version_info {
 };
 
 struct merged_info {
+	/* if is_null, ignore result.  otherwise result has oid & mode */
 	struct version_info result;
 	unsigned is_null:1;
+
+	/*
+	 * clean: whether the path in question is cleanly merged.
+	 *
+	 * see conflict_info.merged for more details.
+	 */
 	unsigned clean:1;
+
+	/*
+	 * basename_offset: offset of basename of path.
+	 *
+	 * perf optimization to avoid recomputing offset of final '/'
+	 * character in pathname (0 if no '/' in pathname).
+	 */
 	size_t basename_offset;
+
 	 /*
-	  * Containing directory name.  Note that we assume directory_name is
-	  * constructed such that
+	  * directory_name: containing directory name.
+	  *
+	  * Note that we assume directory_name is constructed such that
 	  *    strcmp(dir1_name, dir2_name) == 0 iff dir1_name == dir2_name,
 	  * i.e. string equality is equivalent to pointer equality.  For this
 	  * to hold, we have to be careful setting directory_name.
@@ -140,13 +212,50 @@ struct merged_info {
 };
 
 struct conflict_info {
+	/*
+	 * merged: the version of the path that will be written to working tree
+	 *
+	 * WARNING: It is critical to check merged.clean and ensure it is 0
+	 * before reading any conflict_info fields outside of merged.
+	 * Allocated merge_info structs will always have clean set to 1.
+	 * Allocated conflict_info structs will have merged.clean set to 0
+	 * initially.  The merged.clean field is how we know if it is safe
+	 * to access other parts of conflict_info besides merged; if a
+	 * conflict_info's merged.clean is changed to 1, the rest of the
+	 * algorithm is not allowed to look at anything outside of the
+	 * merged member anymore.
+	 */
 	struct merged_info merged;
+
+	/* oids & modes from each of the three trees for this path */
 	struct version_info stages[3];
+
+	/* pathnames for each stage; may differ due to rename detection */
 	const char *pathnames[3];
+
+	/* Whether this path is/was involved in a directory/file conflict */
 	unsigned df_conflict:1;
+
+	/*
+	 * Whether this path is/was involved in a non-content conflict other
+	 * than a directory/file conflict (e.g. rename/rename, rename/delete,
+	 * file location based on possible directory rename).
+	 */
 	unsigned path_conflict:1;
+
+	/*
+	 * For filemask and dirmask, see tree-walk.h's struct traverse_info,
+	 * particularly the documentation above the "fn" member.  Note that
+	 * filemask = mask & ~dirmask from that documentation.
+	 */
 	unsigned filemask:3;
 	unsigned dirmask:3;
+
+	/*
+	 * Optimization to track which stages match, to avoid the need to
+	 * recompute it in multiple steps. Either 0 or at least 2 bits are
+	 * set; if at least 2 bits are set, their corresponding stages match.
+	 */
 	unsigned match_mask:3;
 };
 
@@ -205,7 +314,7 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 			strbuf_release(sb);
 			/*
 			 * While strictly speaking we don't need to free(sb)
-			 * here because we could pass free_util=1 when
+			 * here because we could pass free_values=1 when
 			 * calling strmap_clear() on opti->output, that would
 			 * require strmap_clear to do another
 			 * strmap_for_each_entry() loop, so we just free it
@@ -219,12 +328,11 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 		discard_index(&opti->attr_index);
 
 	/*
-	 * All strings and util fields in opti->unmerged are a subset
-	 * of those in opti->paths.  We don't want to deallocate
-	 * anything twice, so we don't set strdup_strings and we pass 0 for
-	 * free_util.
+	 * All keys and values in opti->conflicted are a subset of those in
+	 * opti->paths.  We don't want to deallocate anything twice, so we
+	 * don't free the keys and we pass 0 for free_values.
 	 */
-	strmap_func(&opti->unmerged, 0);
+	strmap_func(&opti->conflicted, 0);
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
@@ -567,6 +675,7 @@ static void setup_path_info(struct merge_options *opt,
 			    unsigned dirmask,
 			    int resolved          /* boolean */)
 {
+	/* result->util is void*, so path_info is convenience typed variable */
 	struct conflict_info *path_info;
 
 	assert(!is_null || resolved);
@@ -605,6 +714,17 @@ static void setup_path_info(struct merge_options *opt,
 		path_info->filemask = filemask;
 		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
+		if (dirmask)
+			/*
+			 * Assume is_null for now, but if we have entries
+			 * under the directory then when it is complete in
+			 * write_completed_directory() it'll update this.
+			 * Also, for D/F conflicts, we have to handle the
+			 * directory first, then clear this bit and process
+			 * the file to see how it is handled -- that occurs
+			 * near the top of process_entry().
+			 */
+			path_info->merged.is_null = 1;
 	}
 	strmap_put(&opt->priv->paths, fullpath, path_info);
 	result->string = fullpath;
@@ -803,7 +923,7 @@ static int collect_merge_info_callback(int n,
 	struct merge_options_internal *opti = opt->priv;
 	struct rename_info *renames = opt->priv->renames;
 	struct string_list_item pi;  /* Path Info */
-	struct conflict_info *ci; /* pi.util when there's a conflict */
+	struct conflict_info *ci; /* typed alias to pi.util (which is void*) */
 	struct name_entry *p;
 	size_t len;
 	char *fullpath;
@@ -823,11 +943,20 @@ static int collect_merge_info_callback(int n,
 	unsigned sides_match = (!side1_null && !side2_null &&
 				names[1].mode == names[2].mode &&
 				oideq(&names[1].oid, &names[2].oid));
+
 	/*
-	 * Note: We only label files with df_conflict, not directories.
-	 * Since directories stay where they are, and files move out of the
-	 * way to make room for a directory, we don't care if there was a
-	 * directory/file conflict for a parent directory of the current path.
+	 * Note: When a path is a file on one side of history and a directory
+	 * in another, we have a directory/file conflict.  In such cases, if
+	 * the conflict doesn't resolve from renames and deletions, then we
+	 * always leave directories where they are and move files out of the
+	 * way.  Thus, while struct conflict_info has a df_conflict field to
+	 * track such conflicts, we ignore that field for any directories at
+	 * a path and only pay attention to it for files at the given path.
+	 * The fact that we leave directories were they are also means that
+	 * we do not need to worry about getting additional df_conflict
+	 * information propagated from parent directories down to children
+	 * (unlike, say traverse_trees_recursive() in unpack-trees.c, which
+	 * sets a newinfo.df_conflicts field specifically to propagate it).
 	 */
 	unsigned df_conflict = (filemask != 0) && (dirmask != 0);
 
@@ -845,9 +974,6 @@ static int collect_merge_info_callback(int n,
 	assert(side2_null == is_null_oid(&names[2].oid));
 	assert(!mbase_null || !side1_null || !side2_null);
 	assert(mask > 0 && mask < 8);
-
-	/* Other invariant checks, mostly for documentation purposes. */
-	assert(mask == (dirmask | filemask));
 
 	/* Determine match_mask */
 	if (side1_matches_mbase)
@@ -874,9 +1000,9 @@ static int collect_merge_info_callback(int n,
 #if USE_MEMORY_POOL
 	fullpath = mem_pool_alloc(&opt->priv->pool, len+1);
 #else
-	fullpath = xmalloc(len+1);
+	fullpath = xmalloc(len + 1);
 #endif
-	make_traverse_path(fullpath, len+1, info, p->path, p->pathlen);
+	make_traverse_path(fullpath, len + 1, info, p->path, p->pathlen);
 
 	/*
 	 * If mbase, side1, and side2 all match, we can resolve early.  Even
@@ -981,7 +1107,7 @@ static int collect_merge_info_callback(int n,
 	if (dirmask) {
 		struct traverse_info newinfo;
 		struct tree_desc t[3];
-		void *buf[3] = {NULL,};
+		void *buf[3] = {NULL, NULL, NULL};
 		const char *original_dir_name;
 		int i, ret, side;
 
@@ -1018,14 +1144,16 @@ static int collect_merge_info_callback(int n,
 		newinfo.namelen = p->pathlen;
 		newinfo.pathlen = st_add3(newinfo.pathlen, p->pathlen, 1);
 		/*
-		 * If we did care about parent directories having a D/F
-		 * conflict, then we'd include
+		 * If this directory we are about to recurse into cared about
+		 * its parent directory (the current directory) having a D/F
+		 * conflict, then we'd propagate the masks in this way:
 		 *    newinfo.df_conflicts |= (mask & ~dirmask);
-		 * here.  But we don't.  (See comment near setting of local
-		 * df_conflict variable near the beginning of this function).
+		 * But we don't worry about propagating D/F conflicts.  (See
+		 * comment near setting of local df_conflict variable near
+		 * the beginning of this function).
 		 */
 
-		for (i = 0; i < 3; i++, dirmask >>= 1) {
+		for (i = 0; i < 3; i++) {
 			if (i == 1 && side1_matches_mbase)
 				t[1] = t[0];
 			else if (i == 2 && side2_matches_mbase)
@@ -1039,6 +1167,7 @@ static int collect_merge_info_callback(int n,
 				buf[i] = fill_tree_descriptor(opt->repo,
 							      t + i, oid);
 			}
+			dirmask >>= 1;
 		}
 
 		original_dir_name = opti->current_dir_name;
@@ -1293,9 +1422,9 @@ static int collect_merge_info(struct merge_options *opt,
 	       oid_to_hex(&side1->object.oid),
 	       oid_to_hex(&side2->object.oid));
 #endif
-	init_tree_desc(t+0, merge_base->buffer, merge_base->size);
-	init_tree_desc(t+1, side1->buffer, side1->size);
-	init_tree_desc(t+2, side2->buffer, side2->size);
+	init_tree_desc(t + 0, merge_base->buffer, merge_base->size);
+	init_tree_desc(t + 1, side1->buffer, side1->size);
+	init_tree_desc(t + 2, side2->buffer, side2->size);
 
 	trace2_region_enter("merge", "traverse_trees", opt->repo);
 	ret = traverse_trees(NULL, 3, t, &info);
@@ -3222,17 +3351,54 @@ error_return:
 }
 
 struct directory_versions {
+	/*
+	 * versions: list of (basename -> version_info)
+	 *
+	 * The basenames are in reverse lexicographic order of full pathnames,
+	 * as processed in process_entries().  This puts all entries within
+	 * a directory together, and covers the directory itself after
+	 * everything within it, allowing us to write subtrees before needing
+	 * to record information for the tree itself.
+	 */
 	struct string_list versions;
+
+	/*
+	 * offsets: list of (full relative path directories -> integer offsets)
+	 *
+	 * Since versions contains basenames from files in multiple different
+	 * directories, we need to know which entries in versions correspond
+	 * to which directories.  Values of e.g.
+	 *     ""             0
+	 *     src            2
+	 *     src/moduleA    5
+	 * Would mean that entries 0-1 of versions are files in the toplevel
+	 * directory, entries 2-4 are files under src/, and the remaining
+	 * entries starting at index 5 are files under src/moduleA/.
+	 */
 	struct string_list offsets;
+
+	/*
+	 * last_directory: directory that previously processed file found in
+	 *
+	 * last_directory starts NULL, but records the directory in which the
+	 * previous file was found within.  As soon as
+	 *    directory(current_file) != last_directory
+	 * then we need to start updating accounting in versions & offsets.
+	 * Note that last_directory is always the last path in "offsets" (or
+	 * NULL if "offsets" is empty) so this exists just for quick access.
+	 */
 	const char *last_directory;
+
+	/* last_directory_len: cached computation of strlen(last_directory) */
 	unsigned last_directory_len;
 };
 
 static void write_tree(struct object_id *result_oid,
 		       struct string_list *versions,
-		       unsigned int offset)
+		       unsigned int offset,
+		       size_t hash_size)
 {
-	size_t maxlen = 0;
+	size_t maxlen = 0, extra;
 	unsigned int nr = versions->nr - offset;
 	struct strbuf buf = STRBUF_INIT;
 	struct string_list relevant_entries = STRING_LIST_INIT_NODUP;
@@ -3255,10 +3421,10 @@ static void write_tree(struct object_id *result_oid,
 	string_list_sort(&relevant_entries);
 
 	/* Pre-allocate some space in buf */
+	extra = hash_size + 8; /* 8: 6 for mode, 1 for space, 1 for NUL char */
 	for (i = 0; i < nr; i++) {
-		maxlen += strlen(versions->items[offset+i].string) + 34;
+		maxlen += strlen(versions->items[offset+i].string) + extra;
 	}
-	strbuf_reset(&buf);
 	strbuf_grow(&buf, maxlen);
 
 	/* Write each entry out to buf */
@@ -3275,7 +3441,7 @@ static void write_tree(struct object_id *result_oid,
 		strbuf_addf(&buf, "%o %s%c",
 			    ri->mode,
 			    versions->items[offset+i].string, '\0');
-		strbuf_add(&buf, ri->oid.hash, the_hash_algo->rawsz);
+		strbuf_add(&buf, ri->oid.hash, hash_size);
 	}
 
 	/* Write this object file out, and record in result_oid */
@@ -3293,14 +3459,6 @@ static void record_entry_for_tree(struct directory_versions *dir_metadata,
 		/* nothing to record */
 		return;
 
-	/*
-	 * Note: write_completed_directories() already added
-	 * entries for directories to dir_metadata->versions,
-	 * so no need to handle ci->filemask == 0 again.
-	 */
-	if (!ci->merged.clean && !ci->filemask)
-		return;
-
 	basename = path + ci->merged.basename_offset;
 	assert(strchr(basename, '/') == NULL);
 	string_list_append(&dir_metadata->versions,
@@ -3311,25 +3469,108 @@ static void record_entry_for_tree(struct directory_versions *dir_metadata,
 #endif
 }
 
-static void write_completed_directories(struct merge_options *opt,
-					const char *new_directory_name,
-					struct directory_versions *info)
+static void write_completed_directory(struct merge_options *opt,
+				      const char *new_directory_name,
+				      struct directory_versions *info)
 {
 	const char *prev_dir;
 	struct merged_info *dir_info = NULL;
 	unsigned int offset;
-	int wrote_a_new_tree = 0;
 #ifdef VERBOSE_DEBUG
 	int i;
 #endif
 
+	/*
+	 * Some explanation of info->versions and info->offsets...
+	 *
+	 * process_entries() iterates over all relevant files AND
+	 * directories in reverse lexicographic order, and calls this
+	 * function.  Thus, an example of the paths that process_entries()
+	 * could operate on (along with the directories for those paths
+	 * being shown) is:
+	 *
+	 *     xtract.c             ""
+	 *     tokens.txt           ""
+	 *     src/moduleB/umm.c    src/moduleB
+	 *     src/moduleB/stuff.h  src/moduleB
+	 *     src/moduleB/baz.c    src/moduleB
+	 *     src/moduleB          src
+	 *     src/moduleA/foo.c    src/moduleA
+	 *     src/moduleA/bar.c    src/moduleA
+	 *     src/moduleA          src
+	 *     src                  ""
+	 *     Makefile             ""
+	 *
+	 * info->versions:
+	 *
+	 *     always contains the unprocessed entries and their
+	 *     version_info information.  For example, after the first five
+	 *     entries above, info->versions would be:
+	 *
+	 *     	   xtract.c     <xtract.c's version_info>
+	 *     	   token.txt    <token.txt's version_info>
+	 *     	   umm.c        <src/moduleB/umm.c's version_info>
+	 *     	   stuff.h      <src/moduleB/stuff.h's version_info>
+	 *     	   baz.c        <src/moduleB/baz.c's version_info>
+	 *
+	 *     Once a subdirectory is completed we remove the entries in
+	 *     that subdirectory from info->versions, writing it as a tree
+	 *     (write_tree()).  Thus, as soon as we get to src/moduleB,
+	 *     info->versions would be updated to
+	 *
+	 *     	   xtract.c     <xtract.c's version_info>
+	 *     	   token.txt    <token.txt's version_info>
+	 *     	   moduleB      <src/moduleB's version_info>
+	 *
+	 * info->offsets:
+	 *
+	 *     helps us track which entries in info->versions correspond to
+	 *     which directories.  When we are N directories deep (e.g. 4
+	 *     for src/modA/submod/subdir/), we have up to N+1 unprocessed
+	 *     directories (+1 because of toplevel dir).  Corresponding to
+	 *     the info->versions example above, after processing five entries
+	 *     info->offsets will be:
+	 *
+	 *     	   ""           0
+	 *     	   src/moduleB  2
+	 *
+	 *     which is used to know that xtract.c & token.txt are from the
+	 *     toplevel dirctory, while umm.c & stuff.h & baz.c are from the
+	 *     src/moduleB directory.  Again, following the example above,
+	 *     once we need to process src/moduleB, then info->offsets is
+	 *     updated to
+	 *
+	 *     	   ""           0
+	 *     	   src          2
+	 *
+	 *     which says that moduleB (and only moduleB so far) is in the
+	 *     src directory.
+	 *
+	 *     One unique thing to note about info->offsets here is that
+	 *     "src" was not added to info->offsets until there was a path
+	 *     (a file OR directory) immediately below src/ that got
+	 *     processed.
+	 *
+	 * Since process_entry() just appends new entries to info->versions,
+	 * write_completed_directory() only needs to do work if the next path
+	 * is in a directory that is different than the last directory found
+	 * in info->offsets.
+	 */
+
+	/*
+	 * If we are working with the same directory as the last entry, there
+	 * is no work to do.  (See comments above the directory_name member of
+	 * struct merged_info for why we can use pointer comparison instead of
+	 * strcmp here.)
+	 */
 	if (new_directory_name == info->last_directory)
 		return;
 
 	/*
 	 * If we are just starting (last_directory is NULL), or last_directory
 	 * is a prefix of the current directory, then we can just update
-	 * last_directory and record the offset where we started this directory.
+	 * info->offsets to record the offset where we started this directory
+	 * and update last_directory to have quick access to it.
 	 */
 	if (info->last_directory == NULL ||
 	    !strncmp(new_directory_name, info->last_directory,
@@ -3338,6 +3579,11 @@ static void write_completed_directories(struct merge_options *opt,
 
 		info->last_directory = new_directory_name;
 		info->last_directory_len = strlen(info->last_directory);
+		/*
+		 * Record the offset into info->versions where we will
+		 * start recording basenames of paths found within
+		 * new_directory_name.
+		 */
 		string_list_append(&info->offsets,
 				   info->last_directory)->util = (void*)offset;
 #ifdef VERBOSE_DEBUG
@@ -3353,11 +3599,11 @@ static void write_completed_directories(struct merge_options *opt,
 	}
 
 	/*
-	 * The next entry will be within new_directory_name.  Since at this
-	 * point we know that new_directory_name is within a different
-	 * directory than info->last_directory, we have all entries for
-	 * info->last_directory in info->versions and we need to create a
-	 * tree object for them.
+	 * The next entry that will be processed will be within
+	 * new_directory_name.  Since at this point we know that
+	 * new_directory_name is within a different directory than
+	 * info->last_directory, we have all entries for info->last_directory
+	 * in info->versions and we need to create a tree object for them.
 	 */
 	dir_info = strmap_get(&opt->priv->paths, info->last_directory);
 #ifdef VERBOSE_DEBUG
@@ -3366,11 +3612,24 @@ static void write_completed_directories(struct merge_options *opt,
 	assert(dir_info);
 	offset = (uintptr_t)info->offsets.items[info->offsets.nr-1].util;
 	if (offset == info->versions.nr) {
+		/*
+		 * Actually, we don't need to create a tree object in this
+		 * case.  Whenever all files within a directory disappear
+		 * during the merge (e.g. unmodified on one side and
+		 * deleted on the other, or files were renamed elsewhere),
+		 * then we get here and the directory itself needs to be
+		 * omitted from its parent tree as well.
+		 */
 		dir_info->is_null = 1;
 	} else {
+		/*
+		 * Write out the tree to the git object directory, and also
+		 * record the mode and oid in dir_info->result.
+		 */
+		dir_info->is_null = 0;
 		dir_info->result.mode = S_IFDIR;
-		write_tree(&dir_info->result.oid, &info->versions, offset);
-		wrote_a_new_tree = 1;
+		write_tree(&dir_info->result.oid, &info->versions, offset,
+			   opt->repo->hash_algo->rawsz);
 #ifdef VERBOSE_DEBUG
 		printf("New tree:\n");
 #endif
@@ -3388,11 +3647,11 @@ static void write_completed_directories(struct merge_options *opt,
 #endif
 
 	/*
-	 * Now we've got an OID for last_directory in dir_info.  We need to
-	 * add it to info->versions for it to be part of the computation of
-	 * its parent directories' OID.  But first, we have to find out what
-	 * its' parent name was and whether that matches the previous
-	 * info->offsets or we need to set up a new one.
+	 * Now we've taken care of the completed directory, but we need to
+	 * prepare things since future entries will be in
+	 * new_directory_name.  (In particular, process_entry() will be
+	 * appending new entries to info->versions.)  So, we need to make
+	 * sure new_directory_name is the last entry in info->offsets.
 	 */
 	prev_dir = info->offsets.nr == 0 ? NULL :
 		   info->offsets.items[info->offsets.nr-1].string;
@@ -3420,19 +3679,7 @@ static void write_completed_directories(struct merge_options *opt,
 #endif
 	}
 
-	/*
-	 * Okay, finally record OID for last_directory in info->versions,
-	 * and update last_directory.
-	 */
-	if (wrote_a_new_tree) {
-		const char *dir_name = strrchr(info->last_directory, '/');
-		dir_name = dir_name ? dir_name+1 : info->last_directory;
-		string_list_append(&info->versions, dir_name)->util = dir_info;
-#ifdef VERBOSE_DEBUG
-		printf("  Finally, added (%s, dir_info:%s) to info->versions\n",
-		       info->last_directory, oid_to_hex(&dir_info->result.oid));
-#endif
-	}
+	/* And, of course, we need to update last_directory to match. */
 	info->last_directory = new_directory_name;
 	info->last_directory_len = strlen(info->last_directory);
 }
@@ -3450,12 +3697,16 @@ static void process_entry(struct merge_options *opt,
 #endif
 	assert(!ci->merged.clean);
 	assert(ci->filemask >= 0 && ci->filemask <= 7);
-	if (ci->filemask == 0) {
-		/*
-		 * This is a placeholder for directories that were recursed
-		 * into; nothing to do in this case.
-		 */
-		return;
+	/* ci->match_mask == 7 was handled in collect_merge_info_callback() */
+	assert(ci->match_mask == 0 || ci->match_mask == 3 ||
+	       ci->match_mask == 5 || ci->match_mask == 6);
+
+	if (ci->dirmask) {
+		record_entry_for_tree(dir_metadata, path, ci);
+		if (ci->filemask == 0)
+			/* nothing else to handle */
+			return;
+		assert(ci->df_conflict);
 	}
 	if (ci->df_conflict && ci->merged.result.mode == 0) {
 		int i;
@@ -3482,7 +3733,7 @@ static void process_entry(struct merge_options *opt,
 		/*
 		 * This started out as a D/F conflict, and the entries in
 		 * the competing directory were not removed by the merge as
-		 * evidenced by write_completed_directories() writing a value
+		 * evidenced by write_completed_directory() writing a value
 		 * to ci->merged.result.mode.
 		 */
 		struct conflict_info *new_ci;
@@ -3575,8 +3826,8 @@ static void process_entry(struct merge_options *opt,
 			printf("filemask: %d, matchmask: %d, othermask: %d, side: %d\n",
 			       ci->filemask, ci->match_mask, othermask, side);
 #endif
-			ci->merged.is_null = (ci->filemask == ci->match_mask);
 			ci->merged.result.mode = ci->stages[side].mode;
+			ci->merged.is_null = !ci->merged.result.mode;
 			oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
 
 #ifdef VERBOSE_DEBUG
@@ -3584,7 +3835,8 @@ static void process_entry(struct merge_options *opt,
 			       ci->merged.result.mode, ci->merged.is_null);
 #endif
 			assert(othermask == 2 || othermask == 4);
-			assert(ci->merged.is_null == !ci->merged.result.mode);
+			assert(ci->merged.is_null ==
+			       (ci->filemask == ci->match_mask));
 		}
 	} else if (ci->filemask >= 6 &&
 		   (S_IFMT & ci->stages[1].mode) !=
@@ -3688,7 +3940,7 @@ static void process_entry(struct merge_options *opt,
 			 * Do special handling for b_path since process_entry()
 			 * won't be called on it specially.
 			 */
-			strmap_put(&opt->priv->unmerged, b_path, new_ci);
+			strmap_put(&opt->priv->conflicted, b_path, new_ci);
 			record_entry_for_tree(dir_metadata, b_path, new_ci);
 
 			/*
@@ -3783,12 +4035,12 @@ static void process_entry(struct merge_options *opt,
 	}
 
 	/*
-	 * If still unmerged, record it separately.  This allows us to later
-	 * iterate over just unmerged entries when updating the index instead
+	 * If still conflicted, record it separately.  This allows us to later
+	 * iterate over just conflicted entries when updating the index instead
 	 * of iterating over all entries.
 	 */
 	if (!ci->merged.clean)
-		strmap_put(&opt->priv->unmerged, path, ci);
+		strmap_put(&opt->priv->conflicted, path, ci);
 
 	/* Record metadata for ci->merged in dir_metadata */
 	record_entry_for_tree(dir_metadata, path, ci);
@@ -3801,7 +4053,9 @@ static void process_entries(struct merge_options *opt,
 	struct strmap_entry *e;
 	struct string_list plist = STRING_LIST_INIT_NODUP;
 	struct string_list_item *entry;
-	struct directory_versions dir_metadata;
+	struct directory_versions dir_metadata = { STRING_LIST_INIT_NODUP,
+						   STRING_LIST_INIT_NODUP,
+						   NULL, 0 };
 
 	trace2_region_enter("merge", "process_entries setup", opt->repo);
 	if (strmap_empty(&opt->priv->paths)) {
@@ -3825,15 +4079,16 @@ static void process_entries(struct merge_options *opt,
 	QSORT(plist.items, plist.nr, sort_dirs_next_to_their_children);
 	trace2_region_leave("merge", "plist special sort", opt->repo);
 
-	string_list_init(&dir_metadata.versions, 0);
-	string_list_init(&dir_metadata.offsets, 0);
-	dir_metadata.last_directory = NULL;
-	dir_metadata.last_directory_len = 0;
 	trace2_region_leave("merge", "process_entries setup", opt->repo);
 
 	/*
 	 * Iterate over the items in reverse order, so we can handle paths
 	 * below a directory before needing to handle the directory itself.
+	 *
+	 * This allows us to write subtrees before we need to write trees,
+	 * and it also enables sane handling of directory/file conflicts
+	 * (because it allows us to know whether the directory is still in
+	 * the way when it is time to process the file at the same path).
 	 */
 	trace2_region_enter("merge", "processing", opt->repo);
 	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
@@ -3850,8 +4105,8 @@ static void process_entries(struct merge_options *opt,
 		       ci->merged.directory_name, ci->merged.directory_name);
 #endif
 
-		write_completed_directories(opt, ci->merged.directory_name,
-					    &dir_metadata);
+		write_completed_directory(opt, ci->merged.directory_name,
+					  &dir_metadata);
 		if (ci->merged.clean)
 			record_entry_for_tree(&dir_metadata, path, ci);
 		else
@@ -3869,7 +4124,8 @@ static void process_entries(struct merge_options *opt,
 		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
-	write_tree(result_oid, &dir_metadata.versions, 0);
+	write_tree(result_oid, &dir_metadata.versions, 0,
+		   opt->repo->hash_algo->rawsz);
 	string_list_clear(&plist, 0);
 	string_list_clear(&dir_metadata.versions, 0);
 	string_list_clear(&dir_metadata.offsets, 0);
@@ -3899,9 +4155,9 @@ static int checkout(struct merge_options *opt,
 
 	/*
 	 * NOTE: if this were just "git checkout" code, we would probably
-	 * read or refresh the cache and check for an unmerged index, but
+	 * read or refresh the cache and check for a conflicted index, but
 	 * builtin/merge.c or sequencer.c really needs to read the index
-	 * and check for unmerged entries before starting merging for a
+	 * and check for conflicted entries before starting merging for a
 	 * good user experience (no sense waiting for merges/rebases before
 	 * erroring out), so there's no reason to duplicate that work here.
 	 */
@@ -3935,10 +4191,10 @@ static int checkout(struct merge_options *opt,
 	return ret;
 }
 
-static int record_unmerged_index_entries(struct merge_options *opt,
-					 struct index_state *index,
-					 struct strmap *paths,
-					 struct strmap *unmerged)
+static int record_conflicted_index_entries(struct merge_options *opt,
+					   struct index_state *index,
+					   struct strmap *paths,
+					   struct strmap *conflicted)
 {
 	struct hashmap_iter iter;
 	struct strmap_entry *e;
@@ -3946,7 +4202,7 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 	int errs = 0;
 	int original_cache_nr;
 
-	if (strmap_empty(unmerged))
+	if (strmap_empty(conflicted))
 		return 0;
 
 #ifdef VERBOSE_DEBUG
@@ -3971,7 +4227,7 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 	original_cache_nr = index->cache_nr;
 
 	/* Put every entry from paths into plist, then sort */
-	strmap_for_each_entry(unmerged, &iter, e) {
+	strmap_for_each_entry(conflicted, &iter, e) {
 		const char *path = e->key;
 		struct conflict_info *ci = e->value;
 		int pos;
@@ -4002,14 +4258,18 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 			if (ci->filemask == 1)
 				cache_tree_invalidate_path(index, path);
 			else
-				BUG("Unmerged %s but nothing in basic working tree or index; this shouldn't happen", path);
+				BUG("Conflicted %s but nothing in basic working tree or index; this shouldn't happen", path);
 		} else {
 			ce = index->cache[pos];
 
 			/*
-			 * If this cache entry had the skip_worktree bit set,
-			 * then it isn't present in the working tree..but since
-			 * it corresponds to a merge conflict we need it to be.
+			 * Clean paths with CE_SKIP_WORKTREE set will not be
+			 * written to the working tree by the unpack_trees()
+			 * call in checkout().  Our conflicted entries would
+			 * have appeared clean to that code since we ignored
+			 * the higher order stages.  Thus, we need override
+			 * the CE_SKIP_WORKTREE bit and manually write those
+			 * files to the working disk here.
 			 */
 			if (ce_skip_worktree(ce)) {
 				struct stat st;
@@ -4030,11 +4290,13 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 
 			/*
 			 * Mark this cache entry for removal and instead add
-			 * new stage > 0 entries corresponding to the
-			 * conflicts.  We just add the new cache entries to
-			 * the end and re-sort later to avoid O(NM) memmove'd
-			 * entries (N=num cache entries, M=num unmerged
-			 * entries) if there are several unmerged entries.
+			 * new stage>0 entries corresponding to the
+			 * conflicts.  If there are many conflicted entries, we
+			 * want to avoid memmove'ing O(NM) entries by
+			 * inserting the new entries one at a time.  So,
+			 * instead, we just add the new cache entries to the
+			 * end (ignoring normal index requirements on sort
+			 * order) and sort the index once we're all done.
 			 */
 			ce->ce_flags |= CE_REMOVE;
 		}
@@ -4052,7 +4314,7 @@ static int record_unmerged_index_entries(struct merge_options *opt,
 
 	/*
 	 * Remove the unused cache entries (and invalidate the relevant
-	 * cache-trees), then sort the index entries to get the unmerged
+	 * cache-trees), then sort the index entries to get the conflicted
 	 * entries we added to the end into their right locations.
 	 */
 	remove_marked_cache_entries(index, 1);
@@ -4093,15 +4355,15 @@ void merge_switch_to_result(struct merge_options *opt,
 		}
 		trace2_region_leave("merge", "checkout", opt->repo);
 
-		trace2_region_enter("merge", "record_unmerged", opt->repo);
-		if (record_unmerged_index_entries(opt, opt->repo->index,
-						  &opti->paths,
-						  &opti->unmerged)) {
+		trace2_region_enter("merge", "record_conflicted", opt->repo);
+		if (record_conflicted_index_entries(opt, opt->repo->index,
+						    &opti->paths,
+						    &opti->conflicted)) {
 			/* failure to function */
 			result->clean = -1;
 			return;
 		}
-		trace2_region_leave("merge", "record_unmerged", opt->repo);
+		trace2_region_leave("merge", "record_conflicted", opt->repo);
 
 		trace2_region_enter("merge", "write_auto_merge", opt->repo);
 		filename = git_path_auto_merge(opt->repo);
@@ -4297,8 +4559,19 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 		}
 
+
+		/*
+		 * Although we initialize opt->priv->paths with
+		 * strdup_strings=0, that's just to avoid making yet another
+		 * copy of an allocated string.  Putting the entry into paths
+		 * means we are taking ownership, so we will later free it.
+		 *
+		 * In contrast, conflicted just has a subset of keys from
+		 * paths, so we don't want to free those (it'd be a
+		 * duplicate free).
+		 */
 		strmap_init_with_options(&opt->priv->paths, pool, 0);
-		strmap_init_with_options(&opt->priv->unmerged, pool, 0);
+		strmap_init_with_options(&opt->priv->conflicted, pool, 0);
 #if !USE_MEMORY_POOL
 		string_list_init(&opt->priv->paths_to_free, 0);
 #endif
@@ -4391,8 +4664,8 @@ redo:
 
 	/* Set return values */
 	result->tree = parse_tree_indirect(&working_tree_oid);
-	/* existence of unmerged entries implies unclean */
-	result->clean &= strmap_empty(&opt->priv->unmerged);
+	/* existence of conflicted entries implies unclean */
+	result->clean &= strmap_empty(&opt->priv->conflicted);
 	if (!opt->priv->call_depth) {
 		result->priv = opt->priv;
 		result->_properly_initialized = RESULT_INITIALIZED;
@@ -4536,16 +4809,16 @@ void merge_incore_nonrecursive(struct merge_options *opt,
 	/* Print out information about any conflicting paths */
 	{
 	struct merge_options_internal *opti = result->priv;
-	if (!strmap_empty(&opti->unmerged)) {
+	if (!strmap_empty(&opti->conflicted)) {
 		struct hashmap_iter iter;
 		struct strmap_entry *entry;
 
-		strmap_for_each_entry(&opti->unmerged, &iter, entry) {
+		strmap_for_each_entry(&opti->conflicted, &iter, entry) {
 			char *path = entry->key;
 			struct conflict_info *ci = entry->value;
 			int side;
 
-			printf("Unmerged path: %s\n", path);
+			printf("Conflicted path: %s\n", path);
 			dump_conflict_info(ci, path);
 			for (side = 1; side <= 2; side++) {
 				int val = strintmap_get(&opti->renames->relevant_sources[side],
