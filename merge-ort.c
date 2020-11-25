@@ -332,7 +332,7 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	 * opti->paths.  We don't want to deallocate anything twice, so we
 	 * don't free the keys and we pass 0 for free_values.
 	 */
-	strmap_clear(&opti->conflicted, 0);
+	strmap_func(&opti->conflicted, 0);
 
 	/* Free memory used by various renames maps */
 	for (i=1; i<3; ++i) {
@@ -714,6 +714,17 @@ static void setup_path_info(struct merge_options *opt,
 		path_info->filemask = filemask;
 		path_info->dirmask = dirmask;
 		path_info->df_conflict = !!df_conflict;
+		if (dirmask)
+			/*
+			 * Assume is_null for now, but if we have entries
+			 * under the directory then when it is complete in
+			 * write_completed_directory() it'll update this.
+			 * Also, for D/F conflicts, we have to handle the
+			 * directory first, then clear this bit and process
+			 * the file to see how it is handled -- that occurs
+			 * near the top of process_entry().
+			 */
+			path_info->merged.is_null = 1;
 	}
 	strmap_put(&opt->priv->paths, fullpath, path_info);
 	result->string = fullpath;
@@ -3615,6 +3626,7 @@ static void write_completed_directory(struct merge_options *opt,
 		 * Write out the tree to the git object directory, and also
 		 * record the mode and oid in dir_info->result.
 		 */
+		dir_info->is_null = 0;
 		dir_info->result.mode = S_IFDIR;
 		write_tree(&dir_info->result.oid, &info->versions, offset,
 			   opt->repo->hash_algo->rawsz);
@@ -3686,15 +3698,15 @@ static void process_entry(struct merge_options *opt,
 	assert(!ci->merged.clean);
 	assert(ci->filemask >= 0 && ci->filemask <= 7);
 	/* ci->match_mask == 7 was handled in collect_merge_info_callback() */
-	assert(ci->match_mask == 3 || ci->match_mask == 5 ||
-	       ci->match_mask == 6 || ci->match_mask == 0);
+	assert(ci->match_mask == 0 || ci->match_mask == 3 ||
+	       ci->match_mask == 5 || ci->match_mask == 6);
 
-	if (ci->filemask == 0) {
-		/*
-		 * This is a placeholder for directories that were recursed
-		 * into; nothing to do in this case.
-		 */
-		return;
+	if (ci->dirmask) {
+		record_entry_for_tree(dir_metadata, path, ci);
+		if (ci->filemask == 0)
+			/* nothing else to handle */
+			return;
+		assert(ci->df_conflict);
 	}
 	if (ci->df_conflict && ci->merged.result.mode == 0) {
 		int i;
@@ -3721,7 +3733,7 @@ static void process_entry(struct merge_options *opt,
 		/*
 		 * This started out as a D/F conflict, and the entries in
 		 * the competing directory were not removed by the merge as
-		 * evidenced by write_completed_directories() writing a value
+		 * evidenced by write_completed_directory() writing a value
 		 * to ci->merged.result.mode.
 		 */
 		struct conflict_info *new_ci;
@@ -4013,13 +4025,13 @@ static void process_entry(struct merge_options *opt,
 		int side = (ci->filemask == 4) ? 2 : 1;
 		ci->merged.result.mode = ci->stages[side].mode;
 		oidcpy(&ci->merged.result.oid, &ci->stages[side].oid);
-		ci->merged.clean = !ci->df_conflict;
+		ci->merged.clean = !ci->df_conflict && !ci->path_conflict;
 	} else if (ci->filemask == 1) {
 		/* Deleted on both sides */
 		ci->merged.is_null = 1;
 		ci->merged.result.mode = 0;
 		oidcpy(&ci->merged.result.oid, &null_oid);
-		ci->merged.clean = 1;
+		ci->merged.clean = !ci->path_conflict;
 	}
 
 	/*
