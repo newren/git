@@ -94,6 +94,11 @@ struct rename_info {
 	 * Values: 0 = don't bother, 1 = let's do it, 2 = we already did it.
 	 */
 	unsigned redo_after_renames;
+	/*
+	 * If the current rename limit wasn't high enough for inexact rename
+	 * detection to run, this records the limit needed.
+	 */
+	int needed_limit;
 };
 
 struct traversal_callback_data {
@@ -172,7 +177,6 @@ struct merge_options_internal {
 
 	/* call_depth: recursion level counter for merging merge bases */
 	int call_depth;
-	int needed_rename_limit;
 };
 
 struct version_info {
@@ -3060,8 +3064,8 @@ static int detect_regular_renames(struct merge_options *opt,
 #ifdef VERBOSE_DEBUG
 	printf("Done.\n");
 #endif
-	if (diff_opts.needed_rename_limit > opt->priv->needed_rename_limit)
-		opt->priv->needed_rename_limit = diff_opts.needed_rename_limit;
+	if (diff_opts.needed_rename_limit > opt->priv->renames->needed_limit)
+		opt->priv->renames->needed_limit = diff_opts.needed_rename_limit;
 
 	renames->pairs[side_index] = diff_queued_diff;
 
@@ -4457,7 +4461,7 @@ void merge_switch_to_result(struct merge_options *opt,
 
 		/* Also include needed rename limit adjustment now */
 		diff_warn_rename_limit("merge.renamelimit",
-				       opti->needed_rename_limit, 0);
+				       opti->renames->needed_limit, 0);
 
 		trace2_region_leave("merge", "display messages", opt->repo);
 	}
