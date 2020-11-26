@@ -2731,12 +2731,6 @@ static int process_renames(struct merge_options *opt,
 #endif
 		assert(source_deleted || oldinfo->filemask & old_sidemask);
 
-		if (!type_changed) {
-			/* Mark the original as resolved by removal */
-			oldinfo->merged.is_null = 1;
-			oldinfo->merged.clean = 1;
-		}
-
 		/* Need to check for special types of rename conflicts... */
 		if (collision && !source_deleted) {
 			/* collision: rename/add or rename/rename(2to1) */
@@ -2844,6 +2838,13 @@ static int process_renames(struct merge_options *opt,
 				newinfo->pathnames[other_source_index] = oldpath;
 			}
 		}
+
+		if (!type_changed) {
+			/* Mark the original as resolved by removal */
+			oldinfo->merged.is_null = 1;
+			oldinfo->merged.clean = 1;
+		}
+
 	}
 
 	return clean_merge;
