@@ -2356,7 +2356,7 @@ static int process_renames(struct merge_options *opt,
 	int clean_merge = 1, i;
 
 	for (i = 0; i < renames->nr; ++i) {
-		const char *oldpath, *newpath;
+		const char *oldpath = NULL, *newpath;
 		struct diff_filepair *pair = renames->queue[i];
 		struct conflict_info *oldinfo = NULL, *newinfo = NULL;
 		struct strmap_entry *old_ent, *new_ent;
