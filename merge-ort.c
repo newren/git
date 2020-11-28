@@ -608,7 +608,7 @@ static void dump_pairs(struct diff_queue_struct *pairs, char *label)
 #endif
 }
 
-/*** Function Grouping: functions related to collect_rename_info() ***/
+/*** Function Grouping: functions related to collect_merge_info() ***/
 
 static int traverse_trees_wrapper_callback(int n,
 					   unsigned long mask,
