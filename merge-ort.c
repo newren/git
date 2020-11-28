@@ -17,7 +17,9 @@
 #include "cache.h"
 #include "merge-ort.h"
 
+#include "alloc.h"
 #include "cache-tree.h"
+#include "commit.h"
 #include "diff.h"
 #include "diffcore.h"
 #include "dir.h"
@@ -1275,6 +1277,34 @@ void merge_finalize(struct merge_options *opt,
 	FREE_AND_NULL(opti);
 }
 
+static inline void set_commit_tree(struct commit *c, struct tree *t)
+{
+	c->maybe_tree = t;
+}
+
+static struct commit *make_virtual_commit(struct repository *repo,
+					  struct tree *tree,
+					  const char *comment)
+{
+	struct commit *commit = alloc_commit_node(repo);
+
+	set_merge_remote_desc(commit, comment, (struct object *)commit);
+	set_commit_tree(commit, tree);
+	commit->object.parsed = 1;
+	return commit;
+}
+
+static struct commit_list *reverse_commit_list(struct commit_list *list)
+{
+	struct commit_list *next = NULL, *current, *backup;
+	for (current = list; current; current = backup) {
+		backup = current->next;
+		current->next = next;
+		next = current;
+	}
+	return next;
+}
+
 static void merge_start(struct merge_options *opt, struct merge_result *result)
 {
 	/* Sanity checks on opt */
@@ -1387,5 +1417,7 @@ void merge_incore_recursive(struct merge_options *opt,
 			    struct commit *side2,
 			    struct merge_result *result)
 {
+	(void)reverse_commit_list;
+	(void)make_virtual_commit;
 	die("Not yet implemented");
 }
