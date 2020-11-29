@@ -147,6 +147,13 @@ struct conflict_info {
 	unsigned df_conflict:1;
 
 	/*
+	 * Whether this path is/was involved in a non-content conflict other
+	 * than a directory/file conflict (e.g. rename/rename, rename/delete,
+	 * file location based on possible directory rename).
+	 */
+	unsigned path_conflict:1;
+
+	/*
 	 * For filemask and dirmask, see tree-walk.h's struct traverse_info,
 	 * particularly the documentation above the "fn" member.  Note that
 	 * filemask = mask & ~dirmask from that documentation.
