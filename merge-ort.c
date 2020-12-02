@@ -2559,6 +2559,10 @@ static int process_renames(struct merge_options *opt,
 		if (!oldinfo || oldinfo->merged.clean)
 			continue;
 
+		/*
+		 * diff_filepairs have copies of pathnames, thus we have to
+		 * use standard 'strcmp()' (negated) instead of '=='.
+		 */
 		if (i+1 < renames->nr &&
 		    !strcmp(oldpath, renames->queue[i+1]->one->path)) {
 			/* Handle rename/rename(1to2) or rename/rename(1to1) */
@@ -2580,7 +2584,7 @@ static int process_renames(struct merge_options *opt,
 			VERIFY_CI(side2);
 
 			if (!strcmp(pathnames[1], pathnames[2])) {
-				/* This is a rename/rename(1to1) */
+				/* Both sides renamed the same way */
 				assert(side1 == side2);
 				memcpy(&side1->stages[0], &base->stages[0],
 				       sizeof(merged));
@@ -2589,7 +2593,9 @@ static int process_renames(struct merge_options *opt,
 				base->merged.is_null = 1;
 				base->merged.clean = 1;
 
-				/* This one is handled; move to next rename */
+				/* We handled both renames, i.e. i+1 handled */
+				i++;
+				/* Move to next rename */
 				continue;
 			}
 
@@ -2683,7 +2689,8 @@ static int process_renames(struct merge_options *opt,
 		type_changed = !source_deleted &&
 			(S_ISREG(oldinfo->stages[other_source_index].mode) !=
 			 S_ISREG(newinfo->stages[target_index].mode));
-		if (type_changed) {
+		if (type_changed && collision) {
+			/* special handling so later blocks can handle this */
 			/*
 			 * if type_changed && collision are both true, then this
 			 * was really a double rename, but one side wasn't
@@ -2706,7 +2713,7 @@ static int process_renames(struct merge_options *opt,
 			 * file also has a different type, that'll be handled
 			 * by the content merge logic in process_entry() too.
 			 *
-			 * See also t3030, 'rename vs. rename/symlink'
+			 * See also t6430, 'rename vs. rename/symlink'
 			 */
 			collision = 0;
 		}
@@ -2800,9 +2807,9 @@ static int process_renames(struct merge_options *opt,
 				 oldpath, newpath, rename_branch, delete_branch);
 		} else {
 			/*
-			 * normal rename or rename/delete; copy the existing
-			 * stage(s) from oldinfo over the newinfo and update
-			 * the pathname(s).
+			 * a few different cases...start by copying the
+			 * existing stage(s) from oldinfo over the newinfo
+			 * and update the pathname(s).
 			 */
 #ifdef VERBOSE_DEBUG
 			printf("--> Normal rename (or rename/delete):\n");
@@ -2814,12 +2821,14 @@ static int process_renames(struct merge_options *opt,
 			newinfo->filemask |= (1 << 0);
 			newinfo->pathnames[0] = oldpath;
 			if (type_changed) {
+				/* rename vs. typechange */
 				/* Mark the original as resolved by removal */
 				memcpy(&oldinfo->stages[0].oid, &null_oid,
 				       sizeof(oldinfo->stages[0].oid));
 				oldinfo->stages[0].mode = 0;
 				oldinfo->filemask &= 0x06;
 			} else if (source_deleted) {
+				/* rename/delete */
 				newinfo->path_conflict = 1;
 				path_msg(opt, newpath, 0,
 					 _("CONFLICT (rename/delete): %s renamed"
@@ -2827,6 +2836,7 @@ static int process_renames(struct merge_options *opt,
 					 oldpath, newpath,
 					 rename_branch, delete_branch);
 			} else {
+				/* normal rename */
 #ifdef VERBOSE_DEBUG
 				printf("      Copied stage %d from old to new\n",
 				       other_source_index);
@@ -2844,7 +2854,6 @@ static int process_renames(struct merge_options *opt,
 			oldinfo->merged.is_null = 1;
 			oldinfo->merged.clean = 1;
 		}
-
 	}
 
 	return clean_merge;
@@ -3296,10 +3305,6 @@ static int detect_and_process_renames(struct merge_options *opt,
 		free(combined.queue);
 	}
 
-	/*
-	 * We cannot deallocate combined yet; strings contained in it were
-	 * used inside opt->priv->paths, so we need to wait to deallocate it.
-	 */
 	return clean;
 }
 
@@ -3812,7 +3817,11 @@ static void process_entry(struct merge_options *opt,
 		 * the directory to remain here, so we need to move this
 		 * path to some new location.
 		 */
-		new_ci = xcalloc(1, sizeof(*ci));
+#if USE_MEMORY_POOL
+		new_ci = mem_pool_calloc(&opt->priv->pool, 1, sizeof(*new_ci));
+#else
+		new_ci = xcalloc(1, sizeof(*new_ci));
+#endif
 		/* We don't really want new_ci->merged.result copied, but it'll
 		 * be overwritten below so it doesn't matter.  We also don't
 		 * want any directory mode/oid values copied, but we'll zero
@@ -3862,7 +3871,7 @@ static void process_entry(struct merge_options *opt,
 	/*
 	 * NOTE: Below there is a long switch-like if-elseif-elseif... block
 	 *       which the code goes through even for the df_conflict cases
-	 *       above.  Well, it will once we don't die-not-implemented above.
+	 *       above.
 	 */
 	if (ci->match_mask) {
 		ci->merged.clean = 1;
