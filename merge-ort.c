@@ -3451,6 +3451,17 @@ struct directory_versions {
 	unsigned last_directory_len;
 };
 
+static int tree_entry_order(const void *a_, const void *b_)
+{
+	const struct string_list_item *a = a_;
+	const struct string_list_item *b = b_;
+
+	const struct merged_info *ami = a->util;
+	const struct merged_info *bmi = b->util;
+	return base_name_compare(a->string, strlen(a->string), ami->result.mode,
+				 b->string, strlen(b->string), bmi->result.mode);
+}
+
 static void write_tree(struct object_id *result_oid,
 		       struct string_list *versions,
 		       unsigned int offset,
@@ -3476,7 +3487,7 @@ static void write_tree(struct object_id *result_oid,
 #endif
 	relevant_entries.items = versions->items + offset;
 	relevant_entries.nr = versions->nr - offset;
-	string_list_sort(&relevant_entries);
+	QSORT(relevant_entries.items, relevant_entries.nr, tree_entry_order);
 
 	/* Pre-allocate some space in buf */
 	extra = hash_size + 8; /* 8: 6 for mode, 1 for space, 1 for NUL char */
