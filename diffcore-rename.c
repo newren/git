@@ -41,14 +41,24 @@ static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
 static int add_rename_dst(struct diff_filepair *p)
 {
 	/*
-	 * See t4058; trees might have duplicate entries. Since that test
-	 * for some reason wants to turn off rename detection (a lame
-	 * overhead if you ask me; I think we should just leave it on --
-	 * while rename detection will be hard to understand that is only
-	 * because the underlying tree makes no sense).  Unless we modify
-	 * that test, we have to detect this.  Since the diff machinery
-	 * passes these to us in adjacent pairs, we just need to check to
-	 * see if our name matches the previous one.
+	 * See t4058; trees might have duplicate entries.  I think
+	 * trees with duplicate entries should be ignored and we
+	 * should just leave rename detection on; while the results
+	 * may be slightly harder to understand, that's merely a
+	 * result of the underlying tree making no sense.  But I
+	 * believe everything still works fine, the results do still
+	 * make sense, and the extra overhead of doing this checking
+	 * for a few historical weird trees from long ago seems like
+	 * the dog wagging the tail to me.
+	 *
+	 * However: I don't feel like fighting that battle right now.
+	 * For now, to keep the regression test passing, we have to
+	 * detect it.  Since the diff machinery passes these to us in
+	 * adjacent pairs, we just need to check to see if our name
+	 * matches the previous one.
+	 *
+	 * TODO: Dispense with this test, rip out the test in t4058, and
+	 * lobby folks for the change.
 	 */
 	if (rename_dst_nr > 0 &&
 	    !strcmp(rename_dst[rename_dst_nr-1].p->two->path, p->two->path))
@@ -150,9 +160,9 @@ static int estimate_similarity(struct repository *r,
 {
 	/* src points at a file that existed in the original tree (or
 	 * optionally a file in the destination tree) and dst points
-	 * at a newly created file.  They may be quite similar, in which
-	 * case we want to say src is renamed to dst or src is copied into
-	 * dst, and then some edit has been applied to dst.
+	 * at a newly added file.  They may be quite similar, in which
+	 * case we want to say src is renamed to dst or src is copied
+	 * into dst, and then some edit has been applied to dst.
 	 *
 	 * Compare them and return how similar they are, representing
 	 * the score as an integer between 0 and MAX_SCORE.
@@ -1008,7 +1018,7 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 				      struct diff_options *options)
 {
 	int rename_limit = options->rename_limit;
-	int i, num_src;
+	int i, limited_sources;
 
 	options->needed_rename_limit = 0;
 
@@ -1020,9 +1030,8 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 	 */
 	if (rename_limit <= 0)
 		rename_limit = 32767;
-	if ((num_targets <= rename_limit || num_sources <= rename_limit) &&
-	    ((uint64_t)num_targets * (uint64_t)num_sources
-	     <= (uint64_t)rename_limit * (uint64_t)rename_limit))
+	if ((uint64_t)num_targets * (uint64_t)num_sources
+	    <= (uint64_t)rename_limit * (uint64_t)rename_limit)
 		return 0;
 
 	options->needed_rename_limit =
@@ -1033,14 +1042,13 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 		return 1;
 
 	/* Would we bust the limit if we were running under -C? */
-	for (num_src = i = 0; i < num_sources; i++) {
+	for (limited_sources = i = 0; i < num_sources; i++) {
 		if (diff_unmodified_pair(rename_src[i].p))
 			continue;
-		num_src++;
+		limited_sources++;
 	}
-	if ((num_targets <= rename_limit || num_src <= rename_limit) &&
-	    ((uint64_t)num_targets * (uint64_t)num_src
-	     <= (uint64_t)rename_limit * (uint64_t)rename_limit))
+	if ((uint64_t)num_targets * (uint64_t)limited_sources
+	    <= (uint64_t)rename_limit * (uint64_t)rename_limit)
 		return 2;
 	return 1;
 }
@@ -1295,7 +1303,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
 	int i, j, exact_count, rename_count, skip_unmodified = 0;
-	int num_create, dst_cnt, num_src, want_copies;
+	int num_targets, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
 	struct mem_pool local_pool;
 	struct dir_rename_info info;
@@ -1444,7 +1452,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	/*
 	 * Calculate how many rename targets are left
 	 */
-	num_create = (rename_dst_nr - rename_count);
+	num_targets = (rename_dst_nr - rename_count);
 
 #if 0
 	/* Debug spew */
@@ -1454,7 +1462,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	       rename_src_nr, rename_dst_nr,
 	       relevant_sources ? strintmap_get_size(relevant_sources) : rename_src_nr);
 	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
-	printf("  Now have (%d x %d)\n", num_src, num_create);
+	printf("  Now have (%d x %d)\n", num_src, num_targets);
 	if (num_src > 0)
 		printf("  Remaining sources:\n");
 	for (i = 0; i < num_src; i++)
@@ -1493,10 +1501,10 @@ void diffcore_rename_extended(struct diff_options *options,
 	rename_src_nr = num_src;
 
 	/* All done? */
-	if (!num_create || !num_src)
+	if (!num_targets || !num_src)
 		goto cleanup;
 
-	switch (too_many_rename_candidates(num_create, num_src, options)) {
+	switch (too_many_rename_candidates(num_targets, num_src, options)) {
 	case 1:
 		goto cleanup;
 	case 2:
@@ -1514,10 +1522,10 @@ void diffcore_rename_extended(struct diff_options *options,
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
 				_("Performing inexact rename detection"),
-				(uint64_t)num_create * (uint64_t)num_src);
+				(uint64_t)num_targets * (uint64_t)num_src);
 	}
 
-	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_create), sizeof(*mx));
+	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_targets), sizeof(*mx));
 	for (dst_cnt = i = 0; i < rename_dst_nr; i++) {
 		struct diff_filespec *two = rename_dst[i].p->two;
 		struct diff_score *m;
@@ -1595,7 +1603,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			diff_q(&outq, p);
 		}
 		else if (!DIFF_FILE_VALID(p->one) && DIFF_FILE_VALID(p->two)) {
-			/* Creation */
+			/* Addition */
 			diff_q(&outq, p);
 		}
 		else if (DIFF_FILE_VALID(p->one) && !DIFF_FILE_VALID(p->two)) {
