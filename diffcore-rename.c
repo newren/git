@@ -11,13 +11,6 @@
 #include "promisor-remote.h"
 #include "strmap.h"
 
-#if 0
-#define VERBOSE_DEBUG
-#endif
-#if 0
-#define SECTION_LABEL
-#endif
-
 /* Table of rename/copy destinations */
 
 static struct diff_rename_dst {
@@ -351,10 +344,6 @@ static int find_identical_files(struct hashmap *srcs,
 			break;
 	}
 	if (best) {
-#ifdef VERBOSE_DEBUG
-		printf("  Exact rename: %s -> %s\n",
-		       rename_src[best->index].p->one->path, target->path);
-#endif
 		record_rename_pair(dst_index, best->index, MAX_SCORE);
 		renames++;
 	}
@@ -967,10 +956,6 @@ static int find_basename_matches(struct diff_options *options,
 			/* If sufficiently similar, record as rename pair */
 			if (score < minimum_score)
 				continue;
-#ifdef VERBOSE_DEBUG
-			printf("  Basename-matched rename: %s -> %s (%d)\n",
-			       one->path, two->path, score);
-#endif
 			record_rename_pair(dst_index, src_index, score);
 			renames++;
 			update_dir_rename_counts(info, dirs_removed,
@@ -1073,12 +1058,6 @@ static int find_renames(struct diff_score *mx,
 			continue; /* already done, either exact or fuzzy. */
 		if (!copies && rename_src[mx[i].src].p->one->rename_used)
 			continue;
-#ifdef VERBOSE_DEBUG
-		printf("  Exhaustively-matched rename: %s -> %s (%d)\n",
-		       rename_src[mx[i].src].p->one->path,
-		       rename_dst[mx[i].dst].p->two->path,
-		       mx[i].score);
-#endif
 		record_rename_pair(mx[i].dst, mx[i].src, mx[i].score);
 		count++;
 		update_dir_rename_counts(info, dirs_removed,
@@ -1086,30 +1065,6 @@ static int find_renames(struct diff_score *mx,
 					 rename_dst[mx[i].dst].p->two->path);
 	}
 	return count;
-}
-
-static void dump_unmatched(int num_src)
-{
-#ifdef VERBOSE_DEBUG
-	int i;
-
-	for (i = 0; i < num_src; ++i) {
-		char *filename = rename_src[i].p->one->path;
-
-		if (rename_src[i].p->one->rename_used)
-			continue;
-
-		printf("  Unmatched source: %s\n", filename);
-	}
-	for (i = 0; i < rename_dst_nr; ++i) {
-		char *filename = rename_dst[i].two->path;
-
-		if (rename_dst[i].is_rename)
-			continue;
-
-		printf("  Unmatched target: %s\n", filename);
-	}
-#endif
 }
 
 enum relevance {
@@ -1302,7 +1257,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	struct diff_queue_struct *q = &diff_queued_diff;
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
-	int i, j, exact_count, rename_count, skip_unmodified = 0;
+	int i, j, rename_count, skip_unmodified = 0;
 	int num_targets, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
 	struct mem_pool local_pool;
@@ -1372,13 +1327,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	 * We really want to cull the candidates list early
 	 * with cheap tests in order to avoid doing deltas.
 	 */
-#ifdef SECTION_LABEL
-	printf("Looking for exact renames...\n");
-#endif
-	exact_count = rename_count = find_exact_renames(options, &local_pool);
-#ifdef SECTION_LABEL
-	printf("Done.\n");
-#endif
+	rename_count = find_exact_renames(options, &local_pool);
 	/*
 	 * Discard local_pool immediately instead of at "cleanup:" in order
 	 * to reduce maximum memory usage; inexact rename detection uses up
@@ -1416,9 +1365,6 @@ void diffcore_rename_extended(struct diff_options *options,
 					   cached_pairs, dir_rename_count);
 		trace2_region_leave("diff", "dir rename setup", options->repo);
 
-#ifdef SECTION_LABEL
-		printf("Looking for basename-based renames...\n");
-#endif
 		/* Cull the candidates list based on basename match. */
 		trace2_region_enter("diff", "basename matches", options->repo);
 		rename_count += find_basename_matches(options, minimum_score,
@@ -1444,9 +1390,6 @@ void diffcore_rename_extended(struct diff_options *options,
 							 relevant_sources,
 							 dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
-#ifdef SECTION_LABEL
-		printf("Done.\n");
-#endif
 	}
 
 	/*
@@ -1454,49 +1397,6 @@ void diffcore_rename_extended(struct diff_options *options,
 	 */
 	num_targets = (rename_dst_nr - rename_count);
 
-#if 0
-	/* Debug spew */
-	fflush(NULL);
-	printf("\nRename stats:\n");
-	printf("  Started with (%d x %d), %d relevant\n",
-	       rename_src_nr, rename_dst_nr,
-	       relevant_sources ? strintmap_get_size(relevant_sources) : rename_src_nr);
-	printf("  Found %d exact & %d basename\n", exact_count, rename_count - exact_count);
-	printf("  Now have (%d x %d)\n", num_src, num_targets);
-	if (num_src > 0)
-		printf("  Remaining sources:\n");
-	for (i = 0; i < num_src; i++)
-		printf("    %s\n", rename_src[i].p->one->path);
-
-	if (dirs_removed) {
-		struct hashmap_iter iter;
-		struct strmap_entry *entry;
-		struct string_list olist = STRING_LIST_INIT_NODUP;
-
-		/* Hack to Pre-allocate olist to the desired size */
-		ALLOC_GROW(olist.items, strintmap_get_size(dirs_removed),
-			   olist.alloc);
-
-		/* Put every entry from output into olist, then sort */
-		strset_for_each_entry(dirs_removed, &iter, entry) {
-			string_list_append(&olist, entry->key);
-		}
-		string_list_sort(&olist);
-
-		/* Iterate over the items, printing them */
-		printf("Removed directories:\n");
-		for (i = 0; i < olist.nr; ++i)
-		  printf("    %s\n", olist.items[i].string);
-		string_list_clear(&olist, 0);
-		printf("Number of removed directories: %d\n",
-		       strintmap_get_size(dirs_removed));
-	}
-
-	fflush(NULL);
-
-#else
-	(void)exact_count;
-#endif
 	/* Avoid other code trying to use invalidated entries */
 	rename_src_nr = num_src;
 
@@ -1515,9 +1415,6 @@ void diffcore_rename_extended(struct diff_options *options,
 		break;
 	}
 
-#ifdef SECTION_LABEL
-	printf("Looking for inexact renames...\n");
-#endif
 	trace2_region_enter("diff", "inexact renames", options->repo);
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
@@ -1582,12 +1479,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		rename_count += find_renames(mx, dst_cnt, minimum_score, 1,
 					     &info, dirs_removed);
 	free(mx);
-#ifdef SECTION_LABEL
-	printf("Done.\n");
-#endif
 	trace2_region_leave("diff", "inexact renames", options->repo);
-
-	dump_unmatched(num_src);
 
  cleanup:
 	/* At this point, we have found some renames and copies and they
