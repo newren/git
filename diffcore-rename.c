@@ -33,30 +33,6 @@ static struct diff_rename_dst *locate_rename_dst(struct diff_filepair *p)
  */
 static int add_rename_dst(struct diff_filepair *p)
 {
-	/*
-	 * See t4058; trees might have duplicate entries.  I think
-	 * trees with duplicate entries should be ignored and we
-	 * should just leave rename detection on; while the results
-	 * may be slightly harder to understand, that's merely a
-	 * result of the underlying tree making no sense.  But I
-	 * believe everything still works fine, the results do still
-	 * make sense, and the extra overhead of doing this checking
-	 * for a few historical weird trees from long ago seems like
-	 * the dog wagging the tail to me.
-	 *
-	 * However: I don't feel like fighting that battle right now.
-	 * For now, to keep the regression test passing, we have to
-	 * detect it.  Since the diff machinery passes these to us in
-	 * adjacent pairs, we just need to check to see if our name
-	 * matches the previous one.
-	 *
-	 * TODO: Dispense with this test, rip out the test in t4058, and
-	 * lobby folks for the change.
-	 */
-	if (rename_dst_nr > 0 &&
-	    !strcmp(rename_dst[rename_dst_nr-1].p->two->path, p->two->path))
-		return -1;
-
 	ALLOC_GROW(rename_dst, rename_dst_nr + 1, rename_dst_alloc);
 	rename_dst[rename_dst_nr].p = p;
 	rename_dst[rename_dst_nr].filespec_to_free = NULL;
@@ -153,9 +129,9 @@ static int estimate_similarity(struct repository *r,
 {
 	/* src points at a file that existed in the original tree (or
 	 * optionally a file in the destination tree) and dst points
-	 * at a newly added file.  They may be quite similar, in which
-	 * case we want to say src is renamed to dst or src is copied
-	 * into dst, and then some edit has been applied to dst.
+	 * at a newly created file.  They may be quite similar, in which
+	 * case we want to say src is renamed to dst or src is copied into
+	 * dst, and then some edit has been applied to dst.
 	 *
 	 * Compare them and return how similar they are, representing
 	 * the score as an integer between 0 and MAX_SCORE.
@@ -999,7 +975,7 @@ static void record_if_better(struct diff_score m[], struct diff_score *o)
  * 1 if we need to disable inexact rename detection;
  * 2 if we would be under the limit if we were given -C instead of -C -C.
  */
-static int too_many_rename_candidates(int num_targets, int num_sources,
+static int too_many_rename_candidates(int num_destinations, int num_sources,
 				      struct diff_options *options)
 {
 	int rename_limit = options->rename_limit;
@@ -1011,16 +987,20 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 	 * This basically does a test for the rename matrix not
 	 * growing larger than a "rename_limit" square matrix, ie:
 	 *
-	 *    num_targets * num_sources > rename_limit * rename_limit
+	 *    num_destinations * num_sources > rename_limit * rename_limit
+	 *
+	 * We use st_mult() to check overflow conditions; size_t isn't large
+	 * enough to hold the multiplication, then the system won't be able to
+	 * allocate enough memory for the matrix anyway.
 	 */
 	if (rename_limit <= 0)
 		rename_limit = 32767;
-	if ((uint64_t)num_targets * (uint64_t)num_sources
-	    <= (uint64_t)rename_limit * (uint64_t)rename_limit)
+	if (st_mult(num_destinations, num_sources)
+	    <= st_mult(rename_limit, rename_limit))
 		return 0;
 
 	options->needed_rename_limit =
-		num_sources > num_targets ? num_sources : num_targets;
+		num_sources > num_destinations ? num_sources : num_destinations;
 
 	/* Are we running under -C -C? */
 	if (!options->flags.find_copies_harder)
@@ -1032,8 +1012,8 @@ static int too_many_rename_candidates(int num_targets, int num_sources,
 			continue;
 		limited_sources++;
 	}
-	if ((uint64_t)num_targets * (uint64_t)limited_sources
-	    <= (uint64_t)rename_limit * (uint64_t)rename_limit)
+	if (st_mult(num_destinations, limited_sources)
+	    <= st_mult(rename_limit, rename_limit))
 		return 2;
 	return 1;
 }
@@ -1258,7 +1238,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	struct diff_queue_struct outq;
 	struct diff_score *mx;
 	int i, j, rename_count, skip_unmodified = 0;
-	int num_targets, dst_cnt, num_src, want_copies;
+	int num_destinations, dst_cnt, num_src, want_copies;
 	struct progress *progress = NULL;
 	struct mem_pool local_pool;
 	struct dir_rename_info info;
@@ -1395,16 +1375,16 @@ void diffcore_rename_extended(struct diff_options *options,
 	/*
 	 * Calculate how many rename targets are left
 	 */
-	num_targets = (rename_dst_nr - rename_count);
+	num_destinations = (rename_dst_nr - rename_count);
 
 	/* Avoid other code trying to use invalidated entries */
 	rename_src_nr = num_src;
 
 	/* All done? */
-	if (!num_targets || !num_src)
+	if (!num_destinations || !num_src)
 		goto cleanup;
 
-	switch (too_many_rename_candidates(num_targets, num_src, options)) {
+	switch (too_many_rename_candidates(num_destinations, num_src, options)) {
 	case 1:
 		goto cleanup;
 	case 2:
@@ -1419,10 +1399,11 @@ void diffcore_rename_extended(struct diff_options *options,
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
 				_("Performing inexact rename detection"),
-				(uint64_t)num_targets * (uint64_t)num_src);
+				(uint64_t)num_destinations * (uint64_t)num_src);
 	}
 
-	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_targets), sizeof(*mx));
+	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_destinations),
+		     sizeof(*mx));
 	for (dst_cnt = i = 0; i < rename_dst_nr; i++) {
 		struct diff_filespec *two = rename_dst[i].p->two;
 		struct diff_score *m;
@@ -1495,7 +1476,7 @@ void diffcore_rename_extended(struct diff_options *options,
 			diff_q(&outq, p);
 		}
 		else if (!DIFF_FILE_VALID(p->one) && DIFF_FILE_VALID(p->two)) {
-			/* Addition */
+			/* Creation */
 			diff_q(&outq, p);
 		}
 		else if (DIFF_FILE_VALID(p->one) && !DIFF_FILE_VALID(p->two)) {
@@ -1518,7 +1499,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			if (DIFF_PAIR_BROKEN(p)) {
 				/* broken delete */
 				struct diff_rename_dst *dst = locate_rename_dst(p);
-				assert(dst);
+				if (!dst)
+					BUG("tracking failed somehow; failed to find associated dst for broken pair");
 				if (dst->is_rename)
 					/* counterpart is now rename/copy */
 					pair_to_free = p;
