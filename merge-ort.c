@@ -2776,10 +2776,7 @@ static int compare_pairs(const void *a_, const void *b_)
 	const struct diff_filepair *a = *((const struct diff_filepair **)a_);
 	const struct diff_filepair *b = *((const struct diff_filepair **)b_);
 
-	int cmp = strcmp(a->one->path, b->one->path);
-	if (cmp)
-		return cmp;
-	return a->score - b->score;
+	return strcmp(a->one->path, b->one->path);
 }
 
 static inline int merge_detect_rename(struct merge_options *opt)
