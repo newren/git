@@ -173,7 +173,7 @@ struct merge_options_internal {
 #else
 	struct string_list paths_to_free; /* list of strings to free */
 #endif
-	struct rename_info *renames;
+	struct rename_info renames;
 	struct index_state attr_index; /* renormalization weirdly needs one... */
 	struct strmap output;  /* maps path -> conflict messages */
 
@@ -321,7 +321,7 @@ static void free_strmap_strings(struct strmap *map)
 static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 					  int reinitialize)
 {
-	struct rename_info *renames = opti->renames;
+	struct rename_info *renames = &opti->renames;
 	int i;
 	void (*strmap_func)(struct strmap *, int) =
 		reinitialize ? strmap_partial_clear : strmap_clear;
@@ -537,7 +537,7 @@ static int traverse_trees_wrapper_callback(int n,
 					   struct traverse_info *info)
 {
 	struct merge_options *opt = info->data;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	unsigned filemask = mask & ~dirmask;
 
 	assert(n==3);
@@ -564,7 +564,7 @@ static int traverse_trees_wrapper_callback(int n,
  *   - read all the tree entries FIRST
  *   - determine if any correspond to new entries in index 1 or 2
  *   - call my callback the way traverse_trees() would, but make sure that
- *     opt->priv->renames->dir_rename_mask is set based on new entries
+ *     opt->priv->renames.dir_rename_mask is set based on new entries
  */
 static int traverse_trees_wrapper(struct index_state *istate,
 				  int n,
@@ -575,10 +575,9 @@ static int traverse_trees_wrapper(struct index_state *istate,
 	traverse_callback_t old_fn;
 	char *old_callback_data_traverse_path;
 	struct merge_options *opt = info->data;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 
-	assert(opt->priv->renames->dir_rename_mask == 2 ||
-	       opt->priv->renames->dir_rename_mask == 4);
+	assert(renames->dir_rename_mask == 2 || renames->dir_rename_mask == 4);
 
 	old_callback_data_traverse_path = renames->callback_data_traverse_path;
 	old_fn = info->fn;
@@ -685,7 +684,7 @@ static void add_pair(struct merge_options *opt,
 #if USE_MEMORY_POOL
 	struct mem_pool *pool = &opt->priv->pool;
 #endif
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	int names_idx = is_add ? side : 0;
 
 	if (is_add) {
@@ -759,7 +758,7 @@ static void collect_rename_info(struct merge_options *opt,
 				unsigned dirmask,
 				unsigned match_mask)
 {
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	unsigned side;
 
 	/*
@@ -863,7 +862,7 @@ static int collect_merge_info_callback(int n,
 	 */
 	struct merge_options *opt = info->data;
 	struct merge_options_internal *opti = opt->priv;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	struct string_list_item pi;  /* Path Info */
 	struct conflict_info *ci; /* typed alias to pi.util (which is void*) */
 	struct name_entry *p;
@@ -1115,7 +1114,7 @@ static void resolve_trivial_directory_merge(struct conflict_info *ci, int side)
 static int handle_deferred_entries(struct merge_options *opt,
 				   struct traverse_info *info)
 {
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 	int side, ret = 0;
@@ -1297,8 +1296,8 @@ static int handle_deferred_entries(struct merge_options *opt,
 			renames->redo_after_renames = 1;
 			renames->cached_pairs_valid_side = -1;
 		}
-	} else if (opt->priv->renames->redo_after_renames == 2)
-		opt->priv->renames->redo_after_renames = 0;
+	} else if (renames->redo_after_renames == 2)
+		renames->redo_after_renames = 0;
 	return ret;
 }
 
@@ -1913,7 +1912,7 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 	struct strmap *dir_renames;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 
 	dir_renames = xmalloc(sizeof(*dir_renames));
 	strmap_init_with_options(dir_renames, NULL, 0);
@@ -2803,7 +2802,7 @@ static int detect_regular_renames(struct merge_options *opt,
 				  unsigned side_index)
 {
 	struct diff_options diff_opts;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 
 	prune_cached_from_relevant(renames, side_index);
 	if (!possible_uncached_renames(renames, side_index)) {
@@ -2852,8 +2851,8 @@ static int detect_regular_renames(struct merge_options *opt,
 				 &renames->dir_rename_count[side_index]);
 	trace2_region_leave("diff", "diffcore_rename", opt->repo);
 	resolve_diffpair_statuses(&diff_queued_diff);
-	if (diff_opts.needed_rename_limit > opt->priv->renames->needed_limit)
-		opt->priv->renames->needed_limit = diff_opts.needed_rename_limit;
+	if (diff_opts.needed_rename_limit > renames->needed_limit)
+		renames->needed_limit = diff_opts.needed_rename_limit;
 
 	renames->pairs[side_index] = diff_queued_diff;
 
@@ -2892,7 +2891,7 @@ static int collect_renames(struct merge_options *opt,
 	struct diff_queue_struct *side_pairs;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 
 	side_pairs = &renames->pairs[side_index];
 	compute_collisions(&collisions, dir_renames_for_side, side_pairs);
@@ -2955,7 +2954,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 {
 	struct diff_queue_struct combined;
 	struct strmap *dir_renames[3]; /* Entry 0 unused */
-	struct rename_info *renames = opt->priv->renames;
+	struct rename_info *renames = &opt->priv->renames;
 	int need_dir_renames, s, clean = 1;
 	unsigned detection_run = 0;
 
@@ -3030,7 +3029,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 		struct diff_queue_struct *side_pairs;
 		int i;
 
-		side_pairs = &opt->priv->renames->pairs[s];
+		side_pairs = &renames->pairs[s];
 		for (i = 0; i < side_pairs->nr; ++i) {
 			struct diff_filepair *p = side_pairs->queue[i];
 #if USE_MEMORY_POOL
@@ -4118,7 +4117,7 @@ void merge_switch_to_result(struct merge_options *opt,
 
 		/* Also include needed rename limit adjustment now */
 		diff_warn_rename_limit("merge.renamelimit",
-				       opti->renames->needed_limit, 0);
+				       opti->renames.needed_limit, 0);
 
 		trace2_region_leave("merge", "display messages", opt->repo);
 	}
@@ -4136,7 +4135,6 @@ void merge_finalize(struct merge_options *opt,
 	assert(opt->priv == NULL);
 
 	clear_or_reinit_internal_opts(opti, 0);
-	FREE_AND_NULL(opti->renames);
 	FREE_AND_NULL(opti);
 }
 
@@ -4250,11 +4248,11 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 
 		trace2_region_enter("merge", "allocate/init", opt->repo);
 		opt->priv = xcalloc(1, sizeof(*opt->priv));
+		renames = &opt->priv->renames;
 #if USE_MEMORY_POOL
 		pool = &opt->priv->pool;
 		mem_pool_init(pool, 0);
 #endif
-		opt->priv->renames = renames = xcalloc(1, sizeof(*renames));
 		for (i = MERGE_SIDE1; i <= MERGE_SIDE2; i++) {
 			strintmap_init_with_options(&renames->relevant_sources[i],
 						    -1, pool, 0);
@@ -4307,13 +4305,14 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 {
 	struct rename_info *renames;
 	struct tree **merge_trees;
+	struct merge_options_internal *opti = result->priv;
 
-	if (!result->priv)
+	if (!opti)
 		return;
 
-	renames = ((struct merge_options_internal *)result->priv)->renames;
+	renames = &opti->renames;
 	merge_trees = renames->merge_trees;
-	/* merge_trees[0..2] will only be NULL if result->priv is */
+	/* merge_trees[0..2] will only be NULL if opti is */
 	assert(merge_trees[0] && merge_trees[1] && merge_trees[2]);
 
 	/* Check if we meet a condition for re-using cached_pairs */
@@ -4367,7 +4366,7 @@ redo:
 	result->clean = detect_and_process_renames(opt, merge_base,
 						   side1, side2);
 	trace2_region_leave("merge", "renames", opt->repo);
-	if (opt->priv->renames->redo_after_renames == 2) {
+	if (opt->priv->renames.redo_after_renames == 2) {
 		trace2_region_enter("merge", "reset_maps", opt->repo);
 		clear_or_reinit_internal_opts(opt->priv, 1);
 		trace2_region_leave("merge", "reset_maps", opt->repo);
@@ -4490,9 +4489,9 @@ void merge_incore_nonrecursive(struct merge_options *opt,
 	 * a cherry-pick or rebase sequence it might be able to take advantage
 	 * of the cached_pairs in that next merge.
 	 */
-	opt->priv->renames->merge_trees[0] = merge_base;
-	opt->priv->renames->merge_trees[1] = side1;
-	opt->priv->renames->merge_trees[2] = side2;
+	opt->priv->renames.merge_trees[0] = merge_base;
+	opt->priv->renames.merge_trees[1] = side1;
+	opt->priv->renames.merge_trees[2] = side2;
 	trace2_region_leave("merge", "merge_start", opt->repo);
 
 	merge_ort_nonrecursive_internal(opt, merge_base, side1, side2, result);
