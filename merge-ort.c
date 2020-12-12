@@ -935,7 +935,7 @@ static int collect_merge_info_callback(int n,
 
 	/* +1 in both of the following lines to include the NUL byte */
 #if USE_MEMORY_POOL
-	fullpath = mem_pool_alloc(&opt->priv->pool, len+1);
+	fullpath = mem_pool_alloc(&opt->priv->pool, len + 1);
 #else
 	fullpath = xmalloc(len + 1);
 #endif
@@ -2396,7 +2396,7 @@ static int process_renames(struct merge_options *opt,
 		 * diff_filepairs have copies of pathnames, thus we have to
 		 * use standard 'strcmp()' (negated) instead of '=='.
 		 */
-		if (i+1 < renames->nr &&
+		if (i + 1 < renames->nr &&
 		    !strcmp(oldpath, renames->queue[i+1]->one->path)) {
 			/* Handle rename/rename(1to2) or rename/rename(1to1) */
 			const char *pathnames[3];
@@ -2495,7 +2495,7 @@ static int process_renames(struct merge_options *opt,
 		VERIFY_CI(newinfo);
 		target_index = pair->score; /* from append_rename_pairs() */
 		assert(target_index == 1 || target_index == 2);
-		other_source_index = 3-target_index;
+		other_source_index = 3 - target_index;
 		old_sidemask = (1 << other_source_index); /* 2 or 4 */
 		source_deleted = (oldinfo->filemask == 1);
 		collision = ((newinfo->filemask & old_sidemask) != 0);
