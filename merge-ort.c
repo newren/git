@@ -244,9 +244,19 @@ struct conflict_info {
 	unsigned path_conflict:1;
 
 	/*
-	 * For filemask and dirmask, see tree-walk.h's struct traverse_info,
-	 * particularly the documentation above the "fn" member.  Note that
-	 * filemask = mask & ~dirmask from that documentation.
+	 * For filemask and dirmask, the ith bit corresponds to whether the
+	 * ith entry is a file (filemask) or a directory (dirmask).  Thus,
+	 * filemask & dirmask is always zero, and filemask | dirmask is at
+	 * most 7 but can be less when a path does not appear as either a
+	 * file or a directory on at least one side of history.
+	 *
+	 * Note that these masks are related to enum merge_side, as the ith
+	 * entry corresponds to side i.
+	 *
+	 * These values come from a traverse_trees() call; more info may be
+	 * found looking at tree-walk.h's struct traverse_info,
+	 * particularly the documentation above the "fn" member (note that
+	 * filemask = mask & ~dirmask from that documentation).
 	 */
 	unsigned filemask:3;
 	unsigned dirmask:3;
