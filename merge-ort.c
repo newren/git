@@ -2493,7 +2493,7 @@ static int process_renames(struct merge_options *opt,
 
 		VERIFY_CI(oldinfo);
 		VERIFY_CI(newinfo);
-		target_index = pair->score; /* from append_rename_pairs() */
+		target_index = pair->score; /* from collect_renames() */
 		assert(target_index == 1 || target_index == 2);
 		other_source_index = 3 - target_index;
 		old_sidemask = (1 << other_source_index); /* 2 or 4 */
@@ -2924,6 +2924,16 @@ static int collect_renames(struct merge_options *opt,
 		if (new_path)
 			apply_directory_rename_modifications(opt, p, new_path);
 
+		/*
+		 * p->score comes back from diffcore_rename_extended() with
+		 * the similarity of the renamed file.  The similarity is
+		 * was used to determine that the two files were related
+		 * and are a rename, which we have already used, but beyond
+		 * that we have no use for the similarity.  So p->score is
+		 * now irrelevant.  However, process_renames() will need to
+		 * know which side of the merge this rename was associated
+		 * with, so overwrite p->score with that value.
+		 */
 		p->score = side_index;
 		result->queue[result->nr++] = p;
 	}
