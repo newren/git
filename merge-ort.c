@@ -78,16 +78,6 @@ struct rename_info {
 	struct diff_queue_struct pairs[3];
 
 	/*
-	 * dir_rename_count: tracking where parts of a directory were renamed to
-	 *
-	 * When files in a directory are renamed, they may not all go to the
-	 * same location.  Each strmap here tracks:
-	 *      old_dir => {new_dir => int}
-	 * That is, dir_rename_count[side] is a strmap to a strintmap.
-	 */
-	struct strmap dir_rename_count[3];
-
-	/*
 	 * dirs_removed: directories removed on a given side of history.
 	 *
 	 * The keys of dirs_removed[side] are the directories that were removed
@@ -100,6 +90,24 @@ struct rename_info {
 	 *      rename for it or any parent directory
 	 */
 	struct strintmap dirs_removed[3];
+
+	/*
+	 * dir_rename_count: tracking where parts of a directory were renamed to
+	 *
+	 * When files in a directory are renamed, they may not all go to the
+	 * same location.  Each strmap here tracks:
+	 *      old_dir => {new_dir => int}
+	 * That is, dir_rename_count[side] is a strmap to a strintmap.
+	 */
+	struct strmap dir_rename_count[3];
+
+	/*
+	 * dir_renames: computed directory renames
+	 *
+	 * This is a map of old_dir => new_dir and is derived in part from
+	 * dir_rename_count.
+	 */
+	struct strmap dir_renames[3];
 
 	/*
 	 * relevant_sources: paths for which we need rename detection, and why
@@ -579,6 +587,7 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	for (i = MERGE_SIDE1; i <= MERGE_SIDE2; ++i) {
 		strintmap_func(&renames->relevant_sources[i]);
 		strintmap_func(&renames->dirs_removed[i]);
+		strmap_func(&renames->dir_renames[i], 0);
 		strintmap_func(&renames->possible_trivial_merges[i]);
 		strset_func(&renames->target_dirs[i]);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
@@ -2099,17 +2108,13 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 	return new_path;
 }
 
-static struct strmap *get_directory_renames(struct merge_options *opt,
-					    unsigned side,
-					    int *clean)
+static void get_provisional_directory_renames(struct merge_options *opt,
+					      unsigned side,
+					      int *clean)
 {
-	struct strmap *dir_renames;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 	struct rename_info *renames = &opt->priv->renames;
-
-	dir_renames = xmalloc(sizeof(*dir_renames));
-	strmap_init_with_options(dir_renames, NULL, 0);
 
 	/*
 	 * Collapse
@@ -2152,11 +2157,10 @@ static struct strmap *get_directory_renames(struct merge_options *opt,
 			       source_dir);
 			*clean &= 0;
 		} else {
-			strmap_put(dir_renames, source_dir, (void*)best);
+			strmap_put(&renames->dir_renames[side],
+				   source_dir, (void*)best);
 		}
 	}
-
-	return dir_renames;
 }
 
 static void remove_invalid_dir_renames(struct merge_options *opt,
@@ -2201,13 +2205,13 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 	string_list_clear(&removable, 0);
 }
 
-static void handle_directory_level_conflicts(struct merge_options *opt,
-					     struct strmap *side1_dir_renames,
-					     struct strmap *side2_dir_renames)
+static void handle_directory_level_conflicts(struct merge_options *opt)
 {
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 	struct string_list duplicated = STRING_LIST_INIT_NODUP;
+	struct strmap *side1_dir_renames = &opt->priv->renames.dir_renames[1];
+	struct strmap *side2_dir_renames = &opt->priv->renames.dir_renames[2];
 	int i;
 
 	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
@@ -3154,7 +3158,6 @@ static int detect_and_process_renames(struct merge_options *opt,
 				      struct tree *side2)
 {
 	struct diff_queue_struct combined;
-	struct strmap *dir_renames[3]; /* Entry 0 unused */
 	struct rename_info *renames = &opt->priv->renames;
 	int need_dir_renames, s, clean = 1;
 	unsigned detection_run = 0;
@@ -3183,40 +3186,26 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
-
 		for (s = MERGE_SIDE1; s <= MERGE_SIDE2; s++)
-			dir_renames[s] = get_directory_renames(opt, s, &clean);
-		handle_directory_level_conflicts(opt, dir_renames[1],
-						 dir_renames[2]);
-
-	} else {
-		for (s = MERGE_SIDE1; s <= MERGE_SIDE2; s++) {
-			dir_renames[s] = xmalloc(sizeof(*dir_renames[s]));
-			strmap_init_with_options(dir_renames[s], NULL, 0);
-		}
+			get_provisional_directory_renames(opt, s, &clean);
+		handle_directory_level_conflicts(opt);
 	}
 
 	ALLOC_GROW(combined.queue,
 		   renames->pairs[1].nr + renames->pairs[2].nr,
 		   combined.alloc);
 	clean &= collect_renames(opt, &combined, MERGE_SIDE1,
-				 dir_renames[2], dir_renames[1]);
+				 &renames->dir_renames[2],
+				 &renames->dir_renames[1]);
 	clean &= collect_renames(opt, &combined, MERGE_SIDE2,
-				 dir_renames[1], dir_renames[2]);
+				 &renames->dir_renames[1],
+				 &renames->dir_renames[2]);
 	QSORT(combined.queue, combined.nr, compare_pairs);
 	trace2_region_leave("merge", "directory renames", opt->repo);
 
 	trace2_region_enter("merge", "process renames", opt->repo);
 	clean &= process_renames(opt, &combined);
 	trace2_region_leave("merge", "process renames", opt->repo);
-
-	/*
-	 * Free memory for side[12]_dir_renames.
-	 */
-	for (s = MERGE_SIDE1; s <= MERGE_SIDE2; s++) {
-		strmap_clear(dir_renames[s], 0);
-		FREE_AND_NULL(dir_renames[s]);
-	}
 
 	goto cleanup; /* collect_renames() handles more_involved_cleanup stuff */
 
@@ -4460,6 +4449,8 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 						    -1, pool, 0);
 			strintmap_init_with_options(&renames->dirs_removed[i],
 						    0, pool, 0);
+			strmap_init_with_options(&renames->dir_renames[i],
+						 NULL, 0);
 			strintmap_init_with_options(&renames->possible_trivial_merges[i],
 						    0, pool, 0);
 			strset_init_with_options(&renames->target_dirs[i],
