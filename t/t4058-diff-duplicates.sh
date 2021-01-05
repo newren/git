@@ -145,8 +145,9 @@ test_expect_failure 'reset --hard does not segfault' '
 
 test_expect_failure 'git diff HEAD does not segfault' '
 	git checkout base &&
-	GIT_TEST_CHECK_CACHE_TREE=false git reset --hard &&
-	GIT_TEST_CHECK_CACHE_TREE=false test_might_fail git diff HEAD
+	GIT_TEST_CHECK_CACHE_TREE=false &&
+	git reset --hard &&
+	test_might_fail git diff HEAD
 '
 
 test_expect_failure 'can switch to another branch when status is empty' '
