@@ -989,9 +989,10 @@ static int too_many_rename_candidates(int num_destinations, int num_sources,
 	 *
 	 *    num_destinations * num_sources > rename_limit * rename_limit
 	 *
-	 * We use st_mult() to check overflow conditions; size_t isn't large
-	 * enough to hold the multiplication, then the system won't be able to
-	 * allocate enough memory for the matrix anyway.
+	 * We use st_mult() to check overflow conditions; in the
+	 * exceptional circumstance that size_t isn't large enough to hold
+	 * the multiplication, the system won't be able to allocate enough
+	 * memory for the matrix anyway.
 	 */
 	if (rename_limit <= 0)
 		rename_limit = 32767;
@@ -1058,22 +1059,28 @@ static int remove_unneeded_paths_from_src(int num_src,
 					  int detecting_copies,
 					  struct strintmap *interesting)
 {
+	int i, new_num_src;
+
 	/*
-	 * Note on reasons why we cull unneeded sources but not targets:
+	 * Note on reasons why we cull unneeded sources but not destinations:
 	 *   1) Pairings are stored in rename_dst (not rename_src), which we
-	 *      need to keep around.  So, we just can't cull rename_dst.
+	 *      need to keep around.  So, we just can't cull rename_dst even
+	 *      if we wanted to.  But doing so wouldn't help because...
 	 *   2) There is a matrix pairwise comparison that follows the
 	 *      "Performing inexact rename detection" progress message.
-	 *      Iterating over the targets is done in the outer loop, hence
-	 *      we only iterate over each of those once.  Therefore, we can
-	 *      simply exit the outer loop early if
-	 *          !strset_contains(relevant_targets, PATH)
-	 *      By contrast, the sources are iterated in the inner loop; we
-	 *      don't want to have to iterate over known-not-needed sources
-	 *      N times each since we already know we don't need them.  As
-	 *      such, we remove them here.
+	 *      Iterating over the destinations is done in the outer loop,
+	 *      hence we only iterate over each of those once and we can
+	 *      easily skip the outer loop early if the destination isn't
+	 *      relevant.  That's only one check per destination path to
+	 *      skip.
+	 *
+	 *      By contrast, the sources are iterated in the inner loop; if
+	 *      we check whether a source can be skipped, then we'll be
+	 *      checking it N separate times, once for each destination.
+	 *      We don't want to have to iterate over known-not-needed
+	 *      sources N times each, so avoid that by removing the sources
+	 *      from rename_src here.
 	 */
-	int i, new_num_src;
 
 	if (detecting_copies && !interesting)
 		return num_src; /* nothing to remove */
@@ -1084,8 +1091,8 @@ static int remove_unneeded_paths_from_src(int num_src,
 		struct diff_filespec *one = rename_src[i].p->one;
 
 		/*
-		 * renames are stored in rename_dst, so if a rename has
-		 * already been detected using this source, just remove it.
+		 * already been detected using this source, we can just
+		 * remove the source knowing rename_dst has its info.
 		 */
 		if (!detecting_copies && one->rename_used)
 			continue;
