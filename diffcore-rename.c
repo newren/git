@@ -287,7 +287,7 @@ static int find_identical_files(struct hashmap *srcs,
 	unsigned int hash = hash_filespec(options->repo, target);
 
 	/*
-	 * Find the best source match for specified destination.
+	 * Find the best source match for specified target.
 	 */
 	p = hashmap_get_entry_from_hash(srcs, hash, NULL,
 					struct file_similarity, entry);
@@ -377,7 +377,7 @@ struct dir_rename_info {
 	struct strmap dir_rename_guess;
 	struct strmap *dir_rename_count;
 	struct strintmap *relevant_source_dirs;
-	struct strset *relevant_target_dirs;
+	struct strset *relevant_destination_dirs;
 	unsigned setup;
 };
 
@@ -398,19 +398,19 @@ static void dirname_munge(char *filename)
 static const char *get_highest_rename_path(struct strintmap *counts)
 {
 	int highest_count = 0;
-	const char *highest_target_dir = NULL;
+	const char *highest_destination_dir = NULL;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 
 	strintmap_for_each_entry(counts, &iter, entry) {
-		const char *target_dir = entry->key;
+		const char *destination_dir = entry->key;
 		intptr_t count = (intptr_t)entry->value;
 		if (count > highest_count) {
 			highest_count = count;
-			highest_target_dir = target_dir;
+			highest_destination_dir = destination_dir;
 		}
 	}
-	return highest_target_dir;
+	return highest_destination_dir;
 }
 
 static char *SENTINEL_DIR = "/"; /* illegal directory */
@@ -421,9 +421,9 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	struct strmap_entry *entry;
 	int first = 0, second = 0, unknown = 0;
 	strintmap_for_each_entry(counts, &iter, entry) {
-		const char *target_dir = entry->key;
+		const char *destination_dir = entry->key;
 		intptr_t count = (intptr_t)entry->value;
-		if (!strcmp(target_dir, SENTINEL_DIR)) {
+		if (!strcmp(destination_dir, SENTINEL_DIR)) {
 			unknown = count;
 		} else if (count >= first) {
 			second = first;
@@ -480,8 +480,8 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 
 		/* Get new_dir, skip if its directory isn't relevant. */
 		dirname_munge(new_dir);
-		if (info->relevant_target_dirs &&
-		    !strset_contains(info->relevant_target_dirs, new_dir))
+		if (info->relevant_destination_dirs &&
+		    !strset_contains(info->relevant_destination_dirs, new_dir))
 			break;
 
 		/*
@@ -556,7 +556,7 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 
 static void initialize_dir_rename_info(struct dir_rename_info *info,
 				       struct strintmap *relevant_sources,
-				       struct strset *relevant_targets,
+				       struct strset *relevant_destinations,
 				       struct strintmap *dirs_removed,
 				       struct strmap *cached_pairs,
 				       struct strmap *dir_rename_count)
@@ -566,7 +566,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	int i;
 
 	info->setup = 0;
-	if (!dirs_removed && !relevant_sources && !relevant_targets)
+	if (!dirs_removed && !relevant_sources && !relevant_destinations)
 		return;
 	info->setup = 1;
 
@@ -578,14 +578,14 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	strintmap_init_with_options(&info->idx_map, -1, NULL, 0);
 	strmap_init_with_options(&info->dir_rename_guess, NULL, 0);
 
-	/* Setup info->relevant_target_dirs */
-	info->relevant_target_dirs = NULL;
-	if (relevant_targets) {
-		info->relevant_target_dirs = xmalloc(sizeof(struct strset));
-		strset_init(info->relevant_target_dirs);
-		strset_for_each_entry(relevant_targets, &iter, entry) {
+	/* Setup info->relevant_destination_dirs */
+	info->relevant_destination_dirs = NULL;
+	if (relevant_destinations) {
+		info->relevant_destination_dirs = xmalloc(sizeof(struct strset));
+		strset_init(info->relevant_destination_dirs);
+		strset_for_each_entry(relevant_destinations, &iter, entry) {
 			char *dirname = get_dirname(entry->key);
-			strset_add(info->relevant_target_dirs, dirname);
+			strset_add(info->relevant_destination_dirs, dirname);
 			free(dirname);
 		}
 	}
@@ -699,10 +699,10 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		FREE_AND_NULL(info->relevant_source_dirs);
 	}
 
-	/* relevant_target_dirs */
-	if (info->relevant_target_dirs) {
-		strset_clear(info->relevant_target_dirs);
-		FREE_AND_NULL(info->relevant_target_dirs);
+	/* relevant_destination_dirs */
+	if (info->relevant_destination_dirs) {
+		strset_clear(info->relevant_destination_dirs);
+		FREE_AND_NULL(info->relevant_destination_dirs);
 	}
 
 	if (!keep_dir_rename_count) {
@@ -771,13 +771,13 @@ static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 	 *       we can proceed.
 	 *   (3) If there are multiple places the directory could have been
 	 *       renamed to based on exact renames, ignore all but one of them.
-	 *       Just use the target with the most renames going to it.
+	 *       Just use the destination with the most renames going to it.
 	 *   (4) Check if applying that directory rename to the original file
-	 *       would result in a target filename that is in the potential
-	 *       rename set.  If so, return the index of the target file
+	 *       would result in a destination filename that is in the potential
+	 *       rename set.  If so, return the index of the destination file
 	 *       (the index within rename_dst).
 	 *   NOTE: The caller will compare the original file and returned
-	 *         target file for similarity, and if they are sufficiently
+	 *         destination file for similarity, and if they are sufficiently
 	 *         similar, will record the rename.
 	 */
 	char *old_dir, *new_dir, *new_path, *basename;
@@ -806,7 +806,7 @@ static int find_basename_matches(struct diff_options *options,
 				 int num_src,
 				 struct dir_rename_info *info,
 				 struct strintmap *relevant_sources,
-				 struct strset *relevant_targets,
+				 struct strset *relevant_destinations,
 				 struct strintmap *dirs_removed)
 {
 	/*
@@ -817,7 +817,7 @@ static int find_basename_matches(struct diff_options *options,
 	 *
 	 * Therefore we can bypass the normal exhaustive NxM matrix
 	 * comparison of similarities between all potential rename sources
-	 * and targets by instead using file basename as a hint, checking
+	 * and destinations by instead using file basename as a hint, checking
 	 * for similarity between files with the same basename, and if we
 	 * find a pair that are sufficiently similar, record the rename
 	 * pair and exclude those two from the NxM matrix.
@@ -917,12 +917,12 @@ static int find_basename_matches(struct diff_options *options,
 			one = rename_src[src_index].p->one;
 			two = rename_dst[dst_index].p->two;
 
-			/* If we don't care about the source/target, skip it */
+			/* Skip irrelevant sources & destinations */
 			if (relevant_sources &&
 			    !strintmap_contains(relevant_sources, one->path))
 				continue;
-			if (relevant_targets &&
-			    !strset_contains(relevant_targets, two->path))
+			if (relevant_destinations &&
+			    !strset_contains(relevant_destinations, two->path))
 				continue;
 
 			/* Estimate the similarity */
@@ -1234,7 +1234,7 @@ void diff_free_filepair_data(struct diff_filepair *p)
 void diffcore_rename_extended(struct diff_options *options,
 			      struct mem_pool *pool,
 			      struct strintmap *relevant_sources,
-			      struct strset *relevant_targets,
+			      struct strset *relevant_destinations,
 			      struct strintmap *dirs_removed,
 			      struct strmap *cached_pairs,
 			      struct strmap *dir_rename_count)
@@ -1348,7 +1348,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		trace2_region_enter("diff", "dir rename setup", options->repo);
 		initialize_dir_rename_info(&info, relevant_sources,
-					   relevant_targets, dirs_removed,
+					   relevant_destinations, dirs_removed,
 					   cached_pairs, dir_rename_count);
 		trace2_region_leave("diff", "dir rename setup", options->repo);
 
@@ -1357,7 +1357,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		rename_count += find_basename_matches(options, minimum_score,
 						      num_src, &info,
 						      relevant_sources,
-						      relevant_targets,
+						      relevant_destinations,
 						      dirs_removed);
 		trace2_region_leave("diff", "basename matches", options->repo);
 
@@ -1380,7 +1380,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	}
 
 	/*
-	 * Calculate how many rename targets are left
+	 * Calculate how many rename destinations are left
 	 */
 	num_destinations = (rename_dst_nr - rename_count);
 
@@ -1418,8 +1418,8 @@ void diffcore_rename_extended(struct diff_options *options,
 		if (rename_dst[i].is_rename)
 			continue; /* dealt with exact & basename match already */
 
-		if (relevant_targets &&
-		    !strset_contains(relevant_targets, two->path))
+		if (relevant_destinations &&
+		    !strset_contains(relevant_destinations, two->path))
 			continue;
 
 		m = &mx[dst_cnt * NUM_CANDIDATE_PER_DST];
