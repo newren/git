@@ -54,13 +54,6 @@ enum merge_side {
 	MERGE_SIDE2 = 2
 };
 
-enum relevance {
-	RELEVANT_NO_MORE = 0,
-	RELEVANT_CONTENT = 1,
-	RELEVANT_LOCATION = 2,
-	RELEVANT_BOTH = 3
-};
-
 static unsigned RESULT_INITIALIZED = 0x1abe11ed; /* unlikely accidental value */
 
 struct traversal_callback_data {
@@ -88,12 +81,7 @@ struct rename_info {
 	 *
 	 * The keys of dirs_removed[side] are the directories that were removed
 	 * on the given side of history.  The value of the strintmap for each
-	 * directory is one of the following:
-	 *   2: we need directory rename detection for this specific directory
-	 *   1: we're in a subdirectory of a directory that needs directory
-	 *      rename detection
-	 *   0: directory removed, but we know we don't need to detect a
-	 *      rename for it or any parent directory
+	 * directory is a value from enum dir_rename_relevance.
 	 */
 	struct strintmap dirs_removed[3];
 
@@ -118,9 +106,16 @@ struct rename_info {
 	/*
 	 * relevant_sources: paths for which we need rename detection, and why
 	 *
-	 * relevant_sources is a mapping from paths for which we need rename
-	 * detection to the reason we need the rename detection.  The reason
-	 * is stored as an enum relevance field.
+	 * relevant_sources is a set of deleted paths on each side of
+	 * history for which we need rename detection.  If a path is deleted
+	 * on one side of history, we need to detect if it is part of a
+	 * rename if either
+	 *    * the file is modified/deleted on the other side of history
+	 *    * we need to detect renames for an ancestor directory
+	 * If neither of those are true, we can skip rename detection for
+	 * that path.  The reason is stored as a value from enum
+	 * file_rename_relevance, as the reason can inform the algorithm in
+	 * diffcore_rename_extended().
 	 */
 	struct strintmap relevant_sources[3];
 
@@ -560,26 +555,6 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	opti->paths_to_free.strdup_strings = 0;
 #endif
 
-	if (!reinitialize) {
-		struct hashmap_iter iter;
-		struct strmap_entry *e;
-
-		/* Release and free each strbuf found in output */
-		strmap_for_each_entry(&opti->output, &iter, e) {
-			struct strbuf *sb = e->value;
-			strbuf_release(sb);
-			/*
-			 * While strictly speaking we don't need to free(sb)
-			 * here because we could pass free_values=1 when
-			 * calling strmap_clear() on opti->output, that would
-			 * require strmap_clear to do another
-			 * strmap_for_each_entry() loop, so we just free it
-			 * while we're iterating anyway.
-			 */
-			free(sb);
-		}
-		strmap_clear(&opti->output, 0);
-	}
 	if (opti->attr_index.cache_nr) /* true iff opt->renormalize */
 		discard_index(&opti->attr_index);
 
@@ -605,6 +580,27 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	}
 	renames->cached_pairs_valid_side = 0;
 	renames->dir_rename_mask = 0;
+
+	if (!reinitialize) {
+		struct hashmap_iter iter;
+		struct strmap_entry *e;
+
+		/* Release and free each strbuf found in output */
+		strmap_for_each_entry(&opti->output, &iter, e) {
+			struct strbuf *sb = e->value;
+			strbuf_release(sb);
+			/*
+			 * While strictly speaking we don't need to free(sb)
+			 * here because we could pass free_values=1 when
+			 * calling strmap_clear() on opti->output, that would
+			 * require strmap_clear to do another
+			 * strmap_for_each_entry() loop, so we just free it
+			 * while we're iterating anyway.
+			 */
+			free(sb);
+		}
+		strmap_clear(&opti->output, 0);
+	}
 
 #if USE_MEMORY_POOL
 	mem_pool_discard(&opti->pool, 0);
@@ -998,11 +994,14 @@ static void collect_rename_info(struct merge_options *opt,
 	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
 		/* absent_mask = 0x07 - dirmask; sides = absent_mask/2 */
 		unsigned sides = (0x07 - dirmask)/2;
-		unsigned drd = (renames->dir_rename_mask == 0x07);
+		unsigned relevance = (renames->dir_rename_mask == 0x07) ?
+					RELEVANT_FOR_ANCESTOR : NOT_RELEVANT;
 		if (sides & 1)
-			strintmap_set(&renames->dirs_removed[1], fullname, drd);
+			strintmap_set(&renames->dirs_removed[1], fullname,
+				      relevance);
 		if (sides & 2)
-			strintmap_set(&renames->dirs_removed[2], fullname, drd);
+			strintmap_set(&renames->dirs_removed[2], fullname,
+				      relevance);
 	}
 
 	if (renames->dir_rename_mask == 0x07 &&
@@ -1013,7 +1012,8 @@ static void collect_rename_info(struct merge_options *opt,
 		 * side = 3 - (filemask/2).
 		 */
 		unsigned side = 3 - (filemask >> 1);
-		strintmap_set(&renames->dirs_removed[side], dirname, 2);
+		strintmap_set(&renames->dirs_removed[side], dirname,
+			      RELEVANT_FOR_SELF);
 	}
 
 	if (filemask == 0 || filemask == 7)
@@ -2140,7 +2140,7 @@ static void get_provisional_directory_renames(struct merge_options *opt,
 				 "no destination getting a majority of the "
 				 "files."),
 			       source_dir);
-			*clean &= 0;
+			*clean = 0;
 		} else {
 			strmap_put(&renames->dir_renames[side],
 				   source_dir, (void*)best);
@@ -2185,7 +2185,7 @@ static void remove_invalid_dir_renames(struct merge_options *opt,
 		}
 	}
 
-	for (i=0; i<removable.nr; ++i)
+	for (i = 0; i < removable.nr; i++)
 		strmap_remove(side_dir_renames, removable.items[i].string, 0);
 	string_list_clear(&removable, 0);
 }
@@ -2195,8 +2195,9 @@ static void handle_directory_level_conflicts(struct merge_options *opt)
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 	struct string_list duplicated = STRING_LIST_INIT_NODUP;
-	struct strmap *side1_dir_renames = &opt->priv->renames.dir_renames[1];
-	struct strmap *side2_dir_renames = &opt->priv->renames.dir_renames[2];
+	struct rename_info *renames = &opt->priv->renames;
+	struct strmap *side1_dir_renames = &renames->dir_renames[MERGE_SIDE1];
+	struct strmap *side2_dir_renames = &renames->dir_renames[MERGE_SIDE2];
 	int i;
 
 	strmap_for_each_entry(side1_dir_renames, &iter, entry) {
@@ -2204,7 +2205,7 @@ static void handle_directory_level_conflicts(struct merge_options *opt)
 			string_list_append(&duplicated, entry->key);
 	}
 
-	for (i=0; i<duplicated.nr; ++i) {
+	for (i = 0; i < duplicated.nr; i++) {
 		strmap_remove(side1_dir_renames, duplicated.items[i].string, 0);
 		strmap_remove(side2_dir_renames, duplicated.items[i].string, 0);
 	}
@@ -3160,7 +3161,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 	detection_run |= detect_regular_renames(opt, MERGE_SIDE2);
 	if (renames->redo_after_renames && detection_run) {
 		trace2_region_leave("merge", "regular renames", opt->repo);
-		goto more_involved_cleanup;
+		goto cleanup;
 	}
 	use_cached_pairs(opt, &renames->cached_pairs[1], &renames->pairs[1]);
 	use_cached_pairs(opt, &renames->cached_pairs[2], &renames->pairs[2]);
@@ -3173,8 +3174,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	   opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_CONFLICT);
 
 	if (need_dir_renames) {
-		for (s = MERGE_SIDE1; s <= MERGE_SIDE2; s++)
-			get_provisional_directory_renames(opt, s, &clean);
+		get_provisional_directory_renames(opt, MERGE_SIDE1, &clean);
+		get_provisional_directory_renames(opt, MERGE_SIDE2, &clean);
 		handle_directory_level_conflicts(opt);
 	}
 
@@ -3194,9 +3195,9 @@ static int detect_and_process_renames(struct merge_options *opt,
 	clean &= process_renames(opt, &combined);
 	trace2_region_leave("merge", "process renames", opt->repo);
 
-	goto cleanup; /* collect_renames() handles more_involved_cleanup stuff */
+	goto simple_cleanup; /* collect_renames() handles some of cleanup */
 
- more_involved_cleanup:
+ cleanup:
 	/*
 	 * Free now unneeded filepairs, which would have been handled
 	 * in collect_renames() normally but we're about to skip that
@@ -3216,7 +3217,7 @@ static int detect_and_process_renames(struct merge_options *opt,
 #endif
 		}
 	}
- cleanup:
+ simple_cleanup:
 	/* Free memory for renames->pairs[] and combined */
 	for (s = MERGE_SIDE1; s <= MERGE_SIDE2; s++) {
 		free(renames->pairs[s].queue);
@@ -4364,6 +4365,10 @@ static struct commit_list *reverse_commit_list(struct commit_list *list)
 
 static void merge_start(struct merge_options *opt, struct merge_result *result)
 {
+	struct rename_info *renames;
+	int i;
+	struct mem_pool *pool = NULL;
+
 	/* Sanity checks on opt */
 	trace2_region_enter("merge", "sanity checks", opt->repo);
 	assert(opt->repo);
@@ -4414,66 +4419,70 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	/* Default to histogram diff.  Actually, just hardcode it...for now. */
 	opt->xdl_opts = DIFF_WITH_ALG(opt, HISTOGRAM_DIFF);
 
-	if (opt->priv) {
-		trace2_region_enter("merge", "reset_maps", opt->repo);
-		clear_or_reinit_internal_opts(opt->priv, 1);
-		trace2_region_leave("merge", "reset_maps", opt->repo);
-	} else {
-		struct rename_info *renames;
-		int i;
-		struct mem_pool *pool = NULL;
-
-		trace2_region_enter("merge", "allocate/init", opt->repo);
-		opt->priv = xcalloc(1, sizeof(*opt->priv));
-		renames = &opt->priv->renames;
-#if USE_MEMORY_POOL
-		pool = &opt->priv->pool;
-		mem_pool_init(pool, 0);
-#endif
-		for (i = MERGE_SIDE1; i <= MERGE_SIDE2; i++) {
-			strintmap_init_with_options(&renames->dirs_removed[i],
-						    0, pool, 0);
-			strmap_init_with_options(&renames->dir_rename_count[i],
-						 NULL, 1);
-			strmap_init_with_options(&renames->dir_renames[i],
-						 NULL, 0);
-			strintmap_init_with_options(&renames->relevant_sources[i],
-						    -1, pool, 0);
-			strintmap_init_with_options(&renames->possible_trivial_merges[i],
-						    0, pool, 0);
-			strset_init_with_options(&renames->target_dirs[i],
-						 pool, 1);
-			strmap_init_with_options(&renames->cached_pairs[i],
-						 NULL, 1);
-			strset_init_with_options(&renames->cached_irrelevant[i],
-						 NULL, 1);
-			strset_init_with_options(&renames->cached_target_names[i],
-						 NULL, 1);
-			renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
-		}
-
-
-		/*
-		 * Although we initialize opt->priv->paths with
-		 * strdup_strings=0, that's just to avoid making yet another
-		 * copy of an allocated string.  Putting the entry into paths
-		 * means we are taking ownership, so we will later free it.
-		 *
-		 * In contrast, conflicted just has a subset of keys from
-		 * paths, so we don't want to free those (it'd be a
-		 * duplicate free).
-		 */
-		strmap_init_with_options(&opt->priv->paths, pool, 0);
-		strmap_init_with_options(&opt->priv->conflicted, pool, 0);
-#if !USE_MEMORY_POOL
-		string_list_init(&opt->priv->paths_to_free, 0);
-#endif
-		strmap_init(&opt->priv->output);
-		trace2_region_leave("merge", "allocate/init", opt->repo);
-	}
-
+	/* Handle attr direction stuff for renormalization */
 	if (opt->renormalize)
 		git_attr_set_direction(GIT_ATTR_CHECKOUT);
+
+	/* Allocation/initialization */
+	trace2_region_enter("merge", "allocate/init", opt->repo);
+	if (opt->priv) {
+		clear_or_reinit_internal_opts(opt->priv, 1);
+		trace2_region_leave("merge", "allocate/init", opt->repo);
+		return;
+	}
+
+	opt->priv = xcalloc(1, sizeof(*opt->priv));
+	renames = &opt->priv->renames;
+#if USE_MEMORY_POOL
+	pool = &opt->priv->pool;
+	mem_pool_init(pool, 0);
+#endif
+	for (i = MERGE_SIDE1; i <= MERGE_SIDE2; i++) {
+		strintmap_init_with_options(&renames->dirs_removed[i],
+					    NOT_RELEVANT, pool, 0);
+		strmap_init_with_options(&renames->dir_rename_count[i],
+					 NULL, 1);
+		strmap_init_with_options(&renames->dir_renames[i],
+					 NULL, 0);
+		/*
+		 * relevant_sources uses -1 for the default, because we need
+		 * to be able to distinguish not-in-strintmap from valid
+		 * relevant_source values from enum file_rename_relevance.
+		 * In particular, possibly_cache_new_pair() expects a negative
+		 * value for not-found entries.
+		 */
+		strintmap_init_with_options(&renames->relevant_sources[i],
+					    -1 /* explicitly invalid */,
+					    pool, 0);
+		strintmap_init_with_options(&renames->possible_trivial_merges[i],
+					    0, pool, 0);
+		strset_init_with_options(&renames->target_dirs[i],
+					 pool, 1);
+		strmap_init_with_options(&renames->cached_pairs[i],
+					 NULL, 1);
+		strset_init_with_options(&renames->cached_irrelevant[i],
+					 NULL, 1);
+		strset_init_with_options(&renames->cached_target_names[i],
+					 NULL, 1);
+		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
+	}
+
+	/*
+	 * Although we initialize opt->priv->paths with strdup_strings=0,
+	 * that's just to avoid making yet another copy of an allocated
+	 * string.  Putting the entry into paths means we are taking
+	 * ownership, so we will later free it.
+	 *
+	 * In contrast, conflicted just has a subset of keys from paths, so
+	 * we don't want to free those (it'd be a duplicate free).
+	 */
+	strmap_init_with_options(&opt->priv->paths, pool, 0);
+	strmap_init_with_options(&opt->priv->conflicted, pool, 0);
+#if !USE_MEMORY_POOL
+	string_list_init(&opt->priv->paths_to_free, 0);
+#endif
+	strmap_init(&opt->priv->output);
+	trace2_region_leave("merge", "allocate/init", opt->repo);
 }
 
 static void merge_check_renames_reusable(struct merge_options *opt,

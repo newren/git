@@ -287,7 +287,7 @@ static int find_identical_files(struct hashmap *srcs,
 	unsigned int hash = hash_filespec(options->repo, target);
 
 	/*
-	 * Find the best source match for specified target.
+	 * Find the best source match for specified destination.
 	 */
 	p = hashmap_get_entry_from_hash(srcs, hash, NULL,
 					struct file_similarity, entry);
@@ -413,7 +413,7 @@ static const char *get_highest_rename_path(struct strintmap *counts)
 	return highest_destination_dir;
 }
 
-static char *SENTINEL_DIR = "/"; /* illegal directory */
+static char *UNKNOWN_DIR = "/";  /* placeholder -- short, illegal directory */
 
 static int dir_rename_already_determinable(struct strintmap *counts)
 {
@@ -423,7 +423,7 @@ static int dir_rename_already_determinable(struct strintmap *counts)
 	strintmap_for_each_entry(counts, &iter, entry) {
 		const char *destination_dir = entry->key;
 		intptr_t count = (intptr_t)entry->value;
-		if (!strcmp(destination_dir, SENTINEL_DIR)) {
+		if (!strcmp(destination_dir, UNKNOWN_DIR)) {
 			unknown = count;
 		} else if (count >= first) {
 			second = first;
@@ -467,10 +467,23 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 	int first_time_in_loop = 1;
 
 	if (!info->setup)
+		/*
+		 * info->setup is 0 here in two cases: either break
+		 * detection or copy detection is active so that we never
+		 * called initialize_dir_rename_info() (and in such cases
+		 * we don't care about either directory renames or the fast
+		 * find_basename_matches).  Inexact rename detection also
+		 * calls update_dir_rename_counts(), but in these two cases
+		 * info->dir_rename_counts will not have been properly
+		 * initialized.  Since we don't care about
+		 * dir_rename_counts (its purpose is to help with directory
+		 * renames and fast find_basename_matches()), we can just
+		 * exit early.
+		 */
 		return;
 
 	while (1) {
-		int drd_flag = 0;
+		int drd_flag = NOT_RELEVANT;
 
 		/* Get old_dir, skip if its directory isn't relevant. */
 		dirname_munge(old_dir);
@@ -525,24 +538,20 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 
 		/*
 		 * When dirs_removed is non-NULL, the value stored for any
-		 * given directory is the greater of:
-		 *   2: when we need directory rename detection for that
-		 *      specific directory
-		 *   1: when we're in a subdirectory of a directory that
-		 *      needs directory rename detection
-		 * We thus only need to track counters if the value is 2,
-		 * as far as directory rename detection is concerned, though
-		 * we also record it for first_time_in_loop because
-		 * find_basename_matches() can use that as a hint to find
-		 * a good pairing.
+		 * given directory comes from dir_rename_relevance.  We
+		 * thus only need to track counters if the value is
+		 * RELEVANT_FOR_SELF, as far as directory rename detection
+		 * is concerned, though we also record it for
+		 * first_time_in_loop because find_basename_matches() can
+		 * use that as a hint to find a good pairing.
 		 */
 		if (dirs_removed)
 			drd_flag = strintmap_get(dirs_removed, old_dir);
-		if (drd_flag == 2 || first_time_in_loop)
+		if (drd_flag == RELEVANT_FOR_SELF || first_time_in_loop)
 			increment_count(info, old_dir, new_dir);
 
 		first_time_in_loop = 0;
-		if (drd_flag == 0)
+		if (drd_flag == NOT_RELEVANT)
 			break;
 		/* If we hit toplevel directory ("") for old or new dir, quit */
 		if (!*old_dir || !*new_dir)
@@ -597,7 +606,7 @@ static void initialize_dir_rename_info(struct dir_rename_info *info,
 	} else {
 		info->relevant_source_dirs = xmalloc(sizeof(struct strintmap));
 		strintmap_init(info->relevant_source_dirs, 0 /* unused */);
-		strset_for_each_entry(relevant_sources, &iter, entry) {
+		strintmap_for_each_entry(relevant_sources, &iter, entry) {
 			char *dirname = get_dirname(entry->key);
 			if (!dirs_removed ||
 			    strintmap_contains(dirs_removed, dirname))
@@ -714,7 +723,7 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 		 * Although dir_rename_count was passed in
 		 * diffcore_rename_extended() and we want to keep it around and
 		 * return it to that caller, we first want to remove any counts
-		 * in the maps associated with SENTINEL_DIR entries and any
+		 * in the maps associated with UNKNOWN_DIR entries and any
 		 * data associated with directories that weren't renamed.
 		 */
 		struct string_list to_remove = STRING_LIST_INIT_NODUP;
@@ -730,8 +739,8 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 				continue;
 			}
 
-			if (strintmap_contains(counts, SENTINEL_DIR))
-				strintmap_remove(counts, SENTINEL_DIR);
+			if (strintmap_contains(counts, UNKNOWN_DIR))
+				strintmap_remove(counts, UNKNOWN_DIR);
 		}
 		for (i=0; i<to_remove.nr; ++i)
 			strmap_remove(info->dir_rename_count,
@@ -1055,13 +1064,6 @@ static int find_renames(struct diff_score *mx,
 	return count;
 }
 
-enum relevance {
-	RELEVANT_NO_MORE = 0,
-	RELEVANT_CONTENT = 1,
-	RELEVANT_LOCATION = 2,
-	RELEVANT_BOTH = 3
-};
-
 static int remove_unneeded_paths_from_src(int num_src,
 					  int detecting_copies,
 					  struct strintmap *interesting)
@@ -1147,7 +1149,7 @@ static int handle_early_known_dir_renames(int num_src,
 		       0 != strintmap_get(dirs_removed, old_dir)) {
 			char *freeme = old_dir;
 
-			increment_count(info, old_dir, SENTINEL_DIR);
+			increment_count(info, old_dir, UNKNOWN_DIR);
 			old_dir = get_dirname(old_dir);
 
 			/* Free resources we don't need anymore */
@@ -1166,9 +1168,11 @@ static int handle_early_known_dir_renames(int num_src,
 		/* entry->key is source_dir */
 		struct strintmap *counts = entry->value;
 
-		if (strintmap_get(dirs_removed, entry->key) == 2 &&
+		if (strintmap_get(dirs_removed, entry->key) ==
+		    RELEVANT_FOR_SELF &&
 		    dir_rename_already_determinable(counts)) {
-			strintmap_set(dirs_removed, entry->key, 1);
+			strintmap_set(dirs_removed, entry->key,
+				      RELEVANT_FOR_ANCESTOR);
 		}
 	}
 
@@ -1193,15 +1197,15 @@ static int handle_early_known_dir_renames(int num_src,
 				int res = strintmap_get(dirs_removed, dir);
 
 				/* Quit if not found or irrelevant */
-				if (res == 0)
+				if (res == NOT_RELEVANT)
 					break;
-				/* If found and value 2, can't remove */
-				if (res == 2) {
+				/* If RELEVANT_FOR_SELF, can't remove */
+				if (res == RELEVANT_FOR_SELF) {
 					removable = 0;
 					break;
 				}
-				/* Else res=1; continue searching upwards */
-				assert(res == 1);
+				/* Else continue searching upwards */
+				assert(res == RELEVANT_FOR_ANCESTOR);
 				dir = get_dirname(dir);
 				free(freeme);
 			}
@@ -1355,8 +1359,9 @@ void diffcore_rename_extended(struct diff_options *options,
 		 *   - remove ones involved in renames (found via exact match)
 		 */
 		trace2_region_enter("diff", "cull exact", options->repo);
-		num_sources = remove_unneeded_paths_from_src(num_sources, want_copies,
-							 NULL);
+		num_sources = remove_unneeded_paths_from_src(num_sources,
+							     want_copies,
+							     NULL);
 		trace2_region_leave("diff", "cull exact", options->repo);
 
 		/* Preparation for basename-driven matching. */
