@@ -2148,48 +2148,6 @@ static void get_provisional_directory_renames(struct merge_options *opt,
 	}
 }
 
-static void remove_invalid_dir_renames(struct merge_options *opt,
-				       struct strmap *side_dir_renames,
-				       unsigned side_mask)
-{
-	struct hashmap_iter iter;
-	struct strmap_entry *entry;
-	struct string_list removable = STRING_LIST_INIT_NODUP;
-	int i;
-
-	strmap_for_each_entry(side_dir_renames, &iter, entry) {
-		struct merged_info *mi;
-		struct conflict_info *ci;
-
-		mi = strmap_get(&opt->priv->paths, entry->key);
-		INITIALIZE_CI(ci, mi);
-		if (!mi ||
-		    mi->clean ||
-		    (ci->dirmask & side_mask)) {
-			/*
-			 * !mi: This rename came from a directory that was
-			 * unchanged on the other side of history, and NULL on
-			 * our side.  No directory rename detection needed.
-			 *
-			 * mi->clean: Due to redo_after_renames, on the second
-			 * run, collect_merge_info_callback was able to
-			 * cleanly resolve the trivial directory merge without
-			 * recursing.  As such, we know we don't need
-			 * directory rename detection for it.
-			 *
-			 * ci->dirmask & side_mask: this directory "rename"
-			 * isn't valid because the source directory name still
-			 * exists on the destination side.
-			 */
-			string_list_append(&removable, entry->key);
-		}
-	}
-
-	for (i = 0; i < removable.nr; i++)
-		strmap_remove(side_dir_renames, removable.items[i].string, 0);
-	string_list_clear(&removable, 0);
-}
-
 static void handle_directory_level_conflicts(struct merge_options *opt)
 {
 	struct hashmap_iter iter;
@@ -2210,9 +2168,6 @@ static void handle_directory_level_conflicts(struct merge_options *opt)
 		strmap_remove(side2_dir_renames, duplicated.items[i].string, 0);
 	}
 	string_list_clear(&duplicated, 0);
-
-	remove_invalid_dir_renames(opt, side1_dir_renames, (1 << MERGE_SIDE1));
-	remove_invalid_dir_renames(opt, side2_dir_renames, (1 << MERGE_SIDE2));
 }
 
 static struct strmap_entry *check_dir_renamed(const char *path,
