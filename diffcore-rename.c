@@ -409,6 +409,26 @@ static const char *get_highest_rename_path(struct strintmap *counts)
 
 static char *UNKNOWN_DIR = "/";  /* placeholder -- short, illegal directory */
 
+static int dir_rename_already_determinable(struct strintmap *counts)
+{
+	struct hashmap_iter iter;
+	struct strmap_entry *entry;
+	int first = 0, second = 0, unknown = 0;
+	strintmap_for_each_entry(counts, &iter, entry) {
+		const char *destination_dir = entry->key;
+		intptr_t count = (intptr_t)entry->value;
+		if (!strcmp(destination_dir, UNKNOWN_DIR)) {
+			unknown = count;
+		} else if (count >= first) {
+			second = first;
+			first = count;
+		} else if (count >= second) {
+			second = count;
+		}
+	}
+	return first > second + unknown;
+}
+
 static void increment_count(struct dir_rename_info *info,
 			    char *old_dir,
 			    char *new_dir)
@@ -1103,6 +1123,8 @@ static void handle_early_known_dir_renames(struct dir_rename_info *info,
 					   struct strintmap *dirs_removed)
 {
 	int i;
+	struct hashmap_iter iter;
+	struct strmap_entry *entry;
 
 	if (!dirs_removed || !relevant_sources)
 		return; /* nothing to cull */
@@ -1137,6 +1159,18 @@ static void handle_early_known_dir_renames(struct dir_rename_info *info,
 		 * to be freed.
 		 */
 		free(old_dir);
+	}
+
+	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
+		/* entry->key is source_dir */
+		struct strintmap *counts = entry->value;
+
+		if (strintmap_get(dirs_removed, entry->key) ==
+		    RELEVANT_FOR_SELF &&
+		    dir_rename_already_determinable(counts)) {
+			strintmap_set(dirs_removed, entry->key,
+				      RELEVANT_FOR_ANCESTOR);
+		}
 	}
 }
 
