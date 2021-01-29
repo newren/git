@@ -1552,6 +1552,9 @@ static void get_provisional_directory_renames(struct merge_options *opt,
 			}
 		}
 
+		if (max == 0)
+			continue;
+
 		if (bad_max == max) {
 			path_msg(opt, source_dir, 0,
 			       _("CONFLICT (directory rename split): "

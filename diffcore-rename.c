@@ -407,6 +407,8 @@ static const char *get_highest_rename_path(struct strintmap *counts)
 	return highest_destination_dir;
 }
 
+static char *UNKNOWN_DIR = "/";  /* placeholder -- short, illegal directory */
+
 static void increment_count(struct dir_rename_info *info,
 			    char *old_dir,
 			    char *new_dir)
@@ -660,7 +662,8 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 	/*
 	 * Although dir_rename_count was passed in
 	 * diffcore_rename_extended() and we want to keep it around and
-	 * return it to that caller, we first want to remove any data
+	 * return it to that caller, we first want to remove any counts in
+	 * the maps associated with UNKNOWN_DIR entries and any data
 	 * associated with directories that weren't renamed.
 	 */
 	strmap_for_each_entry(info->dir_rename_count, &iter, entry) {
@@ -672,6 +675,9 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 			strintmap_clear(counts);
 			continue;
 		}
+
+		if (strintmap_contains(counts, UNKNOWN_DIR))
+			strintmap_remove(counts, UNKNOWN_DIR);
 	}
 	for (i = 0; i < to_remove.nr; ++i)
 		strmap_remove(info->dir_rename_count,
@@ -1072,6 +1078,49 @@ static void remove_unneeded_paths_from_src(int detecting_copies,
 	}
 
 	rename_src_nr = new_num_src;
+}
+
+MAYBE_UNUSED
+static void handle_early_known_dir_renames(struct dir_rename_info *info,
+					   struct strintmap *relevant_sources,
+					   struct strintmap *dirs_removed)
+{
+	int i;
+
+	if (!dirs_removed || !relevant_sources)
+		return; /* nothing to cull */
+	if (break_idx)
+		return; /* culling incompatbile with break detection */
+
+	for (i = 0; i < rename_src_nr; i++) {
+		char *old_dir;
+		struct diff_filespec *one = rename_src[i].p->one;
+
+		/*
+		 * sources that are part of a rename will have already been
+		 * removed by a prior call to remove_unneeded_paths_from_src()
+		 */
+		assert(!one->rename_used);
+
+		old_dir = get_dirname(one->path);
+		while (*old_dir != '\0' &&
+		       NOT_RELEVANT != strintmap_get(dirs_removed, old_dir)) {
+			char *freeme = old_dir;
+
+			increment_count(info, old_dir, UNKNOWN_DIR);
+			old_dir = get_dirname(old_dir);
+
+			/* Free resources we don't need anymore */
+			free(freeme);
+		}
+		/*
+		 * old_dir and new_dir free'd in increment_count, but
+		 * get_dirname() gives us a new pointer we need to free for
+		 * old_dir.  Also, if the loop runs 0 times we need old_dir
+		 * to be freed.
+		 */
+		free(old_dir);
+	}
 }
 
 void diffcore_rename_extended(struct diff_options *options,
