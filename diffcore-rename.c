@@ -1117,7 +1117,6 @@ static void remove_unneeded_paths_from_src(int detecting_copies,
 	rename_src_nr = new_num_src;
 }
 
-MAYBE_UNUSED
 static void handle_early_known_dir_renames(struct dir_rename_info *info,
 					   struct strintmap *relevant_sources,
 					   struct strintmap *dirs_removed)
@@ -1358,9 +1357,15 @@ void diffcore_rename_extended(struct diff_options *options,
 		 * Cull sources, again:
 		 *   - remove ones involved in renames (found via basenames)
 		 *   - remove ones not found in relevant_sources
+		 * and
+		 *   - remove ones in relevant_sources which are needed only
+		 *     for directory renames, if no ancestory directory actually
+		 *     needs to know any more individual path renames under them
 		 */
 		trace2_region_enter("diff", "cull basename", options->repo);
 		remove_unneeded_paths_from_src(want_copies, relevant_sources);
+		handle_early_known_dir_renames(&info, relevant_sources,
+					       dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
 	}
 
