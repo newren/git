@@ -167,6 +167,12 @@ enum file_rename_relevance {
 	RELEVANT_CONTENT = 1,
 	RELEVANT_LOCATION = 2
 };
+/* dir_rename_relevance: the reason we want rename information for a dir */
+enum dir_rename_relevance {
+	NOT_RELEVANT = 0,
+	RELEVANT_FOR_ANCESTOR = 1,
+	RELEVANT_FOR_SELF = 2
+};
 void partial_clear_dir_rename_count(struct strmap *dir_rename_count);
 
 void diffcore_break(struct repository *, int);
