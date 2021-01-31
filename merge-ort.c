@@ -2920,13 +2920,15 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 	} else if (p->status == 'R') {
 		if (!new_path)
 			new_path = p->two->path;
+		new_path = xstrdup(new_path);
 		old_value = strmap_put(&renames->cached_pairs[side],
-				       p->one->path, xstrdup(new_path));
+				       p->one->path, new_path);
 		strset_add(&renames->cached_target_names[side], new_path);
 		free(old_value);
 	} else if (p->status == 'A' && new_path) {
+		new_path = xstrdup(new_path);
 		old_value = strmap_put(&renames->cached_pairs[side],
-				       p->two->path, xstrdup(new_path));
+				       p->two->path, new_path);
 		strset_add(&renames->cached_target_names[side], new_path);
 		assert(!old_value);
 	}
@@ -4444,7 +4446,7 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 		strset_init_with_options(&renames->cached_irrelevant[i],
 					 NULL, 1);
 		strset_init_with_options(&renames->cached_target_names[i],
-					 NULL, 1);
+					 NULL, 0);
 		renames->trivial_merges_okay[i] = 1; /* 1 == maybe */
 	}
 
