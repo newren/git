@@ -3054,6 +3054,7 @@ static int detect_regular_renames(struct merge_options *opt,
 	diffcore_rename_extended(&diff_opts,
 				 opt->priv->pool,
 				 &renames->relevant_sources[side_index],
+				 NULL,
 				 &renames->dirs_removed[side_index],
 				 &renames->dir_rename_count[side_index],
 				 &renames->cached_pairs[side_index]);
