@@ -10,6 +10,7 @@ struct diff_options;
 struct repository;
 struct strintmap;
 struct strmap;
+struct strset;
 struct userdiff_driver;
 
 /* This header file is internal between diff.c and its diff transformers
@@ -179,6 +180,7 @@ void diffcore_break(struct repository *, int);
 void diffcore_rename(struct diff_options *);
 void diffcore_rename_extended(struct diff_options *options,
 			      struct strintmap *relevant_sources,
+			      struct strset *relevant_destinations,
 			      struct strintmap *dirs_removed,
 			      struct strmap *dir_rename_count,
 			      struct strmap *cached_pairs);
