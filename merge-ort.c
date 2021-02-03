@@ -104,7 +104,7 @@ struct rename_info {
 	struct strmap dir_renames[3];
 
 	/*
-	 * relevant_sources: paths for which we need rename detection, and why
+	 * relevant_sources: deleted paths wanted in rename detection, and why
 	 *
 	 * relevant_sources is a set of deleted paths on each side of
 	 * history for which we need rename detection.  If a path is deleted
@@ -214,15 +214,23 @@ struct rename_info {
 	int cached_pairs_valid_side;
 
 	/*
-	 * cached_pairs: Caching of rename pairs.
+	 * cached_pairs: Caching of renames and deletions.
 	 *
-	 * See the description for merge_trees.  These are mappings from
-	 * rename sources (never including directories) to either rename
-	 * destinations or NULL.  NULL only occurs for path deletions; we
-	 * cache those too so that rename detection knows they aren't
-	 * paired with an add and doesn't look for a possible match.
+	 * These are mappings recording renames and deletions of individual
+	 * files (not directories).  They are thus a map from an old
+	 * filename to either NULL (for deletions) or a new filename (for
+	 * renames).
 	 */
 	struct strmap cached_pairs[3];
+
+	/*
+	 * cached_target_names: just the destinations from cached_pairs
+	 *
+	 * We sometimes want a fast lookup to determine if a given filename
+	 * is one of the destinations in cached_pairs.  cached_target_names
+	 * is thus duplicative information, but it provides a fast lookup.
+	 */
+	struct strset cached_target_names[3];
 
 	/*
 	 * cached_irrelevant: Caching of rename_sources that aren't relevant.
@@ -235,15 +243,6 @@ struct rename_info {
 	 * paths too, but separately from cached_pairs.
 	 */
 	struct strset cached_irrelevant[3];
-
-	/*
-	 * cached_target_names: just the destinations from cached_pairs
-	 *
-	 * We sometimes want a fast lookup to determine if a given filename
-	 * is one of the destinations in cached_pairs.  cached_target_names
-	 * is thus duplicative information, but it provides a fast lookup.
-	 */
-	struct strset cached_target_names[3];
 
 	/*
 	 * redo_after_renames: optimization flag for "restarting" the merge
@@ -1155,43 +1154,35 @@ static int collect_merge_info_callback(int n,
 	if (side1_matches_mbase && side2_matches_mbase) {
 		/* mbase, side1, & side2 all match; use mbase as resolution */
 		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
-				names, names+0, mbase_null, 0,
+				names, names+0, mbase_null, 0 /* df_conflict */,
+				filemask, dirmask, 1 /* resolved */);
+		return mask;
+	}
+
+	/*
+	 * If the sides match, and all three paths are present and are
+	 * files, then we can take either as the resolution.  We can't do
+	 * this with trees, because there may be rename sources from the
+	 * merge_base.
+	 */
+	if (sides_match && filemask == 0x07) {
+		/* use side1 (== side2) version as resolution */
+		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
+				names, names+1, side1_null, 0,
 				filemask, dirmask, 1);
 		return mask;
 	}
 
 	/*
-	 * If all three paths are files, then there will be no renames
-	 * either for or under this path.  If additionally the sides match,
-	 * we can take either as the resolution.
-	 */
-	if (filemask == 7 && sides_match) {
-		/* use side1 (== side2) version as resolution */
-		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
-				names, names+1, 0, 0, filemask, dirmask, 1);
-		return mask;
-	}
-
-	/*
-	 * Sometimes we can tell that a source path need not be included in
-	 * rename detection (because it matches one of the two sides; see
-	 * more below).  However, we call collect_rename_info() even in that
-	 * case, because exact renames are cheap and would let us remove both
-	 * a source and destination path.  We'll cull the unneeded sources
-	 * later.
-	 */
-	collect_rename_info(opt, names, dirname, fullpath,
-			    filemask, dirmask, match_mask);
-
-	/*
-	 * If side1 matches mbase and this is a file, we can early resolve.
-	 * We cannot necessarily do so for trees, because trees may have
-	 * rename targets on side2.
+	 * If side1 matches mbase and all three paths are present and are
+	 * files, then we can use side2 as the resolution.  We cannot
+	 * necessarily do so this for trees, because there may be rename
+	 * destinations within side2.
 	 */
 	if (side1_matches_mbase && filemask == 0x07) {
 		/* use side2 version as resolution */
-		setup_path_info(opt, &pi, dirname, info->pathlen,
-				fullpath, names, names+2, side2_null, 0,
+		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
+				names, names+2, side2_null, 0,
 				filemask, dirmask, 1);
 		return mask;
 	}
@@ -1199,11 +1190,25 @@ static int collect_merge_info_callback(int n,
 	/* Similar to above but swapping sides 1 and 2 */
 	if (side2_matches_mbase && filemask == 0x07) {
 		/* use side1 version as resolution */
-		setup_path_info(opt, &pi, dirname, info->pathlen,
-				fullpath, names, names+1, side1_null, 0,
+		setup_path_info(opt, &pi, dirname, info->pathlen, fullpath,
+				names, names+1, side1_null, 0,
 				filemask, dirmask, 1);
 		return mask;
 	}
+
+	/*
+	 * Sometimes we can tell that a source path need not be included in
+	 * rename detection -- namely, whenever either
+	 *    side1_matches_mbase && side2_null
+	 * or
+	 *    side2_matches_mbase && side1_null
+	 * However, we call collect_rename_info() even in those cases,
+	 * because exact renames are cheap and would let us remove both a
+	 * source and destination path.  We'll cull the unneeded sources
+	 * later.
+	 */
+	collect_rename_info(opt, names, dirname, fullpath,
+			    filemask, dirmask, match_mask);
 
 	/*
 	 * None of the special cases above matched, so we have a
@@ -1242,7 +1247,8 @@ static int collect_merge_info_callback(int n,
 			ci->match_mask = (7 - dirmask);
 			side = dirmask / 2;
 		}
-		if (renames->dir_rename_mask != 0x07 && side &&
+		if (renames->dir_rename_mask != 0x07 &&
+		    (side != MERGE_BASE) &&
 		    renames->trivial_merges_okay[side] &&
 		    !strset_contains(&renames->target_dirs[side], pi.string)) {
 			strintmap_set(&renames->possible_trivial_merges[side],
@@ -1474,26 +1480,32 @@ static int handle_deferred_entries(struct merge_options *opt,
 		 * to redo collect_merge_info after we've cached the
 		 * regular renames is.  Basically, collect_merge_info(),
 		 * detect_regular_renames(), and process_entries() are
-		 * similar costs and all big tent poles.  Caching the result
-		 * of detect_regular_renames() means that redoing that one
-		 * function will cost us virtually 0 extra, so it depends on
-		 * the other two functions, which are both O(N) cost in the
-		 * number of paths.  Thus, it makes sense that if we can
-		 * cut the number of paths in half, then redoing
+		 * similar costs and all big tent poles.  Caching the
+		 * result of detect_regular_renames() means that redoing
+		 * that one function will cost us virtually 0 extra, so it
+		 * depends on the other two functions, which are both O(N)
+		 * cost in the number of paths.  Thus, it makes sense that
+		 * if we can cut the number of paths in half, then redoing
 		 * collect_merge_info() at half cost in order to get
-		 * process_entries() at half cost should be about equal cost.
-		 * If we can cut by more than half, then we would win.
-		 * However, even when we have renames cached, we still have
-		 * to traverse down to the individual renames, so the factor
-		 * of two needs a little fudge.
+		 * process_entries() at half cost should be about equal
+		 * cost.  If we can cut by more than half, then we would
+		 * win.  The fact that process_entries() is about 10%-20%
+		 * more expensive than collect_merge_info() suggests we
+		 * could make the factor be less than two.  The fact that
+		 * even when we have renames cached, we still have to
+		 * traverse down to the individual (relevant) renames,
+		 * which suggests we should perhaps use a bigger factor.
 		 *
-		 * Error on the side of a bigger fudge, just because it's
-		 * all an optimization; the code works even if we get
-		 * wanted_factor wrong.  For the linux kernel testcases I
-		 * was looking at, I saw factors of 50 to 250.  For such
-		 * cases, this optimization provides *very* nice speedups.
+		 * The exact number isn't critical, since the code will
+		 * work even if we get the factor wrong -- it just might be
+		 * slightly slower if we're a bit off.  For now, just error
+		 * on the side of a bigger fudge.  For the linux kernel
+		 * testcases I was looking at with massive renames, the
+		 * ratio came in around 50 to 250, which clearly would
+		 * trigger this optimization and provided some *very* nice
+		 * speedups.
 		 */
-		int wanted_factor = 10;
+		int wanted_factor = 3;
 
 		/* We should only redo collect_merge_info one time */
 		assert(renames->redo_after_renames == 0);
@@ -3240,7 +3252,7 @@ static int sort_dirs_next_to_their_children(const void *a, const void *b)
 	 * another character, we compare '/' to it.
 	 *
 	 * The reason to not use df_name_compare directly was that it was
-	 * just too bloody expensive, so I had to reimplement it.
+	 * just too expensive, so I had to reimplement it.
 	 */
 	const char *one = ((struct string_list_item *)a)->string;
 	const char *two = ((struct string_list_item *)b)->string;
