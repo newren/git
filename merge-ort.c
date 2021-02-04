@@ -324,7 +324,6 @@ struct merge_options_internal {
 	 */
 	struct strmap conflicted;
 
-#if USE_MEMORY_POOL
 	/*
 	 * pool: memory pool for fast allocation/deallocation
 	 *
@@ -333,8 +332,9 @@ struct merge_options_internal {
 	 * freed together too.  Using a memory pool for these provides a
 	 * nice speedup.
 	 */
-	struct mem_pool pool;
-#else
+	struct mem_pool internal_pool;
+	struct mem_pool *pool; /* NULL, or pointer to internal_pool */
+
 	/*
 	 * paths_to_free: additional list of strings to free
 	 *
@@ -344,7 +344,6 @@ struct merge_options_internal {
 	 * referencing these paths.
 	 */
 	struct string_list paths_to_free;
-#endif
 
 	/*
 	 * output: special messages and conflict notices for various paths
@@ -523,19 +522,19 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	void (*strset_func)(struct strset *) =
 		reinitialize ? strset_partial_clear : strset_clear;
 
-#if USE_MEMORY_POOL
-	strmap_func(&opti->paths, 0);
-#else
-	/*
-	 * We marked opti->paths with strdup_strings = 0, so that we
-	 * wouldn't have to make another copy of the fullpath created by
-	 * make_traverse_path from setup_path_info().  But, now that we've
-	 * used it and have no other references to these strings, it is time
-	 * to deallocate them.
-	 */
-	free_strmap_strings(&opti->paths);
-	strmap_func(&opti->paths, 1);
-#endif
+	if (opti->pool)
+		strmap_func(&opti->paths, 0);
+	else {
+		/*
+		 * We marked opti->paths with strdup_strings = 0, so that
+		 * we wouldn't have to make another copy of the fullpath
+		 * created by make_traverse_path from setup_path_info().
+		 * But, now that we've used it and have no other references
+		 * to these strings, it is time to deallocate them.
+		 */
+		free_strmap_strings(&opti->paths);
+		strmap_func(&opti->paths, 1);
+	}
 
 	/*
 	 * All keys and values in opti->conflicted are a subset of those in
@@ -544,18 +543,19 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	 */
 	strmap_func(&opti->conflicted, 0);
 
-#if !USE_MEMORY_POOL
-	/*
-	 * opti->paths_to_free is similar to opti->paths; we created it with
-	 * strdup_strings = 0 to avoid making _another_ copy of the fullpath
-	 * but now that we've used it and have no other references to these
-	 * strings, it is time to deallocate them.  We do so by temporarily
-	 * setting strdup_strings to 1.
-	 */
-	opti->paths_to_free.strdup_strings = 1;
-	string_list_clear(&opti->paths_to_free, 0);
-	opti->paths_to_free.strdup_strings = 0;
-#endif
+	if (!opti->pool) {
+		/*
+		 * opti->paths_to_free is similar to opti->paths; we
+		 * created it with strdup_strings = 0 to avoid making
+		 * _another_ copy of the fullpath but now that we've used
+		 * it and have no other references to these strings, it is
+		 * time to deallocate them.  We do so by temporarily
+		 * setting strdup_strings to 1.
+		 */
+		opti->paths_to_free.strdup_strings = 1;
+		string_list_clear(&opti->paths_to_free, 0);
+		opti->paths_to_free.strdup_strings = 0;
+	}
 
 	if (opti->attr_index.cache_nr) /* true iff opt->renormalize */
 		discard_index(&opti->attr_index);
@@ -605,7 +605,9 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 	}
 
 #if USE_MEMORY_POOL
-	mem_pool_discard(&opti->pool, 0);
+	mem_pool_discard(&opti->internal_pool, 0);
+	if (!reinitialize)
+		opti->pool = NULL;
 #endif
 
 	/* Clean out callback_data as well. */
@@ -669,35 +671,62 @@ static void path_msg(struct merge_options *opt,
 	strbuf_addch(sb, '\n');
 }
 
-#if USE_MEMORY_POOL
-static struct diff_filespec *mempool_alloc_filespec(struct mem_pool *pool,
-						    const char *path)
+static struct diff_filespec *pool_alloc_filespec(struct mem_pool *pool,
+						 const char *path)
 {
 	struct diff_filespec *spec;
-	size_t len = strlen(path);
 
-	spec = mem_pool_calloc(pool, 1, st_add3(sizeof(*spec), len, 1));
-	memcpy(spec+1, path, len);
-	spec->path = (void*)(spec+1);
+	if (!pool)
+		return alloc_filespec(path);
+
+	/* Similar to alloc_filespec, but allocate from pool and reuse path */
+	spec = mem_pool_calloc(pool, 1, sizeof(*spec));
+	spec->path = (char*)path; /* spec won't modify it */
 
 	spec->count = 1;
 	spec->is_binary = -1;
 	return spec;
 }
 
-static struct diff_filepair *mempool_diff_queue(struct mem_pool *pool,
-						struct diff_queue_struct *queue,
-						struct diff_filespec *one,
-						struct diff_filespec *two)
+static struct diff_filepair *pool_diff_queue(struct mem_pool *pool,
+					     struct diff_queue_struct *queue,
+					     struct diff_filespec *one,
+					     struct diff_filespec *two)
 {
-	struct diff_filepair *dp = mem_pool_calloc(pool, 1, sizeof(*dp));
+	struct diff_filepair *dp;
+
+	if (!pool)
+		return diff_queue(queue, one, two);
+
+	/* Same code as diff_queue, except allocate from pool */
+	dp = mem_pool_calloc(pool, 1, sizeof(*dp));
 	dp->one = one;
 	dp->two = two;
 	if (queue)
 		diff_q(queue, dp);
 	return dp;
 }
-#endif
+
+static void *pool_calloc(struct mem_pool *pool, size_t count, size_t size)
+{
+	if (!pool)
+		return xcalloc(count, size);
+	return mem_pool_calloc(pool, count, size);
+}
+
+static void *pool_alloc(struct mem_pool *pool, size_t size)
+{
+	if (!pool)
+		return xmalloc(size);
+	return mem_pool_alloc(pool, size);
+}
+
+static void *pool_strndup(struct mem_pool *pool, const char *str, size_t len)
+{
+	if (!pool)
+		return xstrndup(str, len);
+	return mem_pool_strndup(pool, str, len);
+}
 
 /* add a string to a strbuf, but converting "/" to "_" */
 static void add_flattened_path(struct strbuf *out, const char *s)
@@ -828,14 +857,9 @@ static void setup_path_info(struct merge_options *opt,
 	assert(!df_conflict || !resolved); /* df_conflict implies !resolved */
 	assert(resolved == (merged_version != NULL));
 
-#if USE_MEMORY_POOL
-	mi = mem_pool_calloc(&opt->priv->pool, 1,
-			     resolved ? sizeof(struct merged_info) :
-					sizeof(struct conflict_info));
-#else
-	mi = xcalloc(1, resolved ? sizeof(struct merged_info) :
-				   sizeof(struct conflict_info));
-#endif
+	mi = pool_calloc(opt->priv->pool, 1,
+			 resolved ? sizeof(struct merged_info) :
+				    sizeof(struct conflict_info));
 	mi->directory_name = current_dir_name;
 	mi->basename_offset = current_dir_name_len;
 	mi->clean = !!resolved;
@@ -882,9 +906,7 @@ static void add_pair(struct merge_options *opt,
 		     unsigned dir_rename_mask)
 {
 	struct diff_filespec *one, *two;
-#if USE_MEMORY_POOL
-	struct mem_pool *pool = &opt->priv->pool;
-#endif
+	struct mem_pool *pool = opt->priv->pool;
 	struct rename_info *renames = &opt->priv->renames;
 	int names_idx = is_add ? side : 0;
 
@@ -935,20 +957,11 @@ static void add_pair(struct merge_options *opt,
 			return;
 	}
 
-#if USE_MEMORY_POOL
-	one = mempool_alloc_filespec(pool, pathname);
-	two = mempool_alloc_filespec(pool, pathname);
-#else
-	one = alloc_filespec(pathname);
-	two = alloc_filespec(pathname);
-#endif
+	one = pool_alloc_filespec(pool, pathname);
+	two = pool_alloc_filespec(pool, pathname);
 	fill_filespec(is_add ? two : one,
 		      &names[names_idx].oid, 1, names[names_idx].mode);
-#if USE_MEMORY_POOL
-	mempool_diff_queue(pool, &renames->pairs[side], one, two);
-#else
-	diff_queue(&renames->pairs[side], one, two);
-#endif
+	pool_diff_queue(pool, &renames->pairs[side], one, two);
 }
 
 static void collect_rename_info(struct merge_options *opt,
@@ -1139,11 +1152,7 @@ static int collect_merge_info_callback(int n,
 	len = traverse_path_len(info, p->pathlen);
 
 	/* +1 in both of the following lines to include the NUL byte */
-#if USE_MEMORY_POOL
-	fullpath = mem_pool_alloc(&opt->priv->pool, len + 1);
-#else
-	fullpath = xmalloc(len + 1);
-#endif
+	fullpath = pool_alloc(opt->priv->pool, len + 1);
 	make_traverse_path(fullpath, len + 1, info, p->path, p->pathlen);
 
 	/*
@@ -1396,11 +1405,7 @@ static int handle_deferred_entries(struct merge_options *opt,
 		copy = renames->possible_trivial_merges[side];
 		strintmap_init_with_options(&renames->possible_trivial_merges[side],
 					    0,
-#if USE_MEMORY_POOL
-					    &opt->priv->pool,
-#else
-					    NULL,
-#endif
+					    opt->priv->pool,
 					    0);
 		strintmap_for_each_entry(&copy, &iter, entry) {
 			const char *path = entry->key;
@@ -2374,24 +2379,21 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 	VERIFY_CI(ci);
 
 	/* Find parent directories missing from opt->priv->paths */
-#if USE_MEMORY_POOL
-	cur_path = mem_pool_strdup(&opt->priv->pool, new_path);
-	free((char*)new_path);
-	new_path = (char *)cur_path;
-#else
-	cur_path = new_path;
-#endif
+	if (opt->priv->pool) {
+		cur_path = mem_pool_strdup(opt->priv->pool, new_path);
+		free((char*)new_path);
+		new_path = (char *)cur_path;
+	} else {
+		cur_path = new_path;
+	}
+
 	while (1) {
 		/* Find the parent directory of cur_path */
 		char *last_slash = strrchr(cur_path, '/');
 		if (last_slash) {
-#if USE_MEMORY_POOL
-			parent_name = mem_pool_strndup(&opt->priv->pool,
-						       cur_path,
-						       last_slash - cur_path);
-#else
-			parent_name = xstrndup(cur_path, last_slash - cur_path);
-#endif
+			parent_name = pool_strndup(opt->priv->pool,
+						   cur_path,
+						   last_slash - cur_path);
 		} else {
 			parent_name = opt->priv->toplevel_dir;
 			break;
@@ -2400,9 +2402,8 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		/* Look it up in opt->priv->paths */
 		entry = strmap_get_entry(&opt->priv->paths, parent_name);
 		if (entry) {
-#if !USE_MEMORY_POOL
-			free((char*)parent_name);
-#endif
+			if (!opt->priv->pool)
+				free((char*)parent_name);
 			parent_name = entry->key; /* reuse known pointer */
 			break;
 		}
@@ -2429,14 +2430,15 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		parent_name = cur_dir;
 	}
 
-#if !USE_MEMORY_POOL
-	/*
-	 * We are removing old_path from opt->priv->paths.  old_path also will
-	 * eventually need to be freed, but it may still be used by e.g.
-	 * ci->pathnames.  So, store it in another string-list for now.
-	 */
-	string_list_append(&opt->priv->paths_to_free, old_path);
-#endif
+	if (!opt->priv->pool) {
+		/*
+		 * We are removing old_path from opt->priv->paths.
+		 * old_path also will eventually need to be freed, but it
+		 * may still be used by e.g.  ci->pathnames.  So, store it
+		 * in another string-list for now.
+		 */
+		string_list_append(&opt->priv->paths_to_free, old_path);
+	}
 
 	assert(ci->filemask == 2 || ci->filemask == 4);
 	assert(ci->dirmask == 0);
@@ -2471,9 +2473,8 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		new_ci->stages[index].mode = ci->stages[index].mode;
 		oidcpy(&new_ci->stages[index].oid, &ci->stages[index].oid);
 
-#if !USE_MEMORY_POOL
-		free(ci);
-#endif
+		if (!opt->priv->pool)
+			free(ci);
 		ci = new_ci;
 	}
 
@@ -2876,9 +2877,7 @@ static void use_cached_pairs(struct merge_options *opt,
 {
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
-#if USE_MEMORY_POOL
-	struct mem_pool *pool = &opt->priv->pool;
-#endif
+	struct mem_pool *pool = opt->priv->pool;
 
 	/*
 	 * Add to side_pairs all entries from renames->cached_pairs[side_index].
@@ -2892,15 +2891,9 @@ static void use_cached_pairs(struct merge_options *opt,
 			new_name = old_name;
 
 		/* We don't care about oid/mode, only filenames and status */
-#if USE_MEMORY_POOL
-		one = mempool_alloc_filespec(pool, old_name);
-		two = mempool_alloc_filespec(pool, new_name);
-		mempool_diff_queue(pool, pairs, one, two);
-#else
-		one = alloc_filespec(old_name);
-		two = alloc_filespec(new_name);
-		diff_queue(pairs, one, two);
-#endif
+		one = pool_alloc_filespec(pool, old_name);
+		two = pool_alloc_filespec(pool, new_name);
+		pool_diff_queue(pool, pairs, one, two);
 		pairs->queue[pairs->nr-1]->status = entry->value ? 'R' : 'D';
 	}
 }
@@ -3011,11 +3004,7 @@ static int detect_regular_renames(struct merge_options *opt,
 	diff_queued_diff = renames->pairs[side_index];
 	trace2_region_enter("diff", "diffcore_rename", opt->repo);
 	diffcore_rename_extended(&diff_opts,
-#if USE_MEMORY_POOL
-				 &opt->priv->pool,
-#else
-				 NULL,
-#endif
+				 opt->priv->pool,
 				 &renames->relevant_sources[side_index],
 				 NULL,
 				 &renames->dirs_removed[side_index],
@@ -3075,11 +3064,7 @@ static int collect_renames(struct merge_options *opt,
 
 		possibly_cache_new_pair(renames, p, side_index, NULL);
 		if (p->status != 'A' && p->status != 'R') {
-#if USE_MEMORY_POOL
-			diff_free_filepair_data(p);
-#else
-			diff_free_filepair(p);
-#endif
+			pool_diff_free_filepair(opt->priv->pool, p);
 			continue;
 		}
 
@@ -3091,11 +3076,7 @@ static int collect_renames(struct merge_options *opt,
 						      &clean);
 
 		if (p->status != 'R' && !new_path) {
-#if USE_MEMORY_POOL
-			diff_free_filepair_data(p);
-#else
-			diff_free_filepair(p);
-#endif
+			pool_diff_free_filepair(opt->priv->pool, p);
 			continue;
 		}
 		possibly_cache_new_pair(renames, p, side_index, new_path);
@@ -3203,11 +3184,7 @@ cleanup:
 		side_pairs = &renames->pairs[s];
 		for (i = 0; i < side_pairs->nr; ++i) {
 			struct diff_filepair *p = side_pairs->queue[i];
-#if USE_MEMORY_POOL
-			diff_free_filepair_data(p);
-#else
-			diff_free_filepair(p);
-#endif
+			pool_diff_free_filepair(opt->priv->pool, p);
 		}
 	}
 
@@ -3220,11 +3197,8 @@ simple_cleanup:
 	if (combined.nr) {
 		int i;
 		for (i = 0; i < combined.nr; i++)
-#if USE_MEMORY_POOL
-			diff_free_filepair_data(combined.queue[i]);
-#else
-			diff_free_filepair(combined.queue[i]);
-#endif
+			pool_diff_free_filepair(opt->priv->pool,
+						combined.queue[i]);
 		free(combined.queue);
 	}
 
@@ -3694,11 +3668,8 @@ static void process_entry(struct merge_options *opt,
 		 * the directory to remain here, so we need to move this
 		 * path to some new location.
 		 */
-#if USE_MEMORY_POOL
-		new_ci = mem_pool_calloc(&opt->priv->pool, 1, sizeof(*new_ci));
-#else
-		new_ci = xcalloc(1, sizeof(*new_ci));
-#endif
+		new_ci = pool_calloc(opt->priv->pool, 1, sizeof(*new_ci));
+
 		/* We don't really want new_ci->merged.result copied, but it'll
 		 * be overwritten below so it doesn't matter.  We also don't
 		 * want any directory mode/oid values copied, but we'll zero
@@ -3788,12 +3759,7 @@ static void process_entry(struct merge_options *opt,
 			const char *a_path = NULL, *b_path = NULL;
 			int rename_a = 0, rename_b = 0;
 
-#if USE_MEMORY_POOL
-			new_ci = mem_pool_alloc(&opt->priv->pool,
-						sizeof(*new_ci));
-#else
-			new_ci = xmalloc(sizeof(*new_ci));
-#endif
+			new_ci = pool_alloc(opt->priv->pool, sizeof(*new_ci));
 
 			if (S_ISREG(a_mode))
 				rename_a = 1;
@@ -3855,16 +3821,16 @@ static void process_entry(struct merge_options *opt,
 
 			if (rename_a && rename_b) {
 				strmap_remove(&opt->priv->paths, path, 0);
-#if !USE_MEMORY_POOL
 				/*
 				 * We removed path from opt->priv->paths.  path
-				 * will also eventually need to be freed, but
-				 * it may still be used by e.g.  ci->pathnames.
-				 * So, store it in another string-list for now.
+				 * will also eventually need to be freed if not
+				 * part of a memory pool...but it may still be
+				 * used by e.g. ci->pathnames.  So, store it in
+				 * another string-list for now in that case.
 				 */
-				string_list_append(&opt->priv->paths_to_free,
-						   path);
-#endif
+				if (!opt->priv->pool)
+					string_list_append(&opt->priv->paths_to_free,
+							   path);
 			}
 
 			/*
@@ -4429,9 +4395,12 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	/* Initialization of various renames fields */
 	renames = &opt->priv->renames;
 #if USE_MEMORY_POOL
-	pool = &opt->priv->pool;
-	mem_pool_init(pool, 0);
+	mem_pool_init(&opt->priv->internal_pool, 0);
+	opt->priv->pool = &opt->priv->internal_pool;
+#else
+	opt->priv->pool = NULL;
 #endif
+	pool = opt->priv->pool;
 	for (i = MERGE_SIDE1; i <= MERGE_SIDE2; i++) {
 		strintmap_init_with_options(&renames->dirs_removed[i],
 					    NOT_RELEVANT, pool, 0);
@@ -4473,9 +4442,8 @@ static void merge_start(struct merge_options *opt, struct merge_result *result)
 	 */
 	strmap_init_with_options(&opt->priv->paths, pool, 0);
 	strmap_init_with_options(&opt->priv->conflicted, pool, 0);
-#if !USE_MEMORY_POOL
-	string_list_init(&opt->priv->paths_to_free, 0);
-#endif
+	if (!opt->priv->pool)
+		string_list_init(&opt->priv->paths_to_free, 0);
 
 	/*
 	 * keys & strbufs in output will sometimes need to outlive "paths",

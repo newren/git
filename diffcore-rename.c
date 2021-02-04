@@ -1235,13 +1235,35 @@ static void free_filespec_data(struct diff_filespec *spec)
 		diff_free_filespec_data(spec);
 }
 
-/*
- * Like diff_free_filepair(), but only frees the data from the filespecs; not
- * the filespecs or the filepair.
- */
-
-void diff_free_filepair_data(struct diff_filepair *p)
+static void pool_free_filespec(struct mem_pool *pool,
+			       struct diff_filespec *spec)
 {
+	if (!pool) {
+		free_filespec(spec);
+		return;
+	}
+
+	/*
+	 * Similar to free_filespec(), but only frees the data.  The spec
+	 * itself was allocated in the pool and should not be individually
+	 * freed.
+	 */
+	free_filespec_data(spec);
+}
+
+void pool_diff_free_filepair(struct mem_pool *pool,
+			     struct diff_filepair *p)
+{
+	if (!pool) {
+		diff_free_filepair(p);
+		return;
+	}
+
+	/*
+	 * Similar to diff_free_filepair() but only frees the data from the
+	 * filespecs; not the filespecs or the filepair which were
+	 * allocated from the pool.
+	 */
 	free_filespec_data(p->one);
 	free_filespec_data(p->two);
 }
@@ -1541,12 +1563,8 @@ void diffcore_rename_extended(struct diff_options *options,
 			/* no need to keep unmodified pairs */
 			pair_to_free = p;
 
-		if (pair_to_free) {
-			if (pool)
-				diff_free_filepair_data(pair_to_free);
-			else
-				diff_free_filepair(pair_to_free);
-		}
+		if (pair_to_free)
+			pool_diff_free_filepair(pool, pair_to_free);
 	}
 	diff_debug_queue("done copying original", &outq);
 
@@ -1554,15 +1572,9 @@ void diffcore_rename_extended(struct diff_options *options,
 	*q = outq;
 	diff_debug_queue("done collapsing", q);
 
-	if (pool) {
-		for (i = 0; i < rename_dst_nr; i++)
-			if (rename_dst[i].filespec_to_free)
-				free_filespec_data(rename_dst[i].filespec_to_free);
-	} else {
-		for (i = 0; i < rename_dst_nr; i++)
-			if (rename_dst[i].filespec_to_free)
-				free_filespec(rename_dst[i].filespec_to_free);
-	}
+	for (i = 0; i < rename_dst_nr; i++)
+		if (rename_dst[i].filespec_to_free)
+			pool_free_filespec(pool, rename_dst[i].filespec_to_free);
 
 	cleanup_dir_rename_info(&info, dirs_removed, dir_rename_count != NULL);
 	FREE_AND_NULL(rename_dst);
