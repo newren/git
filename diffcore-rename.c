@@ -1069,11 +1069,15 @@ static int find_renames(struct diff_score *mx,
 	return count;
 }
 
-static int remove_unneeded_paths_from_src(int num_src,
-					  int detecting_copies,
-					  struct strintmap *interesting)
+static void remove_unneeded_paths_from_src(int detecting_copies,
+					   struct strintmap *interesting)
 {
 	int i, new_num_src;
+
+	if (detecting_copies && !interesting)
+		return; /* nothing to remove */
+	if (break_idx)
+		return; /* culling incompatbile with break detection */
 
 	/*
 	 * Note on reasons why we cull unneeded sources but not destinations:
@@ -1096,12 +1100,7 @@ static int remove_unneeded_paths_from_src(int num_src,
 	 *      sources N times each, so avoid that by removing the sources
 	 *      from rename_src here.
 	 */
-	if (detecting_copies && !interesting)
-		return num_src; /* nothing to remove */
-	if (break_idx)
-		return num_src; /* culling incompatbile with break detection */
-
-	for (i = 0, new_num_src = 0; i < num_src; i++) {
+	for (i = 0, new_num_src = 0; i < rename_src_nr; i++) {
 		struct diff_filespec *one = rename_src[i].p->one;
 
 		/*
@@ -1122,24 +1121,23 @@ static int remove_unneeded_paths_from_src(int num_src,
 		new_num_src++;
 	}
 
-	return new_num_src;
+	rename_src_nr = new_num_src;
 }
 
-static int handle_early_known_dir_renames(int num_src,
-					  struct dir_rename_info *info,
-					  struct strintmap *relevant_sources,
-					  struct strintmap *dirs_removed)
+static void handle_early_known_dir_renames(struct dir_rename_info *info,
+					   struct strintmap *relevant_sources,
+					   struct strintmap *dirs_removed)
 {
 	int i, new_num_src;
 	struct hashmap_iter iter;
 	struct strmap_entry *entry;
 
 	if (!dirs_removed || !relevant_sources)
-		return num_src; /* nothing to cull */
+		return; /* nothing to cull */
 	if (break_idx)
-		return num_src; /* culling incompatbile with break detection */
+		return; /* culling incompatbile with break detection */
 
-	for (i = 0; i < num_src; i++) {
+	for (i = 0; i < rename_src_nr; i++) {
 		char *old_dir;
 		struct diff_filespec *one = rename_src[i].p->one;
 
@@ -1181,7 +1179,7 @@ static int handle_early_known_dir_renames(int num_src,
 		}
 	}
 
-	for (i = 0, new_num_src = 0; i < num_src; i++) {
+	for (i = 0, new_num_src = 0; i < rename_src_nr; i++) {
 		struct diff_filespec *one = rename_src[i].p->one;
 		int val;
 
@@ -1228,7 +1226,7 @@ static int handle_early_known_dir_renames(int num_src,
 		new_num_src++;
 	}
 
-	return new_num_src;
+	rename_src_nr = new_num_src;
 }
 
 static void free_filespec_data(struct diff_filespec *spec)
@@ -1312,7 +1310,7 @@ void diffcore_rename_extended(struct diff_options *options,
 				p->one->rename_used++;
 			register_rename_src(p);
 		}
-		else if (detect_rename == DIFF_DETECT_COPY) {
+		else if (want_copies) {
 			/*
 			 * Increment the "rename_used" score by
 			 * one, to indicate ourselves as a user.
@@ -1353,9 +1351,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		 *   - remove ones not found in relevant_sources
 		 */
 		trace2_region_enter("diff", "cull after exact", options->repo);
-		num_sources = remove_unneeded_paths_from_src(num_sources,
-							     want_copies,
-							     relevant_sources);
+		remove_unneeded_paths_from_src(want_copies, relevant_sources);
 		trace2_region_leave("diff", "cull after exact", options->repo);
 	} else {
 		/*
@@ -1363,9 +1359,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		 *   - remove ones involved in renames (found via exact match)
 		 */
 		trace2_region_enter("diff", "cull exact", options->repo);
-		num_sources = remove_unneeded_paths_from_src(num_sources,
-							     want_copies,
-							     NULL);
+		remove_unneeded_paths_from_src(want_copies, NULL);
 		trace2_region_leave("diff", "cull exact", options->repo);
 
 		/* Preparation for basename-driven matching. */
@@ -1378,7 +1372,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		/* Utilize file basenames to quickly find renames. */
 		trace2_region_enter("diff", "basename matches", options->repo);
 		rename_count += find_basename_matches(options, minimum_score,
-						      num_sources, &info,
+						      rename_src_nr, &info,
 						      relevant_sources,
 						      relevant_destinations,
 						      dirs_removed);
@@ -1386,7 +1380,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		/*
 		 * Cull sources, again:
-		 *   - remove ones already involved in basename renames
+		 *   - remove ones involved in renames (found via basenames)
 		 *   - remove ones not found in relevant_sources
 		 * and
 		 *   - remove ones in relevant_sources which are needed only
@@ -1394,13 +1388,9 @@ void diffcore_rename_extended(struct diff_options *options,
 		 *     needs to know any more individual path renames under them
 		 */
 		trace2_region_enter("diff", "cull basename", options->repo);
-		num_sources = remove_unneeded_paths_from_src(num_sources,
-							     want_copies,
-							     relevant_sources);
-		num_sources = handle_early_known_dir_renames(num_sources,
-							     &info,
-							     relevant_sources,
-							     dirs_removed);
+		remove_unneeded_paths_from_src(want_copies, relevant_sources);
+		handle_early_known_dir_renames(&info, relevant_sources,
+					       dirs_removed);
 		trace2_region_leave("diff", "cull basename", options->repo);
 	}
 
@@ -1408,9 +1398,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	 * Calculate how many rename destinations are left
 	 */
 	num_destinations = (rename_dst_nr - rename_count);
-
-	/* Avoid other code trying to use invalidated entries */
-	rename_src_nr = num_sources;
+	num_sources = rename_src_nr; /* rename_src_nr reflects lower number */
 
 	/* All done? */
 	if (!num_destinations || !num_sources)
@@ -1432,8 +1420,7 @@ void diffcore_rename_extended(struct diff_options *options,
 	if (options->show_rename_progress) {
 		progress = start_delayed_progress(
 				_("Performing inexact rename detection"),
-				(uint64_t)num_destinations *
-				(uint64_t)num_sources);
+				(uint64_t)num_destinations * (uint64_t)num_sources);
 	}
 
 	mx = xcalloc(st_mult(NUM_CANDIDATE_PER_DST, num_destinations),
@@ -1453,13 +1440,11 @@ void diffcore_rename_extended(struct diff_options *options,
 		for (j = 0; j < NUM_CANDIDATE_PER_DST; j++)
 			m[j].dst = -1;
 
-		for (j = 0; j < num_sources; j++) {
+		for (j = 0; j < rename_src_nr; j++) {
 			struct diff_filespec *one = rename_src[j].p->one;
 			struct diff_score this_src;
 
-			assert(!one->rename_used ||
-			       detect_rename == DIFF_DETECT_COPY ||
-			       break_idx);
+			assert(!one->rename_used || want_copies || break_idx);
 
 			if (skip_unmodified &&
 			    diff_unmodified_pair(rename_src[j].p))
@@ -1491,7 +1476,7 @@ void diffcore_rename_extended(struct diff_options *options,
 
 	rename_count += find_renames(mx, dst_cnt, minimum_score, 0,
 				     &info, dirs_removed);
-	if (detect_rename == DIFF_DETECT_COPY)
+	if (want_copies)
 		rename_count += find_renames(mx, dst_cnt, minimum_score, 1,
 					     &info, dirs_removed);
 	free(mx);
