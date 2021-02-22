@@ -468,17 +468,23 @@ static void update_dir_rename_counts(struct dir_rename_info *info,
 
 	if (!info->setup)
 		/*
-		 * info->setup is 0 here in two cases: either break
-		 * detection or copy detection is active so that we never
-		 * called initialize_dir_rename_info() (and in such cases
-		 * we don't care about either directory renames or the fast
-		 * find_basename_matches).  Inexact rename detection also
-		 * calls update_dir_rename_counts(), but in these two cases
-		 * info->dir_rename_counts will not have been properly
-		 * initialized.  Since we don't care about
-		 * dir_rename_counts (its purpose is to help with directory
-		 * renames and fast find_basename_matches()), we can just
-		 * exit early.
+		 * info->setup is 0 here in two cases: (1) all auxiliary
+		 * vars (like dirs_removed) were NULL so
+		 * initialize_dir_rename_info() returned early, or (2)
+		 * either break detection or copy detection are active so
+		 * that we never called initialize_dir_rename_info().  In
+		 * the former case, we don't have enough info to know if
+		 * directories were renamed (because dirs_removed lets us
+		 * know about a necessary prerequisite, namely if they were
+		 * removed), and in the latter, we don't care about
+		 * directory renames or find_basename_matches.
+		 *
+		 * This matters because both basename and inexact matching
+		 * will also call update_dir_rename_counts().  In either of
+		 * the above two cases info->dir_rename_counts will not
+		 * have been properly initialized which prevents us from
+		 * updating it, but in these two cases we don't care about
+		 * dir_rename_counts anyway, so we can just exit early.
 		 */
 		return;
 
@@ -754,47 +760,74 @@ static void cleanup_dir_rename_info(struct dir_rename_info *info,
 	}
 }
 
+static const char *get_basename(const char *filename)
+{
+	/*
+	 * gitbasename() has to worry about special drives, multiple
+	 * directory separator characters, trailing slashes, NULL or
+	 * empty strings, etc.  We only work on filenames as stored in
+	 * git, and thus get to ignore all those complications.
+	 */
+	const char *base = strrchr(filename, '/');
+	return base ? base + 1 : filename;
+}
+
 static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 {
 	/*
 	 * Our comparison of files with the same basename (see
-	 * find_basename_matches() below), is only helpful when we have
-	 * exactly one file with a given basename among the rename sources
-	 * and also only exactly one file with that basename among the
-	 * rename destinations.  When we have multiple files with the same
-	 * basename in either set, we do not know which to compare against.
+	 * find_basename_matches() below), is only helpful when after exact
+	 * rename detection we have exactly one file with a given basename
+	 * among the rename sources and also only exactly one file with
+	 * that basename among the rename destinations.  When we have
+	 * multiple files with the same basename in either set, we do not
+	 * know which to compare against.  However, there are some
+	 * filenames that occur in large numbers (particularly
+	 * build-related filenames such as 'Makefile', '.gitignore', or
+	 * 'build.gradle' that potentially exist within every single
+	 * subdirectory), and for performance we want to be able to quickly
+	 * find renames for these files too.
 	 *
-	 * Multiple files on each side with the same basename most
-	 * frequently comes up when an entire directory is renamed, and
-	 * then common filenames (such as 'Makefile' or '.gitignore' or
-	 * 'build.gradle') that potentially exist within every single
-	 * subdirectory are part of the rename puzzle.  However, when an
-	 * entire directory is renamed (along with all subdirectories),
-	 * we have a couple things that can help us out:
+	 * The reason basename comparisons are a useful heuristic was that it
+	 * is common for people to move files across directories while keeping
+	 * their filename the same.  If we had a way of determining or even
+	 * making a good educated guess about which directory these non-unique
+	 * basename files had moved the file to, we could check it.
+	 * Luckily...
+	 *
+	 * When an entire directory is in fact renamed, we have two factors
+	 * helping us out:
+	 *   (a) the original directory disappeared giving us a hint
+	 *       about when we can apply an extra heuristic.
 	 *   (a) we often have several files within that directory and
 	 *       subdirectories that are renamed without changes
-	 *   (b) the original directory disappeared giving us a hint
-	 *       about when we can apply an extra heuristic.
 	 * So, rules for a heuristic:
-	 *   (0) If there are basename matches but more than one
-	 *       (the condition under which this function is called) AND
-	 *   (1) the directory in which the file was found has disappeared THEN
+	 *   (0) If there basename matches are non-unique (the condition under
+	 *       which this function is called) AND
+	 *   (1) the directory in which the file was found has disappeared
+	 *       (i.e. dirs_removed is non-NULL and has a relevant entry) THEN
 	 *   (2) use exact renames of files within the directory to determine
 	 *       where the directory is likely to have been renamed to.  IF
-	 *       there is at least one exact rename from within that directory,
-	 *       we can proceed.
+	 *       there is at least one exact rename from within that
+	 *       directory, we can proceed.
 	 *   (3) If there are multiple places the directory could have been
 	 *       renamed to based on exact renames, ignore all but one of them.
 	 *       Just use the destination with the most renames going to it.
 	 *   (4) Check if applying that directory rename to the original file
-	 *       would result in a destination filename that is in the potential
-	 *       rename set.  If so, return the index of the destination file
-	 *       (the index within rename_dst).
-	 *   NOTE: The caller will compare the original file and returned
-	 *         destination file for similarity, and if they are sufficiently
-	 *         similar, will record the rename.
+	 *       would result in a destination filename that is in the
+	 *       potential rename set.  If so, return the index of the
+	 *       destination file (the index within rename_dst).
+	 *   (5) Compare the original file and returned destination for
+	 *       similarity, and if they are sufficiently similar, record the
+	 *       rename.
+	 *
+	 * This function, idx_possible_rename(), is only responsible for (4).
+	 * The conditions/steps in (1)-(3) are handled via setting up
+	 * dir_rename_count and dir_rename_guess in
+	 * initialize_dir_rename_info().  Steps (0) and (5) are handled by
+	 * the caller of this function.
 	 */
-	char *old_dir, *new_dir, *new_path, *basename;
+	char *old_dir, *new_dir, *new_path;
 	int idx;
 
 	if (!info->setup)
@@ -806,9 +839,7 @@ static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 	if (!new_dir)
 		return -1;
 
-	basename = strrchr(filename, '/');
-	basename = (basename ? basename+1 : filename);
-	new_path = xstrfmt("%s/%s", new_dir, basename);
+	new_path = xstrfmt("%s/%s", new_dir, get_basename(filename));
 
 	idx = strintmap_get(&info->idx_map, new_path);
 	free(new_path);
@@ -817,24 +848,24 @@ static int idx_possible_rename(char *filename, struct dir_rename_info *info)
 
 static int find_basename_matches(struct diff_options *options,
 				 int minimum_score,
-				 int num_src,
 				 struct dir_rename_info *info,
 				 struct strintmap *relevant_sources,
 				 struct strset *relevant_destinations,
 				 struct strintmap *dirs_removed)
 {
 	/*
-	 * When I checked, over 76% of file renames in linux just moved
-	 * files to a different directory but kept the same basename.  gcc
-	 * did that with over 64% of renames, gecko did it with over 79%,
-	 * and WebKit did it with over 89%.
+	 * When I checked in early 2020, over 76% of file renames in linux
+	 * just moved files to a different directory but kept the same
+	 * basename.  gcc did that with over 64% of renames, gecko did it
+	 * with over 79%, and WebKit did it with over 89%.
 	 *
 	 * Therefore we can bypass the normal exhaustive NxM matrix
 	 * comparison of similarities between all potential rename sources
-	 * and destinations by instead using file basename as a hint, checking
-	 * for similarity between files with the same basename, and if we
-	 * find a pair that are sufficiently similar, record the rename
-	 * pair and exclude those two from the NxM matrix.
+	 * and destinations by instead using file basename as a hint (i.e.
+	 * the portion of the filename after the last '/'), checking for
+	 * similarity between files with the same basename, and if we find
+	 * a pair that are sufficiently similar, record the rename pair and
+	 * exclude those two from the NxM matrix.
 	 *
 	 * This *might* cause us to find a less than optimal pairing (if
 	 * there is another file that we are even more similar to but has a
@@ -842,10 +873,14 @@ static int find_basename_matches(struct diff_options *options,
 	 * basename matching provides, and given the frequency with which
 	 * people use the same basename in real world projects, that's a
 	 * trade-off we are willing to accept when doing just rename
-	 * detection.  However, if someone wants copy detection that
-	 * implies they are willing to spend more cycles to find
-	 * similarities between files, so it may be less likely that this
-	 * heuristic is wanted.
+	 * detection.
+	 *
+	 * If someone wants copy detection that implies they are willing to
+	 * spend more cycles to find similarities between files, so it may
+	 * be less likely that this heuristic is wanted.  If someone is
+	 * doing break detection, that means they do not want filename
+	 * similarity to imply any form of content similiarity, and thus
+	 * this heuristic would definitely be incompatible.
 	 */
 
 	int i, renames = 0;
@@ -853,32 +888,32 @@ static int find_basename_matches(struct diff_options *options,
 	struct strintmap dests;
 
 	/*
-	 * The prefeteching stuff wants to know if it can skip prefetching blobs
-	 * that are unmodified.  unmodified blobs are only relevant when doing
-	 * copy detection.  find_basename_matches() is only used when detecting
-	 * renames, not when detecting copies, so it'll only be used when a file
-	 * only existed in the source.  Since we already know that the file
-	 * won't be unmodified, there's no point checking for it; that's just a
-	 * waste of resources.  So set skip_unmodified to 0 so that
-	 * estimate_similarity() and prefetch() won't waste resources checking
-	 * for something we already know is false.
+	 * The prefeteching stuff wants to know if it can skip prefetching
+	 * blobs that are unmodified...and will then do a little extra work
+	 * to verify that the oids are indeed different before prefetching.
+	 * Unmodified blobs are only relevant when doing copy detection;
+	 * when limiting to rename detection, diffcore_rename[_extended]()
+	 * will never be called with unmodified source paths fed to us, so
+	 * the extra work necessary to check if rename_src entries are
+	 * unmodified would be a small waste.
 	 */
 	int skip_unmodified = 0;
 
-	/* Create maps of basename -> fullname(s) for sources and dests */
+	/*
+	 * Create maps of basename -> fullname(s) for remaining sources and
+	 * dests.
+	 */
 	strintmap_init_with_options(&sources, -1, NULL, 0);
 	strintmap_init_with_options(&dests, -1, NULL, 0);
-	for (i = 0; i < num_src; ++i) {
+	for (i = 0; i < rename_src_nr; ++i) {
 		char *filename = rename_src[i].p->one->path;
-		char *base;
+		const char *base;
 
 		/* exact renames removed in remove_unneeded_paths_from_src() */
 		assert(!rename_src[i].p->one->rename_used);
 
-		base = strrchr(filename, '/');
-		base = (base ? base+1 : filename);
-
 		/* Record index within rename_src (i) if basename is unique */
+		base = get_basename(filename);
 		if (strintmap_contains(&sources, base))
 			strintmap_set(&sources, base, -1);
 		else
@@ -886,15 +921,13 @@ static int find_basename_matches(struct diff_options *options,
 	}
 	for (i = 0; i < rename_dst_nr; ++i) {
 		char *filename = rename_dst[i].p->two->path;
-		char *base;
+		const char *base;
 
 		if (rename_dst[i].is_rename)
 			continue; /* involved in exact match already. */
 
-		base = strrchr(filename, '/');
-		base = (base ? base+1 : filename);
-
 		/* Record index within rename_dst (i) if basename is unique */
+		base = get_basename(filename);
 		if (strintmap_contains(&dests, base))
 			strintmap_set(&dests, base, -1);
 		else
@@ -902,9 +935,9 @@ static int find_basename_matches(struct diff_options *options,
 	}
 
 	/* Now look for basename matchups and do similarity estimation */
-	for (i = 0; i < num_src; ++i) {
+	for (i = 0; i < rename_src_nr; ++i) {
 		char *filename = rename_src[i].p->one->path;
-		char *base = NULL;
+		const char *base = NULL;
 		intptr_t src_index;
 		intptr_t dst_index;
 
@@ -913,11 +946,8 @@ static int find_basename_matches(struct diff_options *options,
 		    !strintmap_contains(relevant_sources, filename))
 			continue;
 
-		/* Get the basename */
-		base = strrchr(filename, '/');
-		base = (base ? base+1 : filename);
-
-		/* Find out if this basename is unique among sources */
+		/* Is this basename unique among remaining sources? */
+		base = get_basename(filename);
 		src_index = strintmap_get(&sources, base);
 		assert(src_index == -1 || src_index == i);
 
@@ -1077,7 +1107,7 @@ static void remove_unneeded_paths_from_src(int detecting_copies,
 	if (detecting_copies && !interesting)
 		return; /* nothing to remove */
 	if (break_idx)
-		return; /* culling incompatbile with break detection */
+		return; /* culling incompatible with break detection */
 
 	/*
 	 * Note on reasons why we cull unneeded sources but not destinations:
@@ -1376,13 +1406,24 @@ void diffcore_rename_extended(struct diff_options *options,
 		remove_unneeded_paths_from_src(want_copies, relevant_sources);
 		trace2_region_leave("diff", "cull after exact", options->repo);
 	} else {
+		/* Determine minimum score to match basenames */
+		double factor = 0.5;
+		char *basename_factor = getenv("GIT_BASENAME_FACTOR");
+		int min_basename_score;
+
+		if (basename_factor)
+			factor = strtol(basename_factor, NULL, 10)/100.0;
+		assert(factor >= 0.0 && factor <= 1.0);
+		min_basename_score = minimum_score +
+			(int)(factor * (MAX_SCORE - minimum_score));
+
 		/*
 		 * Cull sources:
 		 *   - remove ones involved in renames (found via exact match)
 		 */
-		trace2_region_enter("diff", "cull exact", options->repo);
+		trace2_region_enter("diff", "cull after exact", options->repo);
 		remove_unneeded_paths_from_src(want_copies, NULL);
-		trace2_region_leave("diff", "cull exact", options->repo);
+		trace2_region_leave("diff", "cull after exact", options->repo);
 
 		/* Preparation for basename-driven matching. */
 		trace2_region_enter("diff", "dir rename setup", options->repo);
@@ -1393,8 +1434,9 @@ void diffcore_rename_extended(struct diff_options *options,
 
 		/* Utilize file basenames to quickly find renames. */
 		trace2_region_enter("diff", "basename matches", options->repo);
-		rename_count += find_basename_matches(options, minimum_score,
-						      rename_src_nr, &info,
+		rename_count += find_basename_matches(options,
+						      min_basename_score,
+						      &info,
 						      relevant_sources,
 						      relevant_destinations,
 						      dirs_removed);
@@ -1416,9 +1458,7 @@ void diffcore_rename_extended(struct diff_options *options,
 		trace2_region_leave("diff", "cull basename", options->repo);
 	}
 
-	/*
-	 * Calculate how many rename destinations are left
-	 */
+	/* Calculate how many rename destinations are left */
 	num_destinations = (rename_dst_nr - rename_count);
 	num_sources = rename_src_nr; /* rename_src_nr reflects lower number */
 
