@@ -1824,6 +1824,7 @@ static int merge_3way(struct merge_options *opt,
 	struct ll_merge_options ll_opts = {0};
 	char *base, *name1, *name2;
 	int merge_status;
+	struct strbuf warnings = STRBUF_INIT;
 
 	if (!opt->priv->attr_index.initialized)
 		initialize_attr_index(opt);
@@ -1864,10 +1865,14 @@ static int merge_3way(struct merge_options *opt,
 	read_mmblob(&src1, a);
 	read_mmblob(&src2, b);
 
-	merge_status = ll_merge(result_buf, path, &orig, base,
-				&src1, name1, &src2, name2,
-				&opt->priv->attr_index, &ll_opts);
+	merge_status = ll_merge_with_warnings(result_buf, &warnings, path,
+					      &orig, base,
+					      &src1, name1, &src2, name2,
+					      &opt->priv->attr_index, &ll_opts);
+	if (warnings.len > 0)
+		path_msg(opt, path, 0, "%s", warnings.buf);
 
+	strbuf_release(&warnings);
 	free(base);
 	free(name1);
 	free(name2);
