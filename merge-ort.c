@@ -2177,8 +2177,9 @@ static int handle_content_merge(struct merge_options *opt,
 			ret = error(_("failed to execute internal merge"));
 
 		if (!ret &&
-		    write_object_file(result_buf.ptr, result_buf.size,
-				      OBJ_BLOB, &result->oid))
+		    repo_write_object_file(opt->repo,
+					   result_buf.ptr, result_buf.size,
+					   OBJ_BLOB, &result->oid))
 			ret = error(_("unable to add %s to database"), path);
 
 		free(result_buf.ptr);
@@ -3557,13 +3558,14 @@ static int sort_dirs_next_to_their_children(const char *one, const char *two)
 		return c1 - c2;
 }
 
-static int read_oid_strbuf(const struct object_id *oid,
+static int read_oid_strbuf(struct repository *r,
+			   const struct object_id *oid,
 			   struct strbuf *dst)
 {
 	void *buf;
 	enum object_type type;
 	unsigned long size;
-	buf = repo_read_object_file(the_repository, oid, &type, &size);
+	buf = repo_read_object_file(r, oid, &type, &size);
 	if (!buf)
 		return error(_("cannot read object %s"), oid_to_hex(oid));
 	if (type != OBJ_BLOB) {
@@ -3592,8 +3594,8 @@ static int blob_unchanged(struct merge_options *opt,
 	if (oideq(&base->oid, &side->oid))
 		return 1;
 
-	if (read_oid_strbuf(&base->oid, &basebuf) ||
-	    read_oid_strbuf(&side->oid, &sidebuf))
+	if (read_oid_strbuf(opt->repo, &base->oid, &basebuf) ||
+	    read_oid_strbuf(opt->repo, &side->oid, &sidebuf))
 		goto error_return;
 	/*
 	 * Note: binary | is used so that both renormalizations are
@@ -3665,7 +3667,8 @@ static int tree_entry_order(const void *a_, const void *b_)
 				 b->string, strlen(b->string), bmi->result.mode);
 }
 
-static int write_tree(struct object_id *result_oid,
+static int write_tree(struct repository *repo,
+		      struct object_id *result_oid,
 		      struct string_list *versions,
 		      unsigned int offset,
 		      size_t hash_size)
@@ -3699,7 +3702,7 @@ static int write_tree(struct object_id *result_oid,
 	}
 
 	/* Write this object file out, and record in result_oid */
-	if (write_object_file(buf.buf, buf.len, OBJ_TREE, result_oid))
+	if (repo_write_object_file(repo, buf.buf, buf.len, OBJ_TREE, result_oid))
 		ret = -1;
 	strbuf_release(&buf);
 	return ret;
@@ -3865,7 +3868,8 @@ static int write_completed_directory(struct merge_options *opt,
 		 */
 		dir_info->is_null = 0;
 		dir_info->result.mode = S_IFDIR;
-		if (write_tree(&dir_info->result.oid, &info->versions, offset,
+		if (write_tree(opt->repo,
+			       &dir_info->result.oid, &info->versions, offset,
 			       opt->repo->hash_algo->rawsz) < 0)
 			ret = -1;
 	}
@@ -4400,7 +4404,7 @@ static int process_entries(struct merge_options *opt,
 		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
-	if (write_tree(result_oid, &dir_metadata.versions, 0,
+	if (write_tree(opt->repo, result_oid, &dir_metadata.versions, 0,
 		       opt->repo->hash_algo->rawsz) < 0)
 		ret = -1;
 cleanup:

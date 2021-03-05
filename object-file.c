@@ -1955,9 +1955,9 @@ static void hash_object_file_literally(const struct git_hash_algo *algo,
 	write_object_file_prepare_literally(algo, buf, len, type, oid, hdr, &hdrlen);
 }
 
-void hash_object_file(const struct git_hash_algo *algo, const void *buf,
-		      unsigned long len, enum object_type type,
-		      struct object_id *oid)
+void hash_object_file(const struct git_hash_algo *algo,
+		      const void *buf, unsigned long len,
+		      enum object_type type, struct object_id *oid)
 {
 	hash_object_file_literally(algo, buf, len, type_name(type), oid);
 }
@@ -2134,7 +2134,8 @@ static int end_loose_object_common(git_hash_ctx *c, git_hash_ctx *compat_c,
 	return Z_OK;
 }
 
-static int write_loose_object(const struct object_id *oid, char *hdr,
+static int write_loose_object(struct repository *repo,
+			      const struct object_id *oid, char *hdr,
 			      int hdrlen, const void *buf, unsigned long len,
 			      time_t mtime, unsigned flags)
 {
@@ -2149,7 +2150,7 @@ static int write_loose_object(const struct object_id *oid, char *hdr,
 	if (batch_fsync_enabled(FSYNC_COMPONENT_LOOSE_OBJECT))
 		prepare_loose_object_bulk_checkin();
 
-	loose_object_path(the_repository, &filename, oid);
+	loose_object_path(repo, &filename, oid);
 
 	fd = start_loose_object_common(&tmp_file, filename.buf, flags,
 				       &stream, compressed, sizeof(compressed),
@@ -2320,13 +2321,13 @@ cleanup:
 	return err;
 }
 
-int write_object_file_flags(const void *buf, unsigned long len,
-			    enum object_type type, struct object_id *oid,
-			    struct object_id *compat_oid_in, unsigned flags)
+int repo_write_object_file_flags(struct repository *r, const void *buf,
+				 unsigned long len, enum object_type type,
+				 struct object_id *oid,
+				 struct object_id *compat_oid_in, unsigned flags)
 {
-	struct repository *repo = the_repository;
-	const struct git_hash_algo *algo = repo->hash_algo;
-	const struct git_hash_algo *compat = repo->compat_hash_algo;
+	const struct git_hash_algo *algo = r->hash_algo;
+	const struct git_hash_algo *compat = r->compat_hash_algo;
 	struct object_id compat_oid;
 	char hdr[MAX_HEADER_LEN];
 	int hdrlen = sizeof(hdr);
@@ -2353,21 +2354,20 @@ int write_object_file_flags(const void *buf, unsigned long len,
 	write_object_file_prepare(algo, buf, len, type, oid, hdr, &hdrlen);
 	if (freshen_packed_object(oid) || freshen_loose_object(oid))
 		return 0;
-	if (write_loose_object(oid, hdr, hdrlen, buf, len, 0, flags))
+	if (write_loose_object(r, oid, hdr, hdrlen, buf, len, 0, flags))
 		return -1;
 	if (compat)
-		return repo_add_loose_object_map(repo, oid, &compat_oid);
+		return repo_add_loose_object_map(r, oid, &compat_oid);
 	return 0;
 }
 
-int write_object_file_literally(const void *buf, unsigned long len,
-				const char *type, struct object_id *oid,
-				unsigned flags)
+int repo_write_object_file_literally(struct repository *r, const void *buf,
+				     unsigned long len, const char *type,
+				     struct object_id *oid, unsigned flags)
 {
 	char *header;
-	struct repository *repo = the_repository;
-	const struct git_hash_algo *algo = repo->hash_algo;
-	const struct git_hash_algo *compat = repo->compat_hash_algo;
+	const struct git_hash_algo *algo = r->hash_algo;
+	const struct git_hash_algo *compat = r->compat_hash_algo;
 	struct object_id compat_oid;
 	int hdrlen, status = 0;
 	int compat_type = -1;
@@ -2397,19 +2397,19 @@ int write_object_file_literally(const void *buf, unsigned long len,
 		goto cleanup;
 	if (freshen_packed_object(oid) || freshen_loose_object(oid))
 		goto cleanup;
-	status = write_loose_object(oid, header, hdrlen, buf, len, 0, 0);
+	status = write_loose_object(r, oid, header, hdrlen, buf, len, 0, 0);
 	if (compat_type != -1)
-		return repo_add_loose_object_map(repo, oid, &compat_oid);
+		return repo_add_loose_object_map(r, oid, &compat_oid);
 
 cleanup:
 	free(header);
 	return status;
 }
 
-int force_object_loose(const struct object_id *oid, time_t mtime)
+int repo_force_object_loose(struct repository *r,
+			    const struct object_id *oid, time_t mtime)
 {
-	struct repository *repo = the_repository;
-	const struct git_hash_algo *compat = repo->compat_hash_algo;
+	const struct git_hash_algo *compat = r->compat_hash_algo;
 	void *buf;
 	unsigned long len;
 	struct object_info oi = OBJECT_INFO_INIT;
@@ -2427,14 +2427,14 @@ int force_object_loose(const struct object_id *oid, time_t mtime)
 	if (oid_object_info_extended(the_repository, oid, &oi, 0))
 		return error(_("cannot read object for %s"), oid_to_hex(oid));
 	if (compat) {
-		if (repo_oid_to_algop(repo, oid, compat, &compat_oid))
+		if (repo_oid_to_algop(r, oid, compat, &compat_oid))
 			return error(_("cannot map object %s to %s"),
 				     oid_to_hex(oid), compat->name);
 	}
 	hdrlen = format_object_header(hdr, sizeof(hdr), type, len);
-	ret = write_loose_object(oid, hdr, hdrlen, buf, len, mtime, 0);
+	ret = write_loose_object(r, oid, hdr, hdrlen, buf, len, mtime, 0);
 	if (!ret && compat)
-		ret = repo_add_loose_object_map(the_repository, oid, &compat_oid);
+		ret = repo_add_loose_object_map(r, oid, &compat_oid);
 	free(buf);
 
 	return ret;
