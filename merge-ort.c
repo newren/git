@@ -1972,8 +1972,9 @@ static int handle_content_merge(struct merge_options *opt,
 			ret = err(opt, _("Failed to execute internal merge"));
 
 		if (!ret &&
-		    write_object_file(result_buf.ptr, result_buf.size,
-				      blob_type, &result->oid))
+		    repo_write_object_file(opt->repo,
+					   result_buf.ptr, result_buf.size,
+					   blob_type, &result->oid))
 			ret = err(opt, _("Unable to add %s to database"),
 				  path);
 
@@ -3317,7 +3318,7 @@ static int read_oid_strbuf(struct merge_options *opt,
 	void *buf;
 	enum object_type type;
 	unsigned long size;
-	buf = read_object_file(oid, &type, &size);
+	buf = repo_read_object_file(opt->repo, oid, &type, &size);
 	if (!buf)
 		return err(opt, _("cannot read object %s"), oid_to_hex(oid));
 	if (type != OBJ_BLOB) {
@@ -3419,7 +3420,8 @@ static int tree_entry_order(const void *a_, const void *b_)
 				 b->string, strlen(b->string), bmi->result.mode);
 }
 
-static void write_tree(struct object_id *result_oid,
+static void write_tree(struct repository *repo,
+		       struct object_id *result_oid,
 		       struct string_list *versions,
 		       unsigned int offset,
 		       size_t hash_size)
@@ -3453,7 +3455,7 @@ static void write_tree(struct object_id *result_oid,
 	}
 
 	/* Write this object file out, and record in result_oid */
-	write_object_file(buf.buf, buf.len, tree_type, result_oid);
+	repo_write_object_file(repo, buf.buf, buf.len, tree_type, result_oid);
 	strbuf_release(&buf);
 }
 
@@ -3617,7 +3619,8 @@ static void write_completed_directory(struct merge_options *opt,
 		 */
 		dir_info->is_null = 0;
 		dir_info->result.mode = S_IFDIR;
-		write_tree(&dir_info->result.oid, &info->versions, offset,
+		write_tree(opt->repo,
+			   &dir_info->result.oid, &info->versions, offset,
 			   opt->repo->hash_algo->rawsz);
 	}
 
@@ -3695,8 +3698,9 @@ static void put_path_msgs_in_file(struct merge_options *opt,
 	new_mi->clean = 1;
 	new_mi->basename_offset = mi->basename_offset;
 	new_mi->directory_name = mi->directory_name;
-	if (write_object_file(new_path_contents.buf, new_path_contents.len,
-			      blob_type, &new_mi->result.oid))
+	if (repo_write_object_file(opt->repo,
+				   new_path_contents.buf, new_path_contents.len,
+				   blob_type, &new_mi->result.oid))
 		die(_("Unable to add %s to database"), new_path);
 
 	/*
@@ -4191,7 +4195,7 @@ static void process_entries(struct merge_options *opt,
 		fflush(stdout);
 		BUG("dir_metadata accounting completely off; shouldn't happen");
 	}
-	write_tree(result_oid, &dir_metadata.versions, 0,
+	write_tree(opt->repo, result_oid, &dir_metadata.versions, 0,
 		   opt->repo->hash_algo->rawsz);
 	string_list_clear(&plist, 0);
 	string_list_clear(&dir_metadata.versions, 0);

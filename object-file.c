@@ -1829,9 +1829,9 @@ static int write_buffer(int fd, const void *buf, size_t len)
 	return 0;
 }
 
-int hash_object_file(const struct git_hash_algo *algo, const void *buf,
-		     unsigned long len, const char *type,
-		     struct object_id *oid)
+int repo_hash_object_file(struct repository *r, const struct git_hash_algo *algo,
+			  const void *buf, unsigned long len,
+			  const char *type, struct object_id *oid)
 {
 	char hdr[MAX_HEADER_LEN];
 	int hdrlen = sizeof(hdr);
@@ -1893,7 +1893,8 @@ static int create_tmpfile(struct strbuf *tmp, const char *filename)
 	return fd;
 }
 
-static int write_loose_object(const struct object_id *oid, char *hdr,
+static int write_loose_object(struct repository *repo,
+			      const struct object_id *oid, char *hdr,
 			      int hdrlen, const void *buf, unsigned long len,
 			      time_t mtime)
 {
@@ -1905,7 +1906,7 @@ static int write_loose_object(const struct object_id *oid, char *hdr,
 	static struct strbuf tmp_file = STRBUF_INIT;
 	static struct strbuf filename = STRBUF_INIT;
 
-	loose_object_path(the_repository, &filename, oid);
+	loose_object_path(repo, &filename, oid);
 
 	fd = create_tmpfile(&tmp_file, filename.buf);
 	if (fd < 0) {
@@ -1984,8 +1985,9 @@ static int freshen_packed_object(const struct object_id *oid)
 	return 1;
 }
 
-int write_object_file(const void *buf, unsigned long len, const char *type,
-		      struct object_id *oid)
+int repo_write_object_file(struct repository *r, const void *buf,
+			   unsigned long len, const char *type,
+			   struct object_id *oid)
 {
 	char hdr[MAX_HEADER_LEN];
 	int hdrlen = sizeof(hdr);
@@ -1997,12 +1999,13 @@ int write_object_file(const void *buf, unsigned long len, const char *type,
 				  &hdrlen);
 	if (freshen_packed_object(oid) || freshen_loose_object(oid))
 		return 0;
-	return write_loose_object(oid, hdr, hdrlen, buf, len, 0);
+	return write_loose_object(r, oid, hdr, hdrlen, buf, len, 0);
 }
 
-int hash_object_file_literally(const void *buf, unsigned long len,
-			       const char *type, struct object_id *oid,
-			       unsigned flags)
+int repo_hash_object_file_literally(struct repository *r,
+				    const void *buf, unsigned long len,
+				    const char *type, struct object_id *oid,
+				    unsigned flags)
 {
 	char *header;
 	int hdrlen, status = 0;
@@ -2017,14 +2020,15 @@ int hash_object_file_literally(const void *buf, unsigned long len,
 		goto cleanup;
 	if (freshen_packed_object(oid) || freshen_loose_object(oid))
 		goto cleanup;
-	status = write_loose_object(oid, header, hdrlen, buf, len, 0);
+	status = write_loose_object(r, oid, header, hdrlen, buf, len, 0);
 
 cleanup:
 	free(header);
 	return status;
 }
 
-int force_object_loose(const struct object_id *oid, time_t mtime)
+int repo_force_object_loose(struct repository *r,
+			    const struct object_id *oid, time_t mtime)
 {
 	void *buf;
 	unsigned long len;
@@ -2039,7 +2043,7 @@ int force_object_loose(const struct object_id *oid, time_t mtime)
 	if (!buf)
 		return error(_("cannot read object for %s"), oid_to_hex(oid));
 	hdrlen = xsnprintf(hdr, sizeof(hdr), "%s %"PRIuMAX , type_name(type), (uintmax_t)len) + 1;
-	ret = write_loose_object(oid, hdr, hdrlen, buf, len, mtime);
+	ret = write_loose_object(r, oid, hdr, hdrlen, buf, len, mtime);
 	free(buf);
 
 	return ret;
