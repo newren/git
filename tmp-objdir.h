@@ -19,6 +19,7 @@
  *
  */
 
+struct repository;
 struct tmp_objdir;
 
 /*
@@ -32,6 +33,11 @@ struct tmp_objdir *tmp_objdir_create(void);
  * temporary object directory.
  */
 const char **tmp_objdir_env(const struct tmp_objdir *);
+
+/*
+ * Return the path used for the temporary object directory.
+ */
+const char *tmp_objdir_path(struct tmp_objdir *t);
 
 /*
  * Finalize a temporary object directory by migrating its objects into the main
@@ -50,5 +56,15 @@ int tmp_objdir_destroy(struct tmp_objdir *);
  * current process.
  */
 void tmp_objdir_add_as_alternate(const struct tmp_objdir *);
+
+/*
+ * Add the temporary object directory as the *primary* object store in the
+ * current process, turning the previous primary object store into an
+ * alternate.
+ */
+void tmp_objdir_make_primary(struct repository *r,
+			     const struct tmp_objdir *t);
+void tmp_objdir_remove_as_primary(struct repository *r,
+				  const struct tmp_objdir *t);
 
 #endif /* TMP_OBJDIR_H */

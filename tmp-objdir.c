@@ -288,7 +288,36 @@ const char **tmp_objdir_env(const struct tmp_objdir *t)
 	return t->env.v;
 }
 
+const char *tmp_objdir_path(struct tmp_objdir *t)
+{
+	return t->path.buf;
+}
+
 void tmp_objdir_add_as_alternate(const struct tmp_objdir *t)
 {
 	add_to_alternates_memory(t->path.buf);
+}
+
+void tmp_objdir_make_primary(struct repository *r, const struct tmp_objdir *t)
+{
+	struct object_directory *od;
+	od = xcalloc(1, sizeof(*od));
+
+	od->path = xstrdup(t->path.buf);
+	od->next = r->objects->odb;
+	r->objects->odb = od;
+}
+
+void tmp_objdir_remove_as_primary(struct repository *r,
+				  const struct tmp_objdir *t)
+{
+	struct object_directory *od;
+
+	od = r->objects->odb;
+	if (strcmp(t->path.buf, od->path))
+		BUG("expected %s as primary object store; found %s",
+		    t->path.buf, od->path);
+	r->objects->odb = od->next;
+	free(od->path);
+	free(od);
 }
