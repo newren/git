@@ -205,16 +205,24 @@ static inline void *repo_read_object_file(struct repository *r,
 /* Read and unpack an object file into memory, write memory to an object file */
 int oid_object_info(struct repository *r, const struct object_id *, unsigned long *);
 
-int hash_object_file(const struct git_hash_algo *algo, const void *buf,
-		     unsigned long len, const char *type,
-		     struct object_id *oid);
+int repo_write_object_file(struct repository *r,
+			   const void *buf, unsigned long len,
+			   const char *type, struct object_id *oid);
 
-int write_object_file(const void *buf, unsigned long len,
-		      const char *type, struct object_id *oid);
+int repo_hash_object_file(struct repository *r, const struct git_hash_algo *algo,
+			  const void *buf, unsigned long len,
+			  const char *type, struct object_id *oid);
 
-int hash_object_file_literally(const void *buf, unsigned long len,
-			       const char *type, struct object_id *oid,
-			       unsigned flags);
+int repo_hash_object_file_literally(struct repository *r,
+				    const void *buf, unsigned long len,
+				    const char *type, struct object_id *oid,
+				    unsigned flags);
+
+#ifndef NO_THE_REPOSITORY_COMPATIBILITY_MACROS
+#define hash_object_file(algo, buf, len, type, oid) repo_hash_object_file(the_repository, algo, buf, len, type, oid)
+#define write_object_file(buf, len, type, oid) repo_write_object_file(the_repository, buf, len, type, oid)
+#define hash_object_file_literally(buf, len, type, oid, flags) repo_hash_object_file_literally(the_repository, buf, len, type, oid, flags)
+#endif
 
 /*
  * Add an object file to the in-memory object store, without writing it
@@ -227,7 +235,11 @@ int hash_object_file_literally(const void *buf, unsigned long len,
 int pretend_object_file(void *, unsigned long, enum object_type,
 			struct object_id *oid);
 
-int force_object_loose(const struct object_id *oid, time_t mtime);
+int repo_force_object_loose(struct repository *r,
+			    const struct object_id *oid, time_t mtime);
+#ifndef NO_THE_REPOSITORY_COMPATIBILITY_MACROS
+#define force_object_loose(oid, mtime) repo_force_object_loose(the_repository, oid, mtime)
+#endif
 
 /*
  * Open the loose object at path, check its hash, and return the contents,
