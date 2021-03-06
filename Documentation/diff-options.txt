@@ -65,6 +65,18 @@ ifdef::git-log[]
 	with conflict markers and such.  A diff is then shown between
 	that temporary tree and the actual merge commit.
 +
+--diff-merges=remerge-only:::
+--diff-merges=ro:::
+--remerge-diff-only:::
+	Similar to --remerge-diff, but also looks for messages in
+	single parent commits suggesting the commit is a cherry-pick
+	or a revert.  If it finds such a note, it will create a
+	temporary tree representing a redo of the cherry-pick or
+	revert, possibly including conflict markers.  It will then
+	show a diff between that temporary tree and the actual commit.
+	Further, with this flag, single parent commits which are not
+	cherry-picks or reverts will be skipped.
++
 --diff-merges=combined:::
 --diff-merges=c:::
 -c:::

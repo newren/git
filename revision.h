@@ -201,7 +201,8 @@ struct rev_info {
 			imply_patch:1,
 			dense_combined_merges:1,
 			first_parent_merges:1,
-			remerge_diff:1;
+			remerge_diff:1,
+			remerge_diff_only:1;
 
 	/* Format info */
 	int		show_notes;

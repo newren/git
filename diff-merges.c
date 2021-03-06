@@ -12,6 +12,7 @@ static void suppress(struct rev_info *revs)
 	revs->imply_patch = 0;
 	revs->merges_need_diff = 0;
 	revs->remerge_diff = 0;
+	revs->remerge_diff_only = 0;
 }
 
 static void set_separate(struct rev_info *revs)
@@ -57,6 +58,13 @@ static void set_remerge_diff(struct rev_info *revs)
 	revs->remerge_diff = 1;
 }
 
+static void set_remerge_diff_only(struct rev_info *revs)
+{
+	suppress(revs);
+	revs->remerge_diff_only = 1;
+	revs->limited = 1; /* needs limit_list() */
+}
+
 static void set_diff_merges(struct rev_info *revs, const char *optarg)
 {
 	if (!strcmp(optarg, "off") || !strcmp(optarg, "none")) {
@@ -75,6 +83,8 @@ static void set_diff_merges(struct rev_info *revs, const char *optarg)
 		set_dense_combined(revs);
 	else if (!strcmp(optarg, "r") || !strcmp(optarg, "remerge"))
 		set_remerge_diff(revs);
+	else if (!strcmp(optarg, "ro") || !strcmp(optarg, "remerge-only"))
+		set_remerge_diff_only(revs);
 	else
 		die(_("unknown value for --diff-merges: %s"), optarg);
 
@@ -102,6 +112,9 @@ int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 		revs->imply_patch = 1;
 	} else if (!strcmp(arg, "--remerge-diff")) {
 		set_remerge_diff(revs);
+		revs->imply_patch = 1;
+	} else if (!strcmp(arg, "--remerge-diff-only")) {
+		set_remerge_diff_only(revs);
 		revs->imply_patch = 1;
 	} else if (!strcmp(arg, "--no-diff-merges")) {
 		suppress(revs);
