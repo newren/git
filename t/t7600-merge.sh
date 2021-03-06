@@ -76,7 +76,7 @@ verify_merge () {
 	git diff --exit-code &&
 	if test -n "$3"
 	then
-		git show -s --pretty=tformat:%s HEAD >msg.act &&
+		git show --cc -s --pretty=tformat:%s HEAD >msg.act &&
 		test_cmp "$3" msg.act
 	fi
 }

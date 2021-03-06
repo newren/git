@@ -409,8 +409,7 @@ test_expect_success 'already-up-to-date pull/rebase succeeds with "only" in pull
 
 test_expect_success 'merge c1 with c2 (ours in pull.twohead)' '
 	git reset --hard c1 &&
-	git config pull.twohead ours &&
-	git merge c2 &&
+	git merge -s ours c2 &&
 	test_path_is_file c1.c &&
 	test_path_is_missing c2.c
 '
@@ -481,7 +480,7 @@ test_expect_success 'setup conflicted merge' '
 # recursive is chosen.
 
 test_expect_success 'merge picks up the best result' '
-	git config --unset-all pull.twohead &&
+	test_might_fail git config --unset-all pull.twohead &&
 	git reset --hard c5 &&
 	test_must_fail git merge -s resolve c6 &&
 	resolve_count=$(conflict_count) &&
