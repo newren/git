@@ -7110,7 +7110,7 @@ int diff_result_code(struct rev_info *revs)
 	struct diff_options *opt = &revs->diffopt;
 	int result = 0;
 
-	if (revs->remerge_diff) {
+	if (revs->remerge_diff || revs->remerge_diff_only) {
 		tmp_objdir_destroy(revs->remerge_objdir);
 		revs->remerge_objdir = NULL;
 	}

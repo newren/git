@@ -2156,6 +2156,8 @@ int cmd_format_patch(int argc,
 		die(_("--check does not make sense"));
 	if (rev.remerge_diff)
 		die(_("--remerge-diff does not make sense"));
+	if (rev.remerge_diff_only)
+		die(_("--remerge-diff-only does not make sense"));
 
 	if (!use_patch_format &&
 		(!rev.diffopt.output_format ||
