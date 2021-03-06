@@ -15,9 +15,9 @@ DESCRIPTION
 -----------
 Shows one or more objects (blobs, trees, tags and commits).
 
-For commits it shows the log message and textual diff. It also
-presents the merge commit in a special format as produced by
-'git diff-tree --cc'.
+By default, for non-merge commits it shows the log message and textual
+diff and for merge commits it shows the log message and a diff against
+a remerge.
 
 For tags, it shows the tag message and the referenced objects.
 
