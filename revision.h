@@ -198,9 +198,10 @@ struct rev_info {
 			separate_merges: 1,
 			combine_merges:1,
 			combined_all_paths:1,
-			combined_imply_patch:1,
+			imply_patch:1,
 			dense_combined_merges:1,
-			first_parent_merges:1;
+			first_parent_merges:1,
+			remerge_diff:1;
 
 	/* Format info */
 	int		show_notes;
@@ -317,6 +318,9 @@ struct rev_info {
 	 * This is loaded from the commit-graph being used.
 	 */
 	struct bloom_filter_settings *bloom_filter_settings;
+
+	/* Location where temporary objects for remerge-diff are written. */
+	struct strbuf remerge_objdir_location;
 };
 
 int ref_excluded(struct string_list *, const char *path);
