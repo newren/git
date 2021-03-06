@@ -35,6 +35,8 @@
 #include "repository.h"
 #include "commit-reach.h"
 #include "range-diff.h"
+#include "dir.h"
+#include "tmp-objdir.h"
 
 #define MAIL_DEFAULT_WRAP 72
 #define COVER_FROM_AUTO_MAX_SUBJECT_LEN 100
@@ -51,6 +53,7 @@ static int default_encode_email_headers = 1;
 static int decoration_style;
 static int decoration_given;
 static int use_mailmap_config = 1;
+static struct tmp_objdir *tmp_objdir;
 static const char *fmt_patch_subject_prefix = "PATCH";
 static int fmt_patch_name_max = FORMAT_PATCH_NAME_MAX_DEFAULT;
 static const char *fmt_pretty;
@@ -404,6 +407,17 @@ static int cmd_log_walk(struct rev_info *rev)
 	int saved_nrl = 0;
 	int saved_dcctc = 0;
 
+	if (rev->remerge_diff) {
+		tmp_objdir = tmp_objdir_create();
+		if (!tmp_objdir)
+			die(_("unable to create temporary object directory"));
+		tmp_objdir_make_primary(the_repository, tmp_objdir);
+
+		strbuf_init(&rev->remerge_objdir_location, 0);
+		strbuf_addstr(&rev->remerge_objdir_location,
+			      tmp_objdir_path(tmp_objdir));
+	}
+
 	if (rev->early_output)
 		setup_early_output();
 
@@ -445,6 +459,13 @@ static int cmd_log_walk(struct rev_info *rev)
 	rev->diffopt.needed_rename_limit = saved_nrl;
 	rev->diffopt.no_free = 0;
 	diff_free(&rev->diffopt);
+
+	if (rev->remerge_diff) {
+		strbuf_release(&rev->remerge_objdir_location);
+		tmp_objdir_remove_as_primary(the_repository, tmp_objdir);
+		tmp_objdir_destroy(tmp_objdir);
+		tmp_objdir = NULL;
+	}
 
 	if (rev->diffopt.output_format & DIFF_FORMAT_CHECKDIFF &&
 	    rev->diffopt.flags.check_failed) {
@@ -1940,6 +1961,8 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 		die(_("--name-status does not make sense"));
 	if (rev.diffopt.output_format & DIFF_FORMAT_CHECKDIFF)
 		die(_("--check does not make sense"));
+	if (rev.remerge_diff)
+		die(_("--remerge_diff does not make sense"));
 
 	if (!use_patch_format &&
 		(!rev.diffopt.output_format ||
