@@ -70,7 +70,8 @@ ifdef::git-log[]
 	With this option, two-parent merge commits are remerged to
 	create a temporary tree object -- potentially containing files
 	with conflict markers and such.  A diff is then shown between
-	that temporary tree and the actual merge commit.
+	that temporary tree and the actual merge commit.  This is
+	implied by `-p` unless a different diff-merges option is passed.
 +
 --diff-merges=remerge-only:::
 --diff-merges=ro:::

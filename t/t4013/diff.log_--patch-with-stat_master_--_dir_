@@ -5,6 +5,26 @@ Author: A U Thor <author@example.com>
 Date:   Mon Jun 26 00:04:00 2006 +0000
 
     Merge branch 'side'
+---
+ dir/sub | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/dir/sub b/dir/sub
+index fffffff..fffffff 100644
+--- a/dir/sub
++++ b/dir/sub
+@@ -1,11 +1,8 @@
+ A
+ B
+-<<<<<<< fffffff (Third)
+ C
+ D
+ E
+ F
+-=======
+ 1
+ 2
+->>>>>>> fffffff (Side)
 
 commit c7a2ab9e8eac7b117442a607d5a9b3950ae34d5a
 Author: A U Thor <author@example.com>

@@ -1261,7 +1261,7 @@ cat >expect <<\EOF
 EOF
 
 test_expect_success 'log --graph with diff and stats' '
-	lib_test_cmp_short_graph --no-renames --stat -p
+	lib_test_cmp_short_graph --no-renames --stat -p --no-diff-merges
 '
 
 cat >expect <<\EOF
@@ -1536,7 +1536,7 @@ cat >expect <<\EOF
 EOF
 
 test_expect_success 'log --line-prefix="*** " --graph with diff and stats' '
-	lib_test_cmp_short_graph --line-prefix="*** " --no-renames --stat -p
+	lib_test_cmp_short_graph --line-prefix="*** " --no-renames --stat -p --no-diff-merges
 '
 
 cat >expect <<-\EOF

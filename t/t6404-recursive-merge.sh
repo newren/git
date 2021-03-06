@@ -108,8 +108,8 @@ test_expect_success 'refuse to merge binary files' '
 	printf "\0\0" >binary-file &&
 	git add binary-file &&
 	git commit -m binary2 &&
-	test_must_fail git merge F >merge.out 2>merge.err &&
-	grep "Cannot merge binary files: binary-file (HEAD vs. F)" merge.err
+	test_must_fail git merge F >merge.out 2>&1 &&
+	grep "Cannot merge binary files: binary-file (HEAD vs. F)" merge.out
 '
 
 test_expect_success 'mark rename/delete as unmerged' '

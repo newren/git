@@ -171,6 +171,12 @@ void diff_merges_default_to_dense_combined(struct rev_info *revs)
 		set_dense_combined(revs);
 }
 
+void diff_merges_default_to_remerge_diff(struct rev_info *revs)
+{
+	if (!revs->explicit_diff_merges)
+		revs->remerge_diff = 1;
+}
+
 void diff_merges_set_dense_combined_if_unset(struct rev_info *revs)
 {
 	if (!revs->combine_merges)
