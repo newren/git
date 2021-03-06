@@ -379,6 +379,7 @@ show initial
 show --root initial
 show side
 show master
+show --cc master
 show -c master
 show -m master
 show --first-parent master

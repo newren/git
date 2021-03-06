@@ -633,7 +633,7 @@ static void show_setup_revisions_tweak(struct rev_info *rev,
 	if (rev->first_parent_only)
 		diff_merges_default_to_first_parent(rev);
 	else
-		diff_merges_default_to_dense_combined(rev);
+		diff_merges_default_to_remerge_diff(rev);
 	if (!rev->diffopt.output_format)
 		rev->diffopt.output_format = DIFF_FORMAT_PATCH;
 }
@@ -756,6 +756,9 @@ static void log_setup_revisions_tweak(struct rev_info *rev,
 
 	if (rev->first_parent_only)
 		diff_merges_default_to_first_parent(rev);
+	else if (rev->diffopt.output_format)
+		/* Make -p imply --remerge-diff */
+		diff_merges_default_to_remerge_diff(rev);
 }
 
 int cmd_log(int argc, const char **argv, const char *prefix)

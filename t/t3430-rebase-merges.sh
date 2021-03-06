@@ -402,7 +402,7 @@ test_expect_success 'octopus merges' '
 
 	test_tick &&
 	git rebase -i --force-rebase -r HEAD^^ &&
-	test "Hank" = "$(git show -s --format=%an HEAD)" &&
+	test "Hank" = "$(git show -s --cc --format=%an HEAD)" &&
 	test "$before" != $(git rev-parse HEAD) &&
 	test_cmp_graph HEAD^^.. <<-\EOF
 	*-.   Tüntenfüsch

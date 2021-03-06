@@ -5,6 +5,55 @@ Author: A U Thor <author@example.com>
 Date:   Mon Jun 26 00:04:00 2006 +0000
 
     Merge branch 'side'
+---
+ dir/sub | 3 ---
+ file0   | 3 ---
+ file3   | 4 ----
+ 3 files changed, 10 deletions(-)
+
+diff --git a/dir/sub b/dir/sub
+index fffffff..fffffff 100644
+--- a/dir/sub
++++ b/dir/sub
+@@ -1,11 +1,8 @@
+ A
+ B
+-<<<<<<< fffffff (Third)
+ C
+ D
+ E
+ F
+-=======
+ 1
+ 2
+->>>>>>> fffffff (Side)
+diff --git a/file0 b/file0
+index fffffff..fffffff 100644
+--- a/file0
++++ b/file0
+@@ -1,12 +1,9 @@
+ 1
+ 2
+ 3
+-<<<<<<< fffffff (Third)
+ 4
+ 5
+ 6
+-=======
+ A
+ B
+ C
+->>>>>>> fffffff (Side)
+diff --git a/file3 b/file3
+deleted file mode 100644
+index fffffff..0000000
+--- a/file3
++++ /dev/null
+@@ -1,4 +0,0 @@
+-A
+-B
+-1
+-2
 
 commit c7a2ab9e8eac7b117442a607d5a9b3950ae34d5a
 Author: A U Thor <author@example.com>
