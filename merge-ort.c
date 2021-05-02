@@ -3175,6 +3175,11 @@ static int detect_and_process_renames(struct merge_options *opt,
 		int i, side;
 		struct diff_filepair *p;
 
+		/*
+		 * FIXME: Drop existing cache_pairs, if any,
+		 * since we're about to overwrite all of them.
+		 */
+
 		/* Cache the renames, we found */
 		for (side = MERGE_SIDE1; side <= MERGE_SIDE2; side++) {
 			for (i = 0; i < renames->pairs[side].nr; ++i) {
