@@ -45,10 +45,10 @@
 #define REF_UPDATE_VIA_HEAD (1 << 8)
 
 /*
- * Used as a flag in ref_update::flags when the loose reference has
- * been deleted.
+ * Used as a flag in ref_update::flags when a reference has been
+ * deleted and the ref's parent directories may need cleanup.
  */
-#define REF_DELETED_LOOSE (1 << 9)
+#define REF_DELETED_RMDIR (1 << 9)
 
 struct ref_lock {
 	char *ref_name;
@@ -1084,7 +1084,7 @@ static void prune_ref(struct files_ref_store *refs, struct ref_to_prune *r)
 	ref_transaction_add_update(
 			transaction, r->name,
 			REF_NO_DEREF | REF_HAVE_NEW | REF_HAVE_OLD | REF_IS_PRUNING,
-			&null_oid, &r->oid, NULL);
+			null_oid(), &r->oid, NULL);
 	if (ref_transaction_commit(transaction, &err))
 		goto cleanup;
 
@@ -2852,6 +2852,7 @@ static int files_transaction_finish(struct ref_store *ref_store,
 
 		if (update->flags & REF_DELETING &&
 		    !(update->flags & REF_LOG_ONLY)) {
+			update->flags |= REF_DELETED_RMDIR;
 			if (!(update->type & REF_ISPACKED) ||
 			    update->type & REF_ISSYMREF) {
 				/* It is a loose reference. */
@@ -2861,7 +2862,6 @@ static int files_transaction_finish(struct ref_store *ref_store,
 					ret = TRANSACTION_GENERIC_ERROR;
 					goto cleanup;
 				}
-				update->flags |= REF_DELETED_LOOSE;
 			}
 		}
 	}
@@ -2874,9 +2874,9 @@ cleanup:
 	for (i = 0; i < transaction->nr; i++) {
 		struct ref_update *update = transaction->updates[i];
 
-		if (update->flags & REF_DELETED_LOOSE) {
+		if (update->flags & REF_DELETED_RMDIR) {
 			/*
-			 * The loose reference was deleted. Delete any
+			 * The reference was deleted. Delete any
 			 * empty parent directories. (Note that this
 			 * can only work because we have already
 			 * removed the lockfile.)

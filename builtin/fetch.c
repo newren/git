@@ -48,6 +48,7 @@ enum {
 static int fetch_prune_config = -1; /* unspecified */
 static int fetch_show_forced_updates = 1;
 static uint64_t forced_updates_ms = 0;
+static int prefetch = 0;
 static int prune = -1; /* unspecified */
 #define PRUNE_BY_DEFAULT 0 /* do we prune by default? */
 
@@ -82,6 +83,7 @@ static struct string_list server_options = STRING_LIST_INIT_DUP;
 static struct string_list negotiation_tip = STRING_LIST_INIT_NODUP;
 static int fetch_write_commit_graph = -1;
 static int stdin_refspecs = 0;
+static int negotiate_only;
 
 static int git_fetch_config(const char *k, const char *v, void *cb)
 {
@@ -158,6 +160,8 @@ static struct option builtin_fetch_options[] = {
 		    N_("do not fetch all tags (--no-tags)"), TAGS_UNSET),
 	OPT_INTEGER('j', "jobs", &max_jobs,
 		    N_("number of submodules fetched in parallel")),
+	OPT_BOOL(0, "prefetch", &prefetch,
+		 N_("modify the refspec to place all refs within refs/prefetch/")),
 	OPT_BOOL('p', "prune", &prune,
 		 N_("prune remote-tracking branches no longer on remote")),
 	OPT_BOOL('P', "prune-tags", &prune_tags,
@@ -202,6 +206,8 @@ static struct option builtin_fetch_options[] = {
 			TRANSPORT_FAMILY_IPV6),
 	OPT_STRING_LIST(0, "negotiation-tip", &negotiation_tip, N_("revision"),
 			N_("report that we have only objects reachable from this object")),
+	OPT_BOOL(0, "negotiate-only", &negotiate_only,
+		 N_("do not fetch a packfile; instead, print ancestors of negotiation tips")),
 	OPT_PARSE_LIST_OBJECTS_FILTER(&filter_options),
 	OPT_BOOL(0, "auto-maintenance", &enable_auto_gc,
 		 N_("run 'maintenance --auto' after fetching")),
@@ -436,6 +442,56 @@ static void find_non_local_tags(const struct ref *refs,
 	oidset_clear(&fetch_oids);
 }
 
+static void filter_prefetch_refspec(struct refspec *rs)
+{
+	int i;
+
+	if (!prefetch)
+		return;
+
+	for (i = 0; i < rs->nr; i++) {
+		struct strbuf new_dst = STRBUF_INIT;
+		char *old_dst;
+		const char *sub = NULL;
+
+		if (rs->items[i].negative)
+			continue;
+		if (!rs->items[i].dst ||
+		    (rs->items[i].src &&
+		     !strncmp(rs->items[i].src, "refs/tags/", 10))) {
+			int j;
+
+			free(rs->items[i].src);
+			free(rs->items[i].dst);
+
+			for (j = i + 1; j < rs->nr; j++) {
+				rs->items[j - 1] = rs->items[j];
+				rs->raw[j - 1] = rs->raw[j];
+			}
+			rs->nr--;
+			i--;
+			continue;
+		}
+
+		old_dst = rs->items[i].dst;
+		strbuf_addstr(&new_dst, "refs/prefetch/");
+
+		/*
+		 * If old_dst starts with "refs/", then place
+		 * sub after that prefix. Otherwise, start at
+		 * the beginning of the string.
+		 */
+		if (!skip_prefix(old_dst, "refs/", &sub))
+			sub = old_dst;
+		strbuf_addstr(&new_dst, sub);
+
+		rs->items[i].dst = strbuf_detach(&new_dst, NULL);
+		rs->items[i].force = 1;
+
+		free(old_dst);
+	}
+}
+
 static struct ref *get_ref_map(struct remote *remote,
 			       const struct ref *remote_refs,
 			       struct refspec *rs,
@@ -451,6 +507,10 @@ static struct ref *get_ref_map(struct remote *remote,
 
 	struct hashmap existing_refs;
 	int existing_refs_populated = 0;
+
+	filter_prefetch_refspec(rs);
+	if (remote)
+		filter_prefetch_refspec(&remote->fetch);
 
 	if (rs->nr) {
 		struct refspec *fetch_refspec;
@@ -520,7 +580,7 @@ static struct ref *get_ref_map(struct remote *remote,
 			if (has_merge &&
 			    !strcmp(branch->remote_name, remote->name))
 				add_merge_config(&ref_map, remote_refs, branch, &tail);
-		} else {
+		} else if (!prefetch) {
 			ref_map = get_remote_ref(remote_refs, "HEAD");
 			if (!ref_map)
 				die(_("Couldn't find remote ref HEAD"));
@@ -1066,7 +1126,7 @@ static int store_updated_refs(const char *raw_url, const char *remote_name,
 
 			if (rm->status == REF_STATUS_REJECT_SHALLOW) {
 				if (want_status == FETCH_HEAD_MERGE)
-					warning(_("reject %s because shallow roots are not allowed to be updated"),
+					warning(_("rejected %s because shallow roots are not allowed to be updated"),
 						rm->peer_ref ? rm->peer_ref->name : rm->name);
 				continue;
 			}
@@ -1986,7 +2046,29 @@ int cmd_fetch(int argc, const char **argv, const char *prefix)
 		}
 	}
 
-	if (remote) {
+	if (negotiate_only) {
+		struct oidset acked_commits = OIDSET_INIT;
+		struct oidset_iter iter;
+		const struct object_id *oid;
+
+		if (!remote)
+			die(_("must supply remote when using --negotiate-only"));
+		gtransport = prepare_transport(remote, 1);
+		if (gtransport->smart_options) {
+			gtransport->smart_options->acked_commits = &acked_commits;
+		} else {
+			warning(_("Protocol does not support --negotiate-only, exiting."));
+			return 1;
+		}
+		if (server_options.nr)
+			gtransport->server_options = &server_options;
+		result = transport_fetch_refs(gtransport, NULL);
+
+		oidset_iter_init(&acked_commits, &iter);
+		while ((oid = oidset_iter_next(&iter)))
+			printf("%s\n", oid_to_hex(oid));
+		oidset_clear(&acked_commits);
+	} else if (remote) {
 		if (filter_options.choice || has_promisor_remote())
 			fetch_one_setup_partial(remote);
 		result = fetch_one(remote, argc, argv, prune_tags_ok, stdin_refspecs);

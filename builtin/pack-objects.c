@@ -37,6 +37,134 @@
 #include "shallow.h"
 #include "promisor-remote.h"
 
+/*
+ * Objects we are going to pack are collected in the `to_pack` structure.
+ * It contains an array (dynamically expanded) of the object data, and a map
+ * that can resolve SHA1s to their position in the array.
+ */
+static struct packing_data to_pack;
+
+static inline struct object_entry *oe_delta(
+		const struct packing_data *pack,
+		const struct object_entry *e)
+{
+	if (!e->delta_idx)
+		return NULL;
+	if (e->ext_base)
+		return &pack->ext_bases[e->delta_idx - 1];
+	else
+		return &pack->objects[e->delta_idx - 1];
+}
+
+static inline unsigned long oe_delta_size(struct packing_data *pack,
+					  const struct object_entry *e)
+{
+	if (e->delta_size_valid)
+		return e->delta_size_;
+
+	/*
+	 * pack->delta_size[] can't be NULL because oe_set_delta_size()
+	 * must have been called when a new delta is saved with
+	 * oe_set_delta().
+	 * If oe_delta() returns NULL (i.e. default state, which means
+	 * delta_size_valid is also false), then the caller must never
+	 * call oe_delta_size().
+	 */
+	return pack->delta_size[e - pack->objects];
+}
+
+unsigned long oe_get_size_slow(struct packing_data *pack,
+			       const struct object_entry *e);
+
+static inline unsigned long oe_size(struct packing_data *pack,
+				    const struct object_entry *e)
+{
+	if (e->size_valid)
+		return e->size_;
+
+	return oe_get_size_slow(pack, e);
+}
+
+static inline void oe_set_delta(struct packing_data *pack,
+				struct object_entry *e,
+				struct object_entry *delta)
+{
+	if (delta)
+		e->delta_idx = (delta - pack->objects) + 1;
+	else
+		e->delta_idx = 0;
+}
+
+static inline struct object_entry *oe_delta_sibling(
+		const struct packing_data *pack,
+		const struct object_entry *e)
+{
+	if (e->delta_sibling_idx)
+		return &pack->objects[e->delta_sibling_idx - 1];
+	return NULL;
+}
+
+static inline struct object_entry *oe_delta_child(
+		const struct packing_data *pack,
+		const struct object_entry *e)
+{
+	if (e->delta_child_idx)
+		return &pack->objects[e->delta_child_idx - 1];
+	return NULL;
+}
+
+static inline void oe_set_delta_child(struct packing_data *pack,
+				      struct object_entry *e,
+				      struct object_entry *delta)
+{
+	if (delta)
+		e->delta_child_idx = (delta - pack->objects) + 1;
+	else
+		e->delta_child_idx = 0;
+}
+
+static inline void oe_set_delta_sibling(struct packing_data *pack,
+					struct object_entry *e,
+					struct object_entry *delta)
+{
+	if (delta)
+		e->delta_sibling_idx = (delta - pack->objects) + 1;
+	else
+		e->delta_sibling_idx = 0;
+}
+
+static inline void oe_set_size(struct packing_data *pack,
+			       struct object_entry *e,
+			       unsigned long size)
+{
+	if (size < pack->oe_size_limit) {
+		e->size_ = size;
+		e->size_valid = 1;
+	} else {
+		e->size_valid = 0;
+		if (oe_get_size_slow(pack, e) != size)
+			BUG("'size' is supposed to be the object size!");
+	}
+}
+
+static inline void oe_set_delta_size(struct packing_data *pack,
+				     struct object_entry *e,
+				     unsigned long size)
+{
+	if (size < pack->oe_delta_size_limit) {
+		e->delta_size_ = size;
+		e->delta_size_valid = 1;
+	} else {
+		packing_data_lock(pack);
+		if (!pack->delta_size)
+			ALLOC_ARRAY(pack->delta_size, pack->nr_alloc);
+		packing_data_unlock(pack);
+
+		pack->delta_size[e - pack->objects] = size;
+		e->delta_size_valid = 0;
+	}
+}
+
 #define IN_PACK(obj) oe_in_pack(&to_pack, obj)
 #define SIZE(obj) oe_size(&to_pack, obj)
 #define SET_SIZE(obj,size) oe_set_size(&to_pack, obj, size)
@@ -55,13 +183,6 @@ static const char *pack_usage[] = {
 	N_("git pack-objects [<options>...] <base-name> [< <ref-list> | < <object-list>]"),
 	NULL
 };
-
-/*
- * Objects we are going to pack are collected in the `to_pack` structure.
- * It contains an array (dynamically expanded) of the object data, and a map
- * that can resolve SHA1s to their position in the array.
- */
-static struct packing_data to_pack;
 
 static struct pack_idx_entry **written_list;
 static uint32_t nr_result, nr_written, nr_seen;
@@ -299,6 +420,17 @@ static void copy_pack_data(struct hashfile *f,
 		offset += avail;
 		len -= avail;
 	}
+}
+
+static inline int oe_size_greater_than(struct packing_data *pack,
+				       const struct object_entry *lhs,
+				       unsigned long rhs)
+{
+	if (lhs->size_valid)
+		return lhs->size_ > rhs;
+	if (rhs < pack->oe_size_limit) /* rhs < 2^x <= lhs ? */
+		return 1;
+	return oe_get_size_slow(pack, lhs) > rhs;
 }
 
 /* Return 0 if we will bust the pack-size limit */
@@ -640,6 +772,14 @@ static int mark_tagged(const char *path, const struct object_id *oid, int flag,
 			entry->tagged = 1;
 	}
 	return 0;
+}
+
+static inline unsigned char oe_layer(struct packing_data *pack,
+				     struct object_entry *e)
+{
+	if (!pack->layer)
+		return 0;
+	return pack->layer[e - pack->objects];
 }
 
 static inline void add_to_write_order(struct object_entry **wo,
@@ -1030,7 +1170,7 @@ static void write_pack_file(void)
 	write_order = compute_write_order();
 
 	do {
-		struct object_id oid;
+		unsigned char hash[GIT_MAX_RAWSZ];
 		char *pack_tmp_name = NULL;
 
 		if (pack_to_stdout)
@@ -1059,13 +1199,13 @@ static void write_pack_file(void)
 		 * If so, rewrite it like in fast-import
 		 */
 		if (pack_to_stdout) {
-			finalize_hashfile(f, oid.hash, CSUM_HASH_IN_STREAM | CSUM_CLOSE);
+			finalize_hashfile(f, hash, CSUM_HASH_IN_STREAM | CSUM_CLOSE);
 		} else if (nr_written == nr_remaining) {
-			finalize_hashfile(f, oid.hash, CSUM_HASH_IN_STREAM | CSUM_FSYNC | CSUM_CLOSE);
+			finalize_hashfile(f, hash, CSUM_HASH_IN_STREAM | CSUM_FSYNC | CSUM_CLOSE);
 		} else {
-			int fd = finalize_hashfile(f, oid.hash, 0);
-			fixup_pack_header_footer(fd, oid.hash, pack_tmp_name,
-						 nr_written, oid.hash, offset);
+			int fd = finalize_hashfile(f, hash, 0);
+			fixup_pack_header_footer(fd, hash, pack_tmp_name,
+						 nr_written, hash, offset);
 			close(fd);
 			if (write_bitmap_index) {
 				if (write_bitmap_index != WRITE_BITMAP_QUIET)
@@ -1100,17 +1240,17 @@ static void write_pack_file(void)
 			strbuf_addf(&tmpname, "%s-", base_name);
 
 			if (write_bitmap_index) {
-				bitmap_writer_set_checksum(oid.hash);
+				bitmap_writer_set_checksum(hash);
 				bitmap_writer_build_type_index(
 					&to_pack, written_list, nr_written);
 			}
 
 			finish_tmp_packfile(&tmpname, pack_tmp_name,
 					    written_list, nr_written,
-					    &pack_idx_opts, oid.hash);
+					    &pack_idx_opts, hash);
 
 			if (write_bitmap_index) {
-				strbuf_addf(&tmpname, "%s.bitmap", oid_to_hex(&oid));
+				strbuf_addf(&tmpname, "%s.bitmap", hash_to_hex(hash));
 
 				stop_progress(&progress_state);
 
@@ -1124,7 +1264,7 @@ static void write_pack_file(void)
 
 			strbuf_release(&tmpname);
 			free(pack_tmp_name);
-			puts(oid_to_hex(&oid));
+			puts(hash_to_hex(hash));
 		}
 
 		/* mark written objects as written to previous pack */
@@ -2230,6 +2370,26 @@ static pthread_mutex_t progress_mutex;
  * ahead in the list because they can be stolen and would need
  * progress_mutex for protection.
  */
+
+static inline int oe_size_less_than(struct packing_data *pack,
+				    const struct object_entry *lhs,
+				    unsigned long rhs)
+{
+	if (lhs->size_valid)
+		return lhs->size_ < rhs;
+	if (rhs < pack->oe_size_limit) /* rhs < 2^x <= lhs ? */
+		return 0;
+	return oe_get_size_slow(pack, lhs) < rhs;
+}
+
+static inline void oe_set_tree_depth(struct packing_data *pack,
+				     struct object_entry *e,
+				     unsigned int tree_depth)
+{
+	if (!pack->tree_depth)
+		CALLOC_ARRAY(pack->tree_depth, pack->nr_alloc);
+	pack->tree_depth[e - pack->objects] = tree_depth;
+}
 
 /*
  * Return the size of the object without doing any delta
@@ -3386,7 +3546,7 @@ static void add_objects_in_unpacked_packs(void)
 
 		for (i = 0; i < p->num_objects; i++) {
 			nth_packed_object_id(&oid, p, i);
-			o = lookup_unknown_object(&oid);
+			o = lookup_unknown_object(the_repository, &oid);
 			if (!(o->flags & OBJECT_ADDED))
 				mark_in_pack_object(o, p, &in_pack);
 			o->flags |= OBJECT_ADDED;
@@ -3479,6 +3639,7 @@ static void loosen_unused_packed_objects(void)
 {
 	struct packed_git *p;
 	uint32_t i;
+	uint32_t loosened_objects_nr = 0;
 	struct object_id oid;
 
 	for (p = get_all_packs(the_repository); p; p = p->next) {
@@ -3492,11 +3653,16 @@ static void loosen_unused_packed_objects(void)
 			nth_packed_object_id(&oid, p, i);
 			if (!packlist_find(&to_pack, &oid) &&
 			    !has_sha1_pack_kept_or_nonlocal(&oid) &&
-			    !loosened_object_can_be_discarded(&oid, p->mtime))
+			    !loosened_object_can_be_discarded(&oid, p->mtime)) {
 				if (force_object_loose(&oid, p->mtime))
 					die(_("unable to force loose object"));
+				loosened_objects_nr++;
+			}
 		}
 	}
+
+	trace2_data_intmax("pack-objects", the_repository,
+			   "loosen_unused_packed_objects/loosened", loosened_objects_nr);
 }
 
 /*
@@ -3516,7 +3682,7 @@ static int pack_options_allow_reuse(void)
 
 static int get_object_list_from_bitmap(struct rev_info *revs)
 {
-	if (!(bitmap_git = prepare_bitmap_walk(revs, &filter_options)))
+	if (!(bitmap_git = prepare_bitmap_walk(revs, &filter_options, 0)))
 		return -1;
 
 	if (pack_options_allow_reuse() &&
@@ -3861,6 +4027,8 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 	if (pack_to_stdout != !base_name || argc)
 		usage_with_options(pack_usage, pack_objects_options);
 
+	if (depth < 0)
+		depth = 0;
 	if (depth >= (1 << OE_DEPTH_BITS)) {
 		warning(_("delta chain depth %d is too deep, forcing %d"),
 			depth, (1 << OE_DEPTH_BITS) - 1);
@@ -3871,6 +4039,8 @@ int cmd_pack_objects(int argc, const char **argv, const char *prefix)
 			(1U << OE_Z_DELTA_BITS) - 1);
 		cache_max_small_delta_size = (1U << OE_Z_DELTA_BITS) - 1;
 	}
+	if (window < 0)
+		window = 0;
 
 	strvec_push(&rp, "pack-objects");
 	if (thin) {

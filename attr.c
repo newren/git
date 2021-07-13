@@ -685,7 +685,7 @@ static struct attr_stack *read_attr_from_array(const char **list)
  * Callers into the attribute system assume there is a single, system-wide
  * global state where attributes are read from and when the state is flipped by
  * calling git_attr_set_direction(), the stack frames that have been
- * constructed need to be discarded so so that subsequent calls into the
+ * constructed need to be discarded so that subsequent calls into the
  * attribute system will lazily read from the right place.  Since changing
  * direction causes a global paradigm shift, it should not ever be called while
  * another thread could potentially be calling into the attribute system.
@@ -733,7 +733,7 @@ static struct attr_stack *read_attr_from_file(const char *path, unsigned flags)
 	return res;
 }
 
-static struct attr_stack *read_attr_from_index(const struct index_state *istate,
+static struct attr_stack *read_attr_from_index(struct index_state *istate,
 					       const char *path,
 					       unsigned flags)
 {
@@ -763,7 +763,7 @@ static struct attr_stack *read_attr_from_index(const struct index_state *istate,
 	return res;
 }
 
-static struct attr_stack *read_attr(const struct index_state *istate,
+static struct attr_stack *read_attr(struct index_state *istate,
 				    const char *path, unsigned flags)
 {
 	struct attr_stack *res = NULL;
@@ -855,7 +855,7 @@ static void push_stack(struct attr_stack **attr_stack_p,
 	}
 }
 
-static void bootstrap_attr_stack(const struct index_state *istate,
+static void bootstrap_attr_stack(struct index_state *istate,
 				 struct attr_stack **stack)
 {
 	struct attr_stack *e;
@@ -894,7 +894,7 @@ static void bootstrap_attr_stack(const struct index_state *istate,
 	push_stack(stack, e, NULL, 0);
 }
 
-static void prepare_attr_stack(const struct index_state *istate,
+static void prepare_attr_stack(struct index_state *istate,
 			       const char *path, int dirlen,
 			       struct attr_stack **stack)
 {
@@ -1094,7 +1094,7 @@ static void determine_macros(struct all_attrs_item *all_attrs,
  * If check->check_nr is non-zero, only attributes in check[] are collected.
  * Otherwise all attributes are collected.
  */
-static void collect_some_attrs(const struct index_state *istate,
+static void collect_some_attrs(struct index_state *istate,
 			       const char *path,
 			       struct attr_check *check)
 {
@@ -1123,7 +1123,7 @@ static void collect_some_attrs(const struct index_state *istate,
 	fill(path, pathlen, basename_offset, check->stack, check->all_attrs, rem);
 }
 
-void git_check_attr(const struct index_state *istate,
+void git_check_attr(struct index_state *istate,
 		    const char *path,
 		    struct attr_check *check)
 {
@@ -1140,7 +1140,7 @@ void git_check_attr(const struct index_state *istate,
 	}
 }
 
-void git_all_attrs(const struct index_state *istate,
+void git_all_attrs(struct index_state *istate,
 		   const char *path, struct attr_check *check)
 {
 	int i;

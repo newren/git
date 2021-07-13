@@ -485,7 +485,7 @@ static const char * const builtin_rebase_interactive_usage[] = {
 int cmd_rebase__interactive(int argc, const char **argv, const char *prefix)
 {
 	struct rebase_options opts = REBASE_OPTIONS_INIT;
-	struct object_id squash_onto = null_oid;
+	struct object_id squash_onto = *null_oid();
 	enum action command = ACTION_NONE;
 	struct option options[] = {
 		OPT_NEGBIT(0, "ff", &opts.flags, N_("allow fast-forward"),
@@ -1140,7 +1140,7 @@ static int can_fast_forward(struct commit *onto, struct commit *upstream,
 
 	merge_bases = get_merge_bases(onto, head);
 	if (!merge_bases || merge_bases->next) {
-		oidcpy(merge_base, &null_oid);
+		oidcpy(merge_base, null_oid());
 		goto done;
 	}
 
@@ -2109,6 +2109,7 @@ cleanup:
 	free(options.head_name);
 	free(options.gpg_sign_opt);
 	free(options.cmd);
+	strbuf_release(&options.git_format_patch_opt);
 	free(squash_onto_name);
 	return ret;
 }

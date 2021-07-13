@@ -2053,7 +2053,7 @@ static void fn_out_diff_words_aux(void *priv,
 static int find_word_boundaries(mmfile_t *buffer, regex_t *word_regex,
 		int *begin, int *end)
 {
-	if (word_regex && *begin < buffer->size) {
+	while (word_regex && *begin < buffer->size) {
 		regmatch_t match[1];
 		if (!regexec_buf(word_regex, buffer->ptr + *begin,
 				 buffer->size - *begin, 1, match, 0)) {
@@ -2061,9 +2061,13 @@ static int find_word_boundaries(mmfile_t *buffer, regex_t *word_regex,
 					'\n', match[0].rm_eo - match[0].rm_so);
 			*end = p ? p - buffer->ptr : match[0].rm_eo + *begin;
 			*begin += match[0].rm_so;
-			return *begin >= *end;
+			if (*begin == *end)
+				(*begin)++;
+			else
+				return *begin > *end;
+		} else {
+			return -1;
 		}
-		return -1;
 	}
 
 	/* find the next word */
@@ -4190,7 +4194,7 @@ static struct diff_tempfile *prepare_temp_file(struct repository *r,
 				die_errno("readlink(%s)", name);
 			prep_temp_blob(r->index, name, temp, sb.buf, sb.len,
 				       (one->oid_valid ?
-					&one->oid : &null_oid),
+					&one->oid : null_oid()),
 				       (one->oid_valid ?
 					one->mode : S_IFLNK));
 			strbuf_release(&sb);
@@ -4199,7 +4203,7 @@ static struct diff_tempfile *prepare_temp_file(struct repository *r,
 			/* we can borrow from the file in the work tree */
 			temp->name = name;
 			if (!one->oid_valid)
-				oid_to_hex_r(temp->hex, &null_oid);
+				oid_to_hex_r(temp->hex, null_oid());
 			else
 				oid_to_hex_r(temp->hex, &one->oid);
 			/* Even though we may sometimes borrow the
@@ -6234,7 +6238,7 @@ static int diff_get_patch_id(struct diff_options *options, struct object_id *oid
 	}
 
 	if (!stable)
-		the_hash_algo->final_fn(oid->hash, &ctx);
+		the_hash_algo->final_oid_fn(oid, &ctx);
 
 	return 0;
 }

@@ -164,6 +164,9 @@ static void process_tree(struct traversal_context *ctx,
 		die("bad tree object");
 	if (obj->flags & (UNINTERESTING | SEEN))
 		return;
+	if (revs->include_check_obj &&
+	    !revs->include_check_obj(&tree->object, revs->include_check_data))
+		return;
 
 	failed_parse = parse_tree_gently(tree, 1);
 	if (failed_parse) {
@@ -211,6 +214,21 @@ static void process_tree(struct traversal_context *ctx,
 
 	strbuf_setlen(base, baselen);
 	free_tree_buffer(tree);
+}
+
+static void process_tag(struct traversal_context *ctx,
+			struct tag *tag,
+			const char *name)
+{
+	enum list_objects_filter_result r;
+
+	r = list_objects_filter__filter_object(ctx->revs->repo, LOFS_TAG,
+					       &tag->object, NULL, NULL,
+					       ctx->filter);
+	if (r & LOFR_MARK_SEEN)
+		tag->object.flags |= SEEN;
+	if (r & LOFR_DO_SHOW)
+		ctx->show_object(&tag->object, name, ctx->show_data);
 }
 
 static void mark_edge_parents_uninteresting(struct commit *commit,
@@ -334,8 +352,7 @@ static void traverse_trees_and_blobs(struct traversal_context *ctx,
 		if (obj->flags & (UNINTERESTING | SEEN))
 			continue;
 		if (obj->type == OBJ_TAG) {
-			obj->flags |= SEEN;
-			ctx->show_object(obj, name, ctx->show_data);
+			process_tag(ctx, (struct tag *)obj, name);
 			continue;
 		}
 		if (!path)
@@ -361,6 +378,12 @@ static void do_traverse(struct traversal_context *ctx)
 	strbuf_init(&csp, PATH_MAX);
 
 	while ((commit = get_revision(ctx->revs)) != NULL) {
+		enum list_objects_filter_result r;
+
+		r = list_objects_filter__filter_object(ctx->revs->repo,
+				LOFS_COMMIT, &commit->object,
+				NULL, NULL, ctx->filter);
+
 		/*
 		 * an uninteresting boundary commit may not have its tree
 		 * parsed yet, but we are not going to show them anyway
@@ -375,7 +398,11 @@ static void do_traverse(struct traversal_context *ctx)
 			die(_("unable to load root tree for commit %s"),
 			      oid_to_hex(&commit->object.oid));
 		}
-		ctx->show_commit(commit, ctx->show_data);
+
+		if (r & LOFR_MARK_SEEN)
+			commit->object.flags |= SEEN;
+		if (r & LOFR_DO_SHOW)
+			ctx->show_commit(commit, ctx->show_data);
 
 		if (ctx->revs->tree_blobs_in_commit_order)
 			/*

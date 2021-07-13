@@ -616,6 +616,7 @@ static void wt_status_collect_changes_worktree(struct wt_status *s)
 	rev.diffopt.rename_score = s->rename_score >= 0 ? s->rename_score : rev.diffopt.rename_score;
 	copy_pathspec(&rev.prune_data, &s->pathspec);
 	run_diff_files(&rev, 0);
+	clear_pathspec(&rev.prune_data);
 }
 
 static void wt_status_collect_changes_index(struct wt_status *s)
@@ -652,6 +653,8 @@ static void wt_status_collect_changes_index(struct wt_status *s)
 	rev.diffopt.rename_score = s->rename_score >= 0 ? s->rename_score : rev.diffopt.rename_score;
 	copy_pathspec(&rev.prune_data, &s->pathspec);
 	run_diff_index(&rev, 1);
+	object_array_clear(&rev.pending);
+	clear_pathspec(&rev.prune_data);
 }
 
 static void wt_status_collect_changes_initial(struct wt_status *s)
@@ -1687,10 +1690,10 @@ void wt_status_get_state(struct repository *r,
 	if (!sequencer_get_last_command(r, &action)) {
 		if (action == REPLAY_PICK) {
 			state->cherry_pick_in_progress = 1;
-			oidcpy(&state->cherry_pick_head_oid, &null_oid);
+			oidcpy(&state->cherry_pick_head_oid, null_oid());
 		} else {
 			state->revert_in_progress = 1;
-			oidcpy(&state->revert_head_oid, &null_oid);
+			oidcpy(&state->revert_head_oid, null_oid());
 		}
 	}
 	if (get_detached_from)
@@ -2480,6 +2483,7 @@ int has_uncommitted_changes(struct repository *r,
 
 	diff_setup_done(&rev_info.diffopt);
 	result = run_diff_index(&rev_info, 1);
+	object_array_clear(&rev_info.pending);
 	return diff_result_code(&rev_info.diffopt, result);
 }
 

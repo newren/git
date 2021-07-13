@@ -189,10 +189,8 @@ static int remove_dirs(struct strbuf *path, const char *prefix, int force_flag,
 	strbuf_complete(path, '/');
 
 	len = path->len;
-	while ((e = readdir(dir)) != NULL) {
+	while ((e = readdir_skip_dot_and_dotdot(dir)) != NULL) {
 		struct stat st;
-		if (is_dot_or_dotdot(e->d_name))
-			continue;
 
 		strbuf_setlen(path, len);
 		strbuf_addstr(path, e->d_name);
@@ -1003,7 +1001,6 @@ int cmd_clean(int argc, const char **argv, const char *prefix)
 
 	for (i = 0; i < dir.nr; i++) {
 		struct dir_entry *ent = dir.entries[i];
-		int matches = 0;
 		struct stat st;
 		const char *rel;
 
@@ -1013,8 +1010,7 @@ int cmd_clean(int argc, const char **argv, const char *prefix)
 		if (lstat(ent->name, &st))
 			die_errno("Cannot lstat '%s'", ent->name);
 
-		if (S_ISDIR(st.st_mode) && !remove_directories &&
-		    matches != MATCHED_EXACTLY)
+		if (S_ISDIR(st.st_mode) && !remove_directories)
 			continue;
 
 		rel = relative_path(ent->name, prefix, &buf);

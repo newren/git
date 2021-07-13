@@ -164,6 +164,7 @@ static GIT_PATH_FUNC(rebase_path_strategy, "rebase-merge/strategy")
 static GIT_PATH_FUNC(rebase_path_strategy_opts, "rebase-merge/strategy_opts")
 static GIT_PATH_FUNC(rebase_path_allow_rerere_autoupdate, "rebase-merge/allow_rerere_autoupdate")
 static GIT_PATH_FUNC(rebase_path_reschedule_failed_exec, "rebase-merge/reschedule-failed-exec")
+static GIT_PATH_FUNC(rebase_path_no_reschedule_failed_exec, "rebase-merge/no-reschedule-failed-exec")
 static GIT_PATH_FUNC(rebase_path_drop_redundant_commits, "rebase-merge/drop_redundant_commits")
 static GIT_PATH_FUNC(rebase_path_keep_redundant_commits, "rebase-merge/keep_redundant_commits")
 
@@ -524,7 +525,7 @@ static int fast_forward_to(struct repository *r,
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD",
 				   to, unborn && !is_rebase_i(opts) ?
-				   &null_oid : from,
+				   null_oid() : from,
 				   0, sb.buf, &err) ||
 	    ref_transaction_commit(transaction, &err)) {
 		ref_transaction_free(transaction);
@@ -1131,7 +1132,7 @@ int update_head_with_reflog(const struct commit *old_head,
 	transaction = ref_transaction_begin(err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD", new_head,
-				   old_head ? &old_head->object.oid : &null_oid,
+				   old_head ? &old_head->object.oid : null_oid(),
 				   0, sb.buf, err) ||
 	    ref_transaction_commit(transaction, err)) {
 		ret = -1;
@@ -2868,6 +2869,8 @@ static int read_populate_opts(struct replay_opts *opts)
 
 		if (file_exists(rebase_path_reschedule_failed_exec()))
 			opts->reschedule_failed_exec = 1;
+		else if (file_exists(rebase_path_no_reschedule_failed_exec()))
+			opts->reschedule_failed_exec = 0;
 
 		if (file_exists(rebase_path_drop_redundant_commits()))
 			opts->drop_redundant_commits = 1;
@@ -2968,6 +2971,8 @@ int write_basic_state(struct replay_opts *opts, const char *head_name,
 		write_file(rebase_path_ignore_date(), "%s", "");
 	if (opts->reschedule_failed_exec)
 		write_file(rebase_path_reschedule_failed_exec(), "%s", "");
+	else
+		write_file(rebase_path_no_reschedule_failed_exec(), "%s", "");
 
 	return 0;
 }

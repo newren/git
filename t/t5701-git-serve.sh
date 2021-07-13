@@ -16,9 +16,10 @@ test_expect_success 'test capability advertisement' '
 	version 2
 	agent=git/$(git version | cut -d" " -f3)
 	ls-refs=unborn
-	fetch=shallow
+	fetch=shallow wait-for-done
 	server-option
 	object-format=$(test_oid algo)
+	object-info
 	0000
 	EOF
 
@@ -238,6 +239,31 @@ test_expect_success 'unexpected lines are not allowed in fetch request' '
 		test_must_fail test-tool serve-v2 --stateless-rpc
 	) <in >/dev/null 2>err &&
 	grep "unexpected line: .this-is-not-a-command." err
+'
+
+# Test the basics of object-info
+#
+test_expect_success 'basics of object-info' '
+	test-tool pkt-line pack >in <<-EOF &&
+	command=object-info
+	object-format=$(test_oid algo)
+	0001
+	size
+	oid $(git rev-parse two:two.t)
+	oid $(git rev-parse two:two.t)
+	0000
+	EOF
+
+	cat >expect <<-EOF &&
+	size
+	$(git rev-parse two:two.t) $(wc -c <two.t | xargs)
+	$(git rev-parse two:two.t) $(wc -c <two.t | xargs)
+	0000
+	EOF
+
+	test-tool serve-v2 --stateless-rpc <in >out &&
+	test-tool pkt-line unpack <out >actual &&
+	test_cmp expect actual
 '
 
 test_done

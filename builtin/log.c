@@ -481,6 +481,8 @@ static int git_log_config(const char *var, const char *value, void *cb)
 			decoration_style = 0; /* maybe warn? */
 		return 0;
 	}
+	if (!strcmp(var, "log.diffmerges"))
+		return diff_merges_config(value);
 	if (!strcmp(var, "log.showroot")) {
 		default_show_root = git_config_bool(var, value);
 		return 0;
@@ -1966,8 +1968,7 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 	} else if (rev.diffopt.close_file) {
 		/*
 		 * The diff code parsed --output; it has already opened the
-		 * file, but but we must instruct it not to close after each
-		 * diff.
+		 * file, but we must instruct it not to close after each diff.
 		 */
 		rev.diffopt.no_free = 1;
 	} else {

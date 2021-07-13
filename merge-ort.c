@@ -1954,7 +1954,7 @@ static int handle_content_merge(struct merge_options *opt,
 		two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
 
 		merge_status = merge_3way(opt, path,
-					  two_way ? &null_oid : &o->oid,
+					  two_way ? null_oid() : &o->oid,
 					  &a->oid, &b->oid,
 					  pathnames, extra_marker_size,
 					  &result_buf);
@@ -1976,7 +1976,7 @@ static int handle_content_merge(struct merge_options *opt,
 	} else if (S_ISGITLINK(a->mode)) {
 		int two_way = ((S_IFMT & o->mode) != (S_IFMT & a->mode));
 		clean = merge_submodule(opt, pathnames[0],
-					two_way ? &null_oid : &o->oid,
+					two_way ? null_oid() : &o->oid,
 					&a->oid, &b->oid, &result->oid);
 		if (opt->priv->call_depth && two_way && !clean) {
 			result->mode = o->mode;
@@ -2805,7 +2805,7 @@ static int process_renames(struct merge_options *opt,
 			if (type_changed) {
 				/* rename vs. typechange */
 				/* Mark the original as resolved by removal */
-				memcpy(&oldinfo->stages[0].oid, &null_oid,
+				memcpy(&oldinfo->stages[0].oid, null_oid(),
 				       sizeof(oldinfo->stages[0].oid));
 				oldinfo->stages[0].mode = 0;
 				oldinfo->filemask &= 0x06;
@@ -3327,7 +3327,7 @@ static int blob_unchanged(struct merge_options *opt,
 	struct strbuf basebuf = STRBUF_INIT;
 	struct strbuf sidebuf = STRBUF_INIT;
 	int ret = 0; /* assume changed for safety */
-	const struct index_state *idx = &opt->priv->attr_index;
+	struct index_state *idx = &opt->priv->attr_index;
 
 	if (!idx->initialized)
 		initialize_attr_index(opt);
@@ -3680,7 +3680,7 @@ static void process_entry(struct merge_options *opt,
 			if (ci->filemask & (1 << i))
 				continue;
 			ci->stages[i].mode = 0;
-			oidcpy(&ci->stages[i].oid, &null_oid);
+			oidcpy(&ci->stages[i].oid, null_oid());
 		}
 	} else if (ci->df_conflict && ci->merged.result.mode != 0) {
 		/*
@@ -3727,7 +3727,7 @@ static void process_entry(struct merge_options *opt,
 				continue;
 			/* zero out any entries related to directories */
 			new_ci->stages[i].mode = 0;
-			oidcpy(&new_ci->stages[i].oid, &null_oid);
+			oidcpy(&new_ci->stages[i].oid, null_oid());
 		}
 
 		/*
@@ -3814,12 +3814,21 @@ static void process_entry(struct merge_options *opt,
 				rename_b = 1;
 			}
 
-			path_msg(opt, path, 0,
-				 _("CONFLICT (distinct types): %s had different "
-				   "types on each side; renamed %s of them so "
-				   "each can be recorded somewhere."),
-				 path,
-				 (rename_a && rename_b) ? _("both") : _("one"));
+			if (rename_a && rename_b) {
+				path_msg(opt, path, 0,
+					 _("CONFLICT (distinct types): %s had "
+					   "different types on each side; "
+					   "renamed both of them so each can "
+					   "be recorded somewhere."),
+					 path);
+			} else {
+				path_msg(opt, path, 0,
+					 _("CONFLICT (distinct types): %s had "
+					   "different types on each side; "
+					   "renamed one of them so each can be "
+					   "recorded somewhere."),
+					 path);
+			}
 
 			ci->merged.clean = 0;
 			memcpy(new_ci, ci, sizeof(*new_ci));
@@ -3828,11 +3837,11 @@ static void process_entry(struct merge_options *opt,
 			new_ci->merged.result.mode = ci->stages[2].mode;
 			oidcpy(&new_ci->merged.result.oid, &ci->stages[2].oid);
 			new_ci->stages[1].mode = 0;
-			oidcpy(&new_ci->stages[1].oid, &null_oid);
+			oidcpy(&new_ci->stages[1].oid, null_oid());
 			new_ci->filemask = 5;
 			if ((S_IFMT & b_mode) != (S_IFMT & o_mode)) {
 				new_ci->stages[0].mode = 0;
-				oidcpy(&new_ci->stages[0].oid, &null_oid);
+				oidcpy(&new_ci->stages[0].oid, null_oid());
 				new_ci->filemask = 4;
 			}
 
@@ -3840,11 +3849,11 @@ static void process_entry(struct merge_options *opt,
 			ci->merged.result.mode = ci->stages[1].mode;
 			oidcpy(&ci->merged.result.oid, &ci->stages[1].oid);
 			ci->stages[2].mode = 0;
-			oidcpy(&ci->stages[2].oid, &null_oid);
+			oidcpy(&ci->stages[2].oid, null_oid());
 			ci->filemask = 3;
 			if ((S_IFMT & a_mode) != (S_IFMT & o_mode)) {
 				ci->stages[0].mode = 0;
-				oidcpy(&ci->stages[0].oid, &null_oid);
+				oidcpy(&ci->stages[0].oid, null_oid());
 				ci->filemask = 2;
 			}
 
@@ -3968,7 +3977,7 @@ static void process_entry(struct merge_options *opt,
 		/* Deleted on both sides */
 		ci->merged.is_null = 1;
 		ci->merged.result.mode = 0;
-		oidcpy(&ci->merged.result.oid, &null_oid);
+		oidcpy(&ci->merged.result.oid, null_oid());
 		ci->merged.clean = !ci->path_conflict;
 	}
 

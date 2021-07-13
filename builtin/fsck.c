@@ -109,7 +109,8 @@ static int fsck_error_func(struct fsck_options *o,
 
 static struct object_array pending;
 
-static int mark_object(struct object *obj, int type, void *data, struct fsck_options *options)
+static int mark_object(struct object *obj, enum object_type type,
+		       void *data, struct fsck_options *options)
 {
 	struct object *parent = data;
 
@@ -725,7 +726,7 @@ static int fsck_cache_tree(struct cache_tree *it)
 
 static void mark_object_for_connectivity(const struct object_id *oid)
 {
-	struct object *obj = lookup_unknown_object(oid);
+	struct object *obj = lookup_unknown_object(the_repository, oid);
 	obj->flags |= HAS_OBJ;
 }
 
@@ -881,6 +882,8 @@ int cmd_fsck(int argc, const char **argv, const char *prefix)
 		verify_index_checksum = 1;
 		verify_ce_order = 1;
 		read_cache();
+		/* TODO: audit for interaction with sparse-index. */
+		ensure_full_index(&the_index);
 		for (i = 0; i < active_nr; i++) {
 			unsigned int mode;
 			struct blob *blob;

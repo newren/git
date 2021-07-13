@@ -7,6 +7,7 @@
 #include "progress.h"
 #include "fsmonitor.h"
 #include "entry.h"
+#include "parallel-checkout.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -57,11 +58,8 @@ static void remove_subtree(struct strbuf *path)
 
 	if (!dir)
 		die_errno("cannot opendir '%s'", path->buf);
-	while ((de = readdir(dir)) != NULL) {
+	while ((de = readdir_skip_dot_and_dotdot(dir)) != NULL) {
 		struct stat st;
-
-		if (is_dot_or_dotdot(de->d_name))
-			continue;
 
 		strbuf_addch(path, '/');
 		strbuf_addstr(path, de->d_name);
@@ -423,11 +421,22 @@ static void mark_colliding_entries(const struct checkout *state,
 
 	ce->ce_flags |= CE_MATCHED;
 
+	/* TODO: audit for interaction with sparse-index. */
+	ensure_full_index(state->istate);
 	for (i = 0; i < state->istate->cache_nr; i++) {
 		struct cache_entry *dup = state->istate->cache[i];
 
-		if (dup == ce)
-			break;
+		if (dup == ce) {
+			/*
+			 * Parallel checkout doesn't create the files in index
+			 * order. So the other side of the collision may appear
+			 * after the given cache_entry in the array.
+			 */
+			if (parallel_checkout_status() == PC_RUNNING)
+				continue;
+			else
+				break;
+		}
 
 		if (dup->ce_flags & (CE_MATCHED | CE_VALID | CE_SKIP_WORKTREE))
 			continue;
@@ -535,6 +544,9 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		convert_attrs(state->istate, &ca_buf, ce->name);
 		ca = &ca_buf;
 	}
+
+	if (!enqueue_checkout(ce, ca))
+		return 0;
 
 	return write_entry(ce, path.buf, ca, state, 0);
 }

@@ -57,7 +57,7 @@ static const char *tag_modified = "";
 static const char *tag_skip_worktree = "";
 static const char *tag_resolve_undo = "";
 
-static void write_eolinfo(const struct index_state *istate,
+static void write_eolinfo(struct index_state *istate,
 			  const struct cache_entry *ce, const char *path)
 {
 	if (show_eol) {
@@ -122,7 +122,7 @@ static void print_debug(const struct cache_entry *ce)
 	}
 }
 
-static void show_dir_entry(const struct index_state *istate,
+static void show_dir_entry(struct index_state *istate,
 			   const char *tag, struct dir_entry *ent)
 {
 	int len = max_prefix_len;
@@ -139,7 +139,7 @@ static void show_dir_entry(const struct index_state *istate,
 	write_name(ent->name);
 }
 
-static void show_other_files(const struct index_state *istate,
+static void show_other_files(struct index_state *istate,
 			     const struct dir_struct *dir)
 {
 	int i;
@@ -152,7 +152,7 @@ static void show_other_files(const struct index_state *istate,
 	}
 }
 
-static void show_killed_files(const struct index_state *istate,
+static void show_killed_files(struct index_state *istate,
 			      const struct dir_struct *dir)
 {
 	int i;
@@ -210,7 +210,7 @@ static void show_submodule(struct repository *superproject,
 {
 	struct repository subrepo;
 	const struct submodule *sub = submodule_from_path(superproject,
-							  &null_oid, path);
+							  null_oid(), path);
 
 	if (repo_submodule_init(&subrepo, superproject, sub))
 		return;
@@ -254,7 +254,7 @@ static void show_ce(struct repository *repo, struct dir_struct *dir,
 	}
 }
 
-static void show_ru_info(const struct index_state *istate)
+static void show_ru_info(struct index_state *istate)
 {
 	struct string_list_item *item;
 
@@ -317,6 +317,8 @@ static void show_files(struct repository *repo, struct dir_struct *dir)
 
 	if (!(show_cached || show_stage || show_deleted || show_modified))
 		return;
+	/* TODO: audit for interaction with sparse-index. */
+	ensure_full_index(repo->index);
 	for (i = 0; i < repo->index->cache_nr; i++) {
 		const struct cache_entry *ce = repo->index->cache[i];
 		struct stat st;
@@ -494,6 +496,8 @@ void overlay_tree_on_index(struct index_state *istate,
 		die("bad tree-ish %s", tree_name);
 
 	/* Hoist the unmerged entries up to stage #3 to make room */
+	/* TODO: audit for interaction with sparse-index. */
+	ensure_full_index(istate);
 	for (i = 0; i < istate->cache_nr; i++) {
 		struct cache_entry *ce = istate->cache[i];
 		if (!ce_stage(ce))
@@ -603,7 +607,7 @@ static int option_parse_exclude_standard(const struct option *opt,
 int cmd_ls_files(int argc, const char **argv, const char *cmd_prefix)
 {
 	int require_work_tree = 0, show_tag = 0, i;
-	const char *max_prefix;
+	char *max_prefix;
 	struct dir_struct dir;
 	struct pattern_list *pl;
 	struct string_list exclude_list = STRING_LIST_INIT_NODUP;
@@ -748,6 +752,9 @@ int cmd_ls_files(int argc, const char **argv, const char *cmd_prefix)
 	if (pathspec.nr && error_unmatch)
 		ps_matched = xcalloc(pathspec.nr, 1);
 
+	if ((dir.flags & DIR_SHOW_IGNORED) && !show_others && !show_cached)
+		die("ls-files -i must be used with either -o or -c");
+
 	if ((dir.flags & DIR_SHOW_IGNORED) && !exc_given)
 		die("ls-files --ignored needs some exclude pattern");
 
@@ -781,5 +788,6 @@ int cmd_ls_files(int argc, const char **argv, const char *cmd_prefix)
 	}
 
 	dir_clear(&dir);
+	free(max_prefix);
 	return 0;
 }

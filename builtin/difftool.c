@@ -323,7 +323,7 @@ static int checkout_path(unsigned mode, struct object_id *oid,
 	struct cache_entry *ce;
 	int ret;
 
-	ce = make_transient_cache_entry(mode, oid, path, 0);
+	ce = make_transient_cache_entry(mode, oid, path, 0, NULL);
 	ret = checkout_entry(ce, state, NULL, NULL);
 
 	discard_cache_entry(ce);
@@ -585,6 +585,9 @@ static int run_dir_diff(const char *extcmd, int symlinks, const char *prefix,
 		setenv("GIT_DIFFTOOL_DIRDIFF", "true", 1);
 	rc = run_command_v_opt(helper_argv, flags);
 
+	/* TODO: audit for interaction with sparse-index. */
+	ensure_full_index(&wtindex);
+
 	/*
 	 * If the diff includes working copy files and those
 	 * files were modified during the diff, then the changes
@@ -672,7 +675,7 @@ static int run_file_diff(int prompt, const char *prefix,
 		"GIT_PAGER=", "GIT_EXTERNAL_DIFF=git-difftool--helper", NULL,
 		NULL
 	};
-	int ret = 0, i;
+	int i;
 
 	if (prompt > 0)
 		env[2] = "GIT_DIFFTOOL_PROMPT=true";
@@ -683,8 +686,7 @@ static int run_file_diff(int prompt, const char *prefix,
 	strvec_push(&args, "diff");
 	for (i = 0; i < argc; i++)
 		strvec_push(&args, argv[i]);
-	ret = run_command_v_opt_cd_env(args.v, RUN_GIT_CMD, prefix, env);
-	exit(ret);
+	return run_command_v_opt_cd_env(args.v, RUN_GIT_CMD, prefix, env);
 }
 
 int cmd_difftool(int argc, const char **argv, const char *prefix)

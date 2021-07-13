@@ -873,55 +873,40 @@ static int maintenance_task_commit_graph(struct maintenance_run_opts *opts)
 	return 0;
 }
 
-static int fetch_remote(const char *remote, struct maintenance_run_opts *opts)
+static int fetch_remote(struct remote *remote, void *cbdata)
 {
+	struct maintenance_run_opts *opts = cbdata;
 	struct child_process child = CHILD_PROCESS_INIT;
 
+	if (remote->skip_default_update)
+		return 0;
+
 	child.git_cmd = 1;
-	strvec_pushl(&child.args, "fetch", remote, "--prune", "--no-tags",
+	strvec_pushl(&child.args, "fetch", remote->name,
+		     "--prefetch", "--prune", "--no-tags",
 		     "--no-write-fetch-head", "--recurse-submodules=no",
-		     "--refmap=", NULL);
+		     NULL);
 
 	if (opts->quiet)
 		strvec_push(&child.args, "--quiet");
 
-	strvec_pushf(&child.args, "+refs/heads/*:refs/prefetch/%s/*", remote);
-
 	return !!run_command(&child);
-}
-
-static int append_remote(struct remote *remote, void *cbdata)
-{
-	struct string_list *remotes = (struct string_list *)cbdata;
-
-	string_list_append(remotes, remote->name);
-	return 0;
 }
 
 static int maintenance_task_prefetch(struct maintenance_run_opts *opts)
 {
-	int result = 0;
-	struct string_list_item *item;
-	struct string_list remotes = STRING_LIST_INIT_DUP;
-
 	git_config_set_multivar_gently("log.excludedecoration",
 					"refs/prefetch/",
 					"refs/prefetch/",
 					CONFIG_FLAGS_FIXED_VALUE |
 					CONFIG_FLAGS_MULTI_REPLACE);
 
-	if (for_each_remote(append_remote, &remotes)) {
-		error(_("failed to fill remotes"));
-		result = 1;
-		goto cleanup;
+	if (for_each_remote(fetch_remote, opts)) {
+		error(_("failed to prefetch remotes"));
+		return 1;
 	}
 
-	for_each_string_list_item(item, &remotes)
-		result |= fetch_remote(item->string, opts);
-
-cleanup:
-	string_list_clear(&remotes, 0);
-	return result;
+	return 0;
 }
 
 static int maintenance_task_gc(struct maintenance_run_opts *opts)
@@ -1924,6 +1909,7 @@ static int crontab_update_schedule(int run_maintenance, int fd, const char *cmd)
 		else if (!in_old_region)
 			fprintf(cron_in, "%s\n", line.buf);
 	}
+	strbuf_release(&line);
 
 	if (run_maintenance) {
 		struct strbuf line_format = STRBUF_INIT;
@@ -1986,8 +1972,10 @@ static int update_background_schedule(int enable)
 		cmd = sep + 1;
 	}
 
-	if (hold_lock_file_for_update(&lk, lock_path, LOCK_NO_DEREF) < 0)
-		return error(_("another process is scheduling background maintenance"));
+	if (hold_lock_file_for_update(&lk, lock_path, LOCK_NO_DEREF) < 0) {
+		result = error(_("another process is scheduling background maintenance"));
+		goto cleanup;
+	}
 
 	if (!strcmp(scheduler, "launchctl"))
 		result = launchctl_update_schedule(enable, get_lock_file_fd(&lk), cmd);
@@ -1999,6 +1987,9 @@ static int update_background_schedule(int enable)
 		die("unknown background scheduler: %s", scheduler);
 
 	rollback_lock_file(&lk);
+
+cleanup:
+	free(lock_path);
 	free(testing);
 	return result;
 }
