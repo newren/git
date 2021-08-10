@@ -1,0 +1,3 @@
+* mode mismatches
+  * a->mode and b->mode different types than each other
+  * o->mode different type than a->mode & b->mode

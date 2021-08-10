@@ -1,0 +1,36 @@
+   pull.ff  pull.rebase  commandline            action
+     *          *        --ff-only              fast-forward only[1]
+     *          *        --ff-only --rebase     fast-forward only[1]
+     *          *        --ff-only --no-rebase  fast-forward only
+
+     *          *        --rebase --no-ff       rebase[1]
+     *          *        --rebase --ff          rebase[1]
+    <unset>     *        --rebase               rebase
+    only        *        --rebase               rebase[2]
+    false       *        --rebase               rebase[4]
+    true        *        --rebase               rebase[4]
+     *       !false      --no-ff                rebase (ignore --no-ff)[2][3]
+     *       !false      --ff                   rebase (ignore --ff)[2][3]
+
+     
+     *          *        --no-rebase --no-ff    merge --no-ff
+     *          *        --no-rebase --ff       merge --ff
+    <unset>     *        --no-rebase            merge --ff
+    only        *        --no-rebase            merge --ff[2]
+    false       *        --no-rebase            merge --no-ff
+    true        *        --no-rebase            merge --ff
+
+     *       <unset>     --no-ff                merge --no-ff
+     *        false      --no-ff                merge --no-ff
+
+     *       <unset>     --ff                   merge --ff
+     *        false      --ff                   merge --ff
+
+For cases with no command line arguments but conflicting options, see the
+cases where both corresponding command line arguments appear.
+
+[1] https://lore.kernel.org/git/xmqq7dhrtrc2.fsf@gitster.g/
+    https://lore.kernel.org/git/c62933fb-96b2-99f5-7169-372f486f6e39@aixigo.com/
+[2] https://lore.kernel.org/git/xmqqpmvn5ukj.fsf@gitster.g/
+[3] https://lore.kernel.org/git/xmqq8s2b489p.fsf@gitster.g/
+[4] https://lore.kernel.org/git/xmqqwnpqot4m.fsf@gitster.g/

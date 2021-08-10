@@ -1,0 +1,221 @@
+a
+b
+<<<
+c
+===
+d
+>>>
+e
+
+
+a
+b
+c
+d
+e
+
+a
+b
+extra
+<<<
+c
+===
+d
+>>>
+e
+
+
+Basic picture:
+
+  B1 - B2 - B3
+ /            \
+A              M
+ \            /
+  C1 - C2 - C3
+
+
+  B1' - B3' - U1
+ /              \
+A'               M'
+ \              /
+  C1' - C3' - U2
+
+* Sergey's method:
+
+Let's say B2 & C2 both add a file (b2 & c2)
+    U1 = three-way merge of B3, M, B3', which adds c2 (does not have b2)
+    U2 = three-way merge of C3, M, C3', which adds b2 (does not have c2)
+    M' = three-way merge of M, U1, U2.  M has both b2 & c2, so both deleted.
+
+Let's say B2 & C2 have a modify/delete conflict; B2 & C1 modify, C2 deletes.
+  Case 1: resolution by deleting in M:
+    U1 = three-way merge of B3, M, B3', which will delete
+    U2 = three-way merge of C3, M, C3', which keeps C3' version of file
+    M' = three-way merge of M, U1, U2.  No conflict; just deletes file.  (!?)
+
+  Case 2: resolution by taking the modify from B2:
+    U1 = three-way merge of B3, M, B3', leaves B3' alone
+    U2 = three-way merge of C3, M, C3', add/add conflict (M or C3' version)
+    M' = three-way merge of M, U1, U2.  depends on intermediate resolution;
+           likely either (B3' version, clean) or (three-way M-B3'-C3' merge)
+
+  Case 3: resolution by modifying even further
+    U1 = three-way merge of B3, M, B3', B3' + extra change
+    U2 = three-way merge of C3, M, C3', add/add conflict (M or C3' version)
+    M' = three-way merge of M, U1, U2.  depends on intermediate resolution;
+           likely either (B3'+ clean) or (three-way M-B3'+-C3' merge)
+
+Let's say B2 adds dir, C2 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    U1 = three-way merge of B3, M, B3', add file at alternate path, no dir
+    U2 = three-way merge of C3, M, C3', rename/delete conflict, dir added
+    M' = three-way merge of M, U1, U2.  no dir (as expected) and either
+         (renamed file mysteriously present) or (deleted)
+
+Let's say B2 adds dir, C3 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    U1 = three-way merge of B3, M, B3', add file at alternate path, no dir
+    U2 = three-way merge of C3, M, C3', rename file, dir added
+    M' = three-way merge of M, U1, U2.  renamed file, no dir
+         (no dir in way any more as expected, but weird that file renamed)
+
+Let's say B3 adds dir, C2 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    U1 = three-way merge of B3, M, B3', file at alternate path, dir there
+    U2 = three-way merge of C3, M, C3', rename/delete conflict, dir added
+    M' = three-way merge of M, U1, U2.  dir present and either
+         (renamed file mysteriously there) or (deleted)
+
+Let's say all text files, B2 adds line 'c', C3 adds line 'd':
+  Case 1: merge.conflictStyle=diff3; not clean:
+    B3  C3  M   B3'  C3'  U1   U2  M'
+    a   a   a   a    a    a    a   a
+    b   b   b   b    b    b    b   b
+    c   d   c   e    e    <<<  <<< <<<<<
+    e   e   d             c    c   <<<
+            e             d    d   c
+                          ===  === d
+                          c    d   ===
+                          |||  ||| c
+                          >>>  >>> |||
+                          e    e   >>>
+			           |||||
+				   c
+				   d
+				   =====
+                                   <<<
+                                   c
+				   d
+				   ===
+				   d
+				   |||
+				   >>>
+				   >>>>>
+				   e
+
+  Case 2: merge.conflictStyle=merge; clean! (despite conflict markers!)
+    B3  C3  M   B3'  C3'  U1   U2  M'
+    a   a   a   a    a    a    a   a
+    b   b   b   b    b    b    b   b
+    c   d   c   e    e    <<<  <<< <<<
+    e   e   d             c    c   c
+            e             d    d   d
+                          ===  === ===
+                          >>>  >>> >>>
+                          e    e   e
+
+
+* Phillip's method, crazy cases:
+
+Reminder:
+  git checkout --detach M
+  git merge-recursive B3 -- M B3'
+  tree=$(git write-tree)
+  git merge-recursive C3 -- $tree C3'
+  tree=$(git write-tree)
+  M'=$(git log --pretty=%B -1 M | git commit-tree -pA' -pB' -pC')
+
+Let's say B2 & C2 have a modify/delete conflict; B2 & C1 modify, C2 deletes.
+  Case 1: resolution by deleting in M:
+    T1 = three-way merge of B3, M,  B3', which is a delete/modify
+    T2 = three-way merge of C3, T1, C3', which depends on prior merge
+         (reasonable-ish, but intermediate merge rather than end-state merge
+	 is annoying and confusing)
+
+Let's say B2 adds dir, C3 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    T1 = three-way merge of B3, M,  B3', add file at alternate path, no dir
+    T2 = three-way merge of C3, T1, C3', C3 == C3', so uses T1.
+         (same weirdness as Sergey method; no dir in way any more as expected,
+	  but file is weirdly renamed)
+
+Let's say B3 adds dir, C2 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    T1 = three-way merge of B3, M,  B3', add file at alternate path, dir there
+    T2 = three-way merge of C3, T1, C3', rename/delete conflict, dir there
+         (provides resolvable conflict warning; I guess that's okay)
+
+Let's say all text files, B2 adds line 'c', C3 adds line 'd':
+  Case 2: merge.conflictStyle=merge; reasonable conflict
+    B3  C3  M   B3'  C3'  T1   T2
+    a   a   a   a    a    a    a
+    b   b   b   b    b    b    b
+    c   d   c   e    e    <<<  <<<<<
+    e   e   d             c    <<<
+            e             d    c
+                          ===  d
+                          >>>  ===
+                          e    >>>
+			       =====
+			       >>>>>
+                               e
+
+
+* My method:
+  1. Create auto-merge for old merge commit ("old AM")
+  2. Create auto-merge based on new parents ("new AM")
+  3. Three-way merge old AM, M, and new AM
+
+  NOTE: Leave off commit IDs in conflict markers, or they won't match and
+  won't be removable.  But if the conflict markers remain, we really do want
+  to keep those commit ID annotations.  Hmm.....
+
+  The .conflict_msg files are the same way; we need to be able to replace
+  old commit IDs with new ones.
+
+Let's say B2 & C2 have a modify/delete conflict; B2 & C1 modify, C2 deletes.
+  Case 1: resolution by deleting in M:
+    old AM: modify/delete conflict
+    M:      no conflict, just delete
+    new AM: no conflict, just C1 version
+    Result: conflict -- from modify/delete to different modify or delete
+
+Let's say B2 adds dir, C3 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    old AM: file/dir conflict, renamed
+    M:      file renamed
+    new AM: new file
+    Result: rename/rename conflict, leftover conflict_msg file
+
+Let's say B3 adds dir, C2 adds file at same path:
+  Case 1: resolution by renaming file elsewhere in M:
+    old AM: file/dir conflict
+    M:      file renamed
+    new AM: new dir, no file
+    Result: rename/delete conflict, leftover conflict_msg file
+
+Let's say all text files, B2 adds line 'c', C3 adds line 'd':
+  Case 2: merge.conflictStyle=merge; reasonable conflict
+
+    old AM:   M   new AM:   M'
+    a         a   a         a
+    b         b   b         b
+    <<<       c   e         <<<<<
+    c         d             <<<
+    ===       e             c
+    d                       ===
+    >>>                     d
+    e                       >>>
+                            =====
+                            >>>>>
+                            e

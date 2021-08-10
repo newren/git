@@ -1,0 +1,150 @@
+git-replay.c, or maybe even builtin/git-replay.c ??
+
+git replay --onto BASE [range] [--exec CMD]
+
+* Provide enough flags, options that rebase & cherry-pick can be implemented
+  atop the new thing
+
+Differs from cherry-pick & rebase:
+  Performance:
+    - --reapply-cherry-picks is the default
+    - skip the can_fast_forward() crap and other revision walking of upstream;
+      does imply that acts like --force-rebase (just faster)
+    - No per-commit hooks (unless special flag?  don't make sense in bare repos)
+    - No updating of working directory or index
+      (unless special flag, or hooks, or conflict, or interactive-edit)
+    - Avoid writing control structures unless replay stops
+    - Avoid forking processes unless explicitly requested (e.g. --exec
+      or --strategy, or --run-hooks), also allows avoiding updating
+      working directory & index & control structures & refreshing
+      index afterward
+  Non-performance:
+  - Simpler control structures; single file if possible
+  - do not update any ref by default; just output resulting commit ID
+    (flag to allow updating, with another for force updating)
+  Behavioral (besides above):
+  - --abort takes you back to original branch, and applies autostash there
+  - works with dirty working trees (will error if hits conflict or would need
+    --autostash and it isn't supplied)
+  - see also new features below
+
+New features:
+  - rewrite hashes in commit messages on the fly
+  - rebase/cherry-pick (2-parent) merges
+  - works in bare repositories, or non-checked-out branches
+  - performance (see above)
+
+Bad wording:
+  - cherry-pick implies --allow-empty isn't default; --allow-become-empty
+    certainly isn't, but --allow-start-empty should be
+  - cherry-pick implies --allow-empty-message is not the default
+
+
+Alternate notes; oort merge strategy, for handling octupii
+  - code needs to return maximum conflict marker size used
+  - can't auto-merge, because binary files could have N>3 versions
+    (but index can store multiple stage 3 entries...)
+
+
+======================================================================
+
+From email to Christian:
+
+  * When a merge/rebase can be done successfully, what is the expected
+output?  Should a new toplevel tree be created and its hash be shown?
+A new commit?  Should branches be automatically updated, or is this
+something that external tools want to consume so they can do updates?
+(What if the branch is tied to another git-worktree for client-side
+users?)  What about all the other output shown during a merge?  (See
+also two points below for an item which discusses the 4 types of
+output from a merge.)
+  * When a merge/rebase hits a conflict, do we just error out?  What
+types of output do we provide, and does it include anything about the
+nature or types of conflicts?  (See also the next point.)
+  * merging has 4 kinds of output: success/failure, hash of the tree
+that represents what would have been put in the working directory
+(possibly including conflict markers if the merge had conflicts),
+special messages normally sent to stdout such as conflict notices or
+info about which paths are being 3-way merged, and an index.  (The
+index is irrelevant if the merge is clean, but might be considered
+important when the merge hits conflicts.)  Which of these 4 pieces are
+relevant to someone doing a merge/revert/rebase/cherry-pick without a
+worktree by default?  How do we display it in a way that is relevant
+for them to consume?  Which forms of output should they be able to add
+or remove from the default using extra options?  If the index
+information is of interest, do we need to display it a different way
+or create a temporary index somewhere for inspection?
+  * If this is client side and we hit a conflict, do we want to allow
+something other than just erroring out.  For example, stashing the
+changes in the working copy, checking out the appropriate commit,
+putting the conflict markers in place in the working tree and index,
+and letting the user continue?  I suspect both abort on conflict, and
+continue with the user's worktree are of interest, so how do users
+specify which one they want?
+  * git-rebase, git-cherry-pick, git-revert, git-merge, and
+git-merge-recursive all have hardcoded assumptions surrounding HEAD
+built into them.  Do we extend these tools with more flags allowing us
+to use something other than HEAD, or do we just write new toplevel
+command(s)?  What do those flags look like or, if going with the new
+toplevel command(s), what is the structure of the syntax for the new
+command(s)?
+  * When thinking about merges (rather than rebases/cherry-picks),
+what's the appropriate command to modify for those?  Is it git-merge?
+git-merge-recursive?  Or is it some new toplevel command?
+  * rebase & cherry-pick are pretty glacially slow due to all kinds of
+things (I think at least 5 causes)[1], but some of those things might
+not be fixable by default due to backward compatibility concerns.  Do
+we create a bunch of flags to turn those things off?  Do we create a
+single new flag to turn all those flags off?  Do we just create a new
+toplevel command?  (Do users want those things even if they are slow?)
+  * There is no longer a user-facing distinction between rebase and
+cherry-pick once you're no longer tied to HEAD.  Do we unify these
+into a single command?  Keep them separate but modify them to use
+similar control structures?  Create a new command that replaces the
+two?  (What about backward compatibility questions -- command names
+and flags, control structures, abilities like being able to call
+cherry-pick in the middle of a rebase despite the fact that you cannot
+call rebase in the middle of a rebase?)
+  * rebasing several branches that depended on each other has always
+been slightly painful (something I felt with my merge-ort work, as I
+had 6-7 stacked series back in January all ready to submit, and I had
+to continually rebase the whole set).  After rebasing the first
+series, you have to look up the appropriate commit ranges for
+subsequent ones.  It'd be nice to allow rebasing multiple branches at
+once.  And the fact that HEAD is no longer intrinsically tied to
+operations might make this easier...but what's the UI for handling
+this?  What if the multiple branches do not form a single linear
+history?  How do users specify what to transplant and where?
+  * Related to rebasing multiple branches, it'd be nice to also have a
+better --rebase-merges, one that reapplied "evil merge" changes (which
+may not be evil, e.g. making changes necessary to fix semantic
+conflicts).  merge-ort provides some new options here, particularly
+with the (not yet submitted upstream) --remerge-diff capabilities for
+log/show.
+  * Once your operation is no longer tied to a worktree, it can make
+perfect sense to allow another replay operation in the middle of the
+interrupted replay operation.  That kind of thing sort of exists today
+in that you can do a cherry-pick during an interrupted rebase, but you
+can't rebase in the middle of a rebase or cherry-pick in the middle of
+a cherry-pick.  But with a non-worktree-connected replay, why not?
+However, doing so would probably require us to simplify the data
+structures, likely using a single INI-style file rather than the
+directory of files approach that is currently used.  Does that present
+backward compatibility concerns?
+  * Besides special handling for no worktrees, we should also improve
+handling with worktrees.  This means multiple things: (1) Not
+needlessly rewriting (and updating mtimes) of worktree files that were
+the same before and after the rebase.  (2) Folks can run "git merge"
+with a dirty worktree.  Shouldn't we be able to do a "git rebase" or
+"git cherry-pick" with a dirty worktree...presuming we don't have to
+stop for conflicts and the rebase/cherry-pick doesn't need to touch
+any of the dirty paths?
+
+...and there are probably other things that I just haven't thought of yet.
+
+I suspect Dscho and Phillip (Wood) probably have numerous thoughts and
+opinions too.  However, I worry the design space is so large that it
+might be helpful to first write a prototype tool or two that does some
+of these things, and then let people play with it and provide feedback
+about how to rewrite it to solve the relevant sets of problems in a
+better way.

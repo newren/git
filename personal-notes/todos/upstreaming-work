@@ -1,0 +1,2 @@
+To ensure same function order, periodically run:
+  mydiff <(git grep -hE -e '^[a-z]+.*\([^;]*$' -e 'Function.Grouping' ort -- merge-ort.c) <(git grep -hE -e '^[a-z]+.*\([^;]*$' -e 'Function.Grouping' HEAD -- merge-ort.c)

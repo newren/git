@@ -1,0 +1,69 @@
+=== If I were to try to replace lots of the pipeline using merge-ort... ===
+
+(Up to) 3 parents:
+  1st parent is HEAD at time of stash creation
+  2nd parent is index at time of stash creation; it's parent is 1st parent
+  3rd parent is a tree with untracked files; it's a root commit
+  merge commit's tree matches tracked files at time of stash creation
+  NOTE: the merge commit's tree ignores untracked files
+
+Desired:
+  1. Record working tree as a tree, w_tree
+  2. [If --index passed to pop/apply], Handle staged changes:
+     a. Write staged changes to tree: c_tree ("cached tree")
+     b. Three-way merge stash^1, c_tree, and stash^2 -> c_result
+     c. If not clean, throw error suggesting to not use --index
+     d. read-tree to update to c_result, then write it to disk
+  3. Create combined worktree & untracked files tree:
+     [If stash has 3 parents] 
+     a1. Three-way merge empty_tree, stash, stash^3 -> full_result
+     [Otherwise]
+     a2. stash -> full_result
+  4. Handle unstaged (& untracked) changes:
+     a. reset incore index to c_result (read-tree c_result)
+     b. Three-way merge stash^1, full_result, and stash -> tmp_result
+     c. No problems if not clean
+     d. For any entries in w_result that differ from c_result,
+        clear SKIP_WORKTREE bit (mostly worried about cleanly merged entries,
+	since unmerged entries would be naturally handled correctly)
+     e. checkout() tmp_result
+     f. reset incore index to c_result
+     g. record_unmerged_index_entries()
+     h. for each untracked file, if not unmerged, remove from index
+
+
+
+NOTES:
+
+* Correctly handles one staged change, and one unstaged change, keeping
+  index entries for both.
+    $ git stash apply --index
+    Auto-merging greetings
+    CONFLICT (content): Merge conflict in greetings
+    Index was not unstashed.
+    $ git status
+    On branch master
+    Changes to be committed:
+      (use "git restore --staged <file>..." to unstage)
+    	modified:   b/counting
+
+    Unmerged paths:
+      (use "git restore --staged <file>..." to unstage)
+      (use "git add <file>..." to mark resolution)
+    	both modified:   greetings
+
+* If index applies cleanly, but untracked files have conflict, it overwrites:
+    [newren@tiger stupid (fooish)]$ git stash apply --index
+    Auto-merging b/counting
+    CONFLICT (content): Merge conflict in b/counting
+    Index was not unstashed.
+    $ git status
+    On branch fooish
+    Changes to be committed:
+      (use "git restore --staged <file>..." to unstage)
+    	modified:   greetings
+
+    Unmerged paths:
+      (use "git restore --staged <file>..." to unstage)
+      (use "git add <file>..." to mark resolution)
+    	both modified:   b/counting

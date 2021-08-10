@@ -1,0 +1,15 @@
+git.git:
+  revert:                4d924528d8
+  octopus:               16d7601e17
+  clean merge:           4a3ed2bec60  (there's lots of these)
+  conflicted merge:      07601b5b36
+  non-conflicted change: bf04590ecd
+
+linux.git:
+  not-a-pick:            219d54332a09
+  cherry-pick:           2f216a850715
+  revert:                a0184d71163a
+  octopus:               f5c7305db30b
+  conflicted merge:      eab3540562fb
+  non-conflicted change: 223cea6a4f05
+  clean merge:           b8387f6f3495

@@ -1,0 +1,272 @@
+git version 2.31.1.402.g17aa0a7484
+
+*** t0005-signal.sh ***
+  * Higher signals get translated to a SIGSEGV; no idea why.  Probably ignorable
+
+*** t1700-split-index.sh ***
+(#27)
+==3050197== Conditional jump or move depends on uninitialised value(s)
+==3050197==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3050197==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3050197==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3050197==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3050197==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3050197==    by 0x479C2D: try_merge_strategy (merge.c:754)
+==3050197==    by 0x47C221: cmd_merge (merge.c:1659)
+==3050197==    by 0x4067D6: run_builtin (git.c:453)
+==3050197==    by 0x406BAF: handle_builtin (git.c:704)
+==3050197==    by 0x406E04: run_argv (git.c:771)
+==3050197==    by 0x407250: cmd_main (git.c:902)
+==3050197==    by 0x4DE24D: main (common-main.c:52)
+==3050197==  Uninitialised value was created by a heap allocation
+==3050197==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3050197==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3050197==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3050197==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3050197==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3050197==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3050197==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3050197==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3050197==    by 0x61296F: repo_read_index (repository.c:273)
+==3050197==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3050197==    by 0x47B643: cmd_merge (merge.c:1358)
+==3050197==    by 0x4067D6: run_builtin (git.c:453)
+
+*** t1701-racy-split-index.sh ***
+(#27-31)
+==3059316== Conditional jump or move depends on uninitialised value(s)
+==3059316==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3059316==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3059316==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3059316==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3059316==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3059316==    by 0x49699B: cmd_read_tree (read-tree.c:267)
+==3059316==    by 0x4067D6: run_builtin (git.c:453)
+==3059316==    by 0x406BAF: handle_builtin (git.c:704)
+==3059316==    by 0x406E04: run_argv (git.c:771)
+==3059316==    by 0x407250: cmd_main (git.c:902)
+==3059316==    by 0x4DE24D: main (common-main.c:52)
+==3059316==  Uninitialised value was created by a heap allocation
+==3059316==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3059316==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3059316==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3059316==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3059316==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3059316==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3059316==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3059316==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3059316==    by 0x61296F: repo_read_index (repository.c:273)
+==3059316==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3059316==    by 0x4965F6: cmd_read_tree (read-tree.c:187)
+==3059316==    by 0x4067D6: run_builtin (git.c:453)
+==3059316== 
+not ok 27 - update the split index after unpack trees() copied a racily clean cache entry from the shared index #0
+	
+==3059336== Conditional jump or move depends on uninitialised value(s)
+==3059336==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3059336==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3059336==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3059336==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3059336==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3059336==    by 0x49699B: cmd_read_tree (read-tree.c:267)
+==3059336==    by 0x4067D6: run_builtin (git.c:453)
+==3059336==    by 0x406BAF: handle_builtin (git.c:704)
+==3059336==    by 0x406E04: run_argv (git.c:771)
+==3059336==    by 0x407250: cmd_main (git.c:902)
+==3059336==    by 0x4DE24D: main (common-main.c:52)
+==3059336==  Uninitialised value was created by a heap allocation
+==3059336==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3059336==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3059336==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3059336==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3059336==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3059336==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3059336==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3059336==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3059336==    by 0x61296F: repo_read_index (repository.c:273)
+==3059336==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3059336==    by 0x4965F6: cmd_read_tree (read-tree.c:187)
+==3059336==    by 0x4067D6: run_builtin (git.c:453)
+==3059336== 
+not ok 28 - update the split index after unpack trees() copied a racily clean cache entry from the shared index #1
+	
+==3059356== Conditional jump or move depends on uninitialised value(s)
+==3059356==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3059356==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3059356==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3059356==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3059356==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3059356==    by 0x49699B: cmd_read_tree (read-tree.c:267)
+==3059356==    by 0x4067D6: run_builtin (git.c:453)
+==3059356==    by 0x406BAF: handle_builtin (git.c:704)
+==3059356==    by 0x406E04: run_argv (git.c:771)
+==3059356==    by 0x407250: cmd_main (git.c:902)
+==3059356==    by 0x4DE24D: main (common-main.c:52)
+==3059356==  Uninitialised value was created by a heap allocation
+==3059356==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3059356==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3059356==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3059356==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3059356==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3059356==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3059356==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3059356==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3059356==    by 0x61296F: repo_read_index (repository.c:273)
+==3059356==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3059356==    by 0x4965F6: cmd_read_tree (read-tree.c:187)
+==3059356==    by 0x4067D6: run_builtin (git.c:453)
+==3059356== 
+not ok 29 - update the split index after unpack trees() copied a racily clean cache entry from the shared index #2
+	
+==3059376== Conditional jump or move depends on uninitialised value(s)
+==3059376==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3059376==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3059376==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3059376==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3059376==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3059376==    by 0x49699B: cmd_read_tree (read-tree.c:267)
+==3059376==    by 0x4067D6: run_builtin (git.c:453)
+==3059376==    by 0x406BAF: handle_builtin (git.c:704)
+==3059376==    by 0x406E04: run_argv (git.c:771)
+==3059376==    by 0x407250: cmd_main (git.c:902)
+==3059376==    by 0x4DE24D: main (common-main.c:52)
+==3059376==  Uninitialised value was created by a heap allocation
+==3059376==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3059376==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3059376==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3059376==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3059376==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3059376==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3059376==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3059376==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3059376==    by 0x61296F: repo_read_index (repository.c:273)
+==3059376==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3059376==    by 0x4965F6: cmd_read_tree (read-tree.c:187)
+==3059376==    by 0x4067D6: run_builtin (git.c:453)
+==3059376== 
+not ok 30 - update the split index after unpack trees() copied a racily clean cache entry from the shared index #3
+
+	
+==3059396== Conditional jump or move depends on uninitialised value(s)
+==3059396==    at 0x48498FE: bcmp (vg_replace_strmem.c:1129)
+==3059396==    by 0x644CC7: compare_ce_content (split-index.c:208)
+==3059396==    by 0x644EFE: prepare_to_write_split_index (split-index.c:336)
+==3059396==    by 0x5EDF3C: write_split_index (read-cache.c:3106)
+==3059396==    by 0x5EE618: write_locked_index (read-cache.c:3290)
+==3059396==    by 0x49699B: cmd_read_tree (read-tree.c:267)
+==3059396==    by 0x4067D6: run_builtin (git.c:453)
+==3059396==    by 0x406BAF: handle_builtin (git.c:704)
+==3059396==    by 0x406E04: run_argv (git.c:771)
+==3059396==    by 0x407250: cmd_main (git.c:902)
+==3059396==    by 0x4DE24D: main (common-main.c:52)
+==3059396==  Uninitialised value was created by a heap allocation
+==3059396==    at 0x484086F: malloc (vg_replace_malloc.c:380)
+==3059396==    by 0x68352E: do_xmalloc (wrapper.c:41)
+==3059396==    by 0x6835B6: xmalloc (wrapper.c:62)
+==3059396==    by 0x5961CF: mem_pool_alloc_block (mem-pool.c:22)
+==3059396==    by 0x59628C: mem_pool_init (mem-pool.c:44)
+==3059396==    by 0x5EB196: load_all_cache_entries (read-cache.c:2034)
+==3059396==    by 0x5EBA47: do_read_index (read-cache.c:2250)
+==3059396==    by 0x5EBDC7: read_index_from (read-cache.c:2335)
+==3059396==    by 0x61296F: repo_read_index (repository.c:273)
+==3059396==    by 0x5EE6AB: repo_read_index_unmerged (read-cache.c:3321)
+==3059396==    by 0x4965F6: cmd_read_tree (read-tree.c:187)
+==3059396==    by 0x4067D6: run_builtin (git.c:453)
+==3059396== 
+not ok 31 - update the split index after unpack trees() copied a racily clean cache entry from the shared index #4
+
+*** t3600-rm.sh ***
+
+Uses test_match_signal again; not sure I care
+
+==3061470== 
+==3061470== Process terminating with default action of signal 11 (SIGSEGV): dumping core
+==3061470==  General Protection Fault
+==3061470==    at 0x488BC82: ??? (in /usr/lib64/libpthread-2.33.so)
+==3061470==    by 0x49D703E: ??? (in /usr/lib64/libc-2.33.so)
+==3061470==    by 0x4A1961C: ??? (in /usr/lib64/libc-2.33.so)
+==3061470==    by 0x4A19271: __libc_freeres (in /usr/lib64/libc-2.33.so)
+==3061470==    by 0x48351E7: _vgnU_freeres (vg_preloaded.c:74)
+==3061470==    by 0x78B2E21: ???
+not ok 36 - choking "git rm" should not let it die with cruft (induce and check SIGPIPE)
+#	
+#		choke_git_rm_setup &&
+#		OUT=$( ((trap "" PIPE; git rm -n "some-file-*"; echo $? 1>&3) | :) 3>&1 ) &&
+#		test_match_signal 13 "$OUT" &&
+#		test_path_is_missing .git/index.lock
+
+
+*** t4202-log.sh ***
+
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_c5d771d1
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_fa0f5436
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_fbf37f37
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_d2fa1ca4
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_d4105a0d
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_39747dc2
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_7af6d7d3
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_110e5f10
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_3a758a09
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_c010b40e
+==3074777== VG_(mkstemp): failed to create temp file: /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_aecd1e2f
+valgrind: Startup or configuration error:
+valgrind:    Can't create client cmdline file in /home/newren/floss/git/t/trash directory.t4202-log/bogus/valgrind_proc_3074777_cmdline_aecd1e2f
+valgrind: Unable to start up properly.  Giving up.
+not ok 80 - log --show-signature for merged tag with GPG failure
+#	
+#		test_when_finished "git reset --hard && git checkout main" &&
+#		git checkout -b plain-fail main &&
+#		echo aaa >bar &&
+#		git add bar &&
+#		git commit -m bar_commit &&
+#		git checkout -b tagged-fail main &&
+#		echo bbb >baz &&
+#		git add baz &&
+#		git commit -m baz_commit &&
+#		git tag -s -m signed_tag_msg signed_tag_fail &&
+#		git checkout plain-fail &&
+#		git merge --no-ff -m msg signed_tag_fail &&
+#		TMPDIR="$(pwd)/bogus" git log --show-signature -n1 plain-fail >actual &&
+#		grep "^merged tag" actual &&
+#		grep "^No signature" actual &&
+#		! grep "^gpg: Signature made" actual
+
+
+*** t4216-log-bloom.sh ***
+
+==3084324== Syscall param utimensat(times[0].tv_sec) points to uninitialised byte(s)
+==3084324==    at 0x499CC6E: ??? (in /usr/lib64/libc-2.33.so)
+==3084324==    by 0x4997726: utime (in /usr/lib64/libc-2.33.so)
+==3084324==    by 0x51907C: mark_commit_graphs (commit-graph.c:2168)
+==3084324==    by 0x5199B0: write_commit_graph (commit-graph.c:2379)
+==3084324==    by 0x5176DB: write_commit_graph_reachable (commit-graph.c:1641)
+==3084324==    by 0x42BFF3: graph_write (commit-graph.c:274)
+==3084324==    by 0x42C240: cmd_commit_graph (commit-graph.c:337)
+==3084324==    by 0x4067D6: run_builtin (git.c:453)
+==3084324==    by 0x406BAF: handle_builtin (git.c:704)
+==3084324==    by 0x406E04: run_argv (git.c:771)
+==3084324==    by 0x407250: cmd_main (git.c:902)
+==3084324==    by 0x4DE24D: main (common-main.c:52)
+==3084324==  Address 0x1ffeffedd0 is on thread 1's stack
+==3084324==  in frame #1, created by utime (???:)
+==3084324==  Uninitialised value was created by a stack allocation
+==3084324==    at 0x518FE1: mark_commit_graphs (commit-graph.c:2156)
+==3084324== 
+not ok 137 - Bloom generation is limited by --max-new-filters
+#	
+#		(
+#			cd limits &&
+#			test_commit c2 filter &&
+#			test_commit c3 filter &&
+#			test_commit c4 no-filter &&
+#	
+#			rm -f trace.event &&
+#			GIT_TRACE2_EVENT="$(pwd)/trace.event" \
+#				git commit-graph write --reachable --split=replace \
+#					--changed-paths --max-new-filters=2 &&
+#	
+#			test_filter_computed 2 trace.event &&
+#			test_filter_not_computed 3 trace.event &&
+#			test_filter_trunc_empty 0 trace.event &&
+#			test_filter_trunc_large 0 trace.event
+#		)

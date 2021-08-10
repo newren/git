@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Before running this, comment out the os.remove(filename) from summarize-perf
+
+die() {
+    echo "$@"
+    exit 1
+}
+
+## Previously done:
+# git clone --sparse --filter=blob:none file://$(pwd)/linux-stable linux-sparse-initial
+
+cd ~/floss
+echo Synchronizing
+rsync -az --delete linux-sparse-initial/ linux-sparse/
+cd linux-sparse/
+git config merge.directoryRenames true
+git config merge.renameLimit 30000
+git status
+
+git branch -f hwmon-updates fd8bdb23b91876ac1e624337bb88dc1dcc21d67e
+git branch -f hwmon-just-one fd8bdb23b91876ac1e624337bb88dc1dcc21d67e~34
+git branch base 4703d9119972bf586d2cca76ec6438f819ffa30e
+
+#../git/misc/summarize-perf test-tool fast-rebase --onto HEAD base hwmon-updates || die "rebasing failed"
+../git/misc/summarize-perf git rebase -s recursive --onto HEAD base hwmon-updates || die "rebasing failed"
+
+tmpfile=/tmp/$(ls -rt /tmp | tail -n 1)
+echo "Number of fetches:" $(grep fetch_count $tmpfile | cut -d '|' -f 9 | wc -l)
+echo "Number of objects fetched:" $(grep fetch_count $tmpfile | cut -d '|' -f 9 | sed -e s/.*:// | awk '{sum+=$1} END{print sum}')
+rm $tmpfile

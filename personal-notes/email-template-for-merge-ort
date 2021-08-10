@@ -1,0 +1,106 @@
+======================================================================
+
+CCs:
+  Derrick Stolee <dstolee@microsoft.com>
+  Jonathan Tan <jonathantanmy@google.com>
+  Taylor Blau <me@ttaylorr.com>
+  Junio C Hamano <gitster@pobox.com>
+  Jeff King <peff@peff.net>
+  Jonathan Nieder <jrnieder@gmail.com>
+  Ævar Arnfjörð Bjarmason <avarab@gmail.com>
+  Johannes Schindelin <Johannes.Schindelin@gmx.de>
+  Christian Couder <christian.couder@gmail.com>
+  Eric Sunshine <sunshine@sunshineco.com>
+
+======================================================================
+
+Subject: [RFC] Requirements for switching default merge backend?
+
+Hi,
+
+I'd like to gather a list of what others feel is needed before switching
+the default merge backend from recursive to ort.
+
+I have my own list, based on both personal daily usage of ort for the
+last year and feedback from many internal testers at $DAYJOB for the
+last half year, but I'm more interested in finding out if there are
+holes I'm unaware of that I should work on filling.  [After the general
+userbase has had some time to test the ort backend (one of the critical
+requirements, I think), then I can send my own thoughts and comparisons
+of the two backends and how ort matches up against the requirements.]
+
+So...thoughts?
+
+Thanks,
+Elijah
+
+======================================================================
+
+Subject: [RFC] Switch default merge backend from recursive to ort
+
+I think we should switch the default merge backend from recursive to
+ort.  From experience, switching is smooth, easy, and basically
+problem free.  "Past performance isn't a guarantee of future results",
+to borrow a phrase from the financial world, but I think it's ready.
+
+Reasons the switch is safe:
+  * There's an easy fallback
+  * Passes all tests that recursive does, and dozens it doesn't
+  * <Real-world testing at Palantir, including --remerge-diff default>
+  * <Specialized testing I do>
+
+Advantages of ort:
+  * Faster (dramatically so)
+  * More correct (as noted above)
+  * Better design
+  * New features
+    * AUTO_MERGE
+    * --remerge-diff
+    * an important component towards enabling sparse indexes
+    * reducing need to download blobs for partial clones (due to only
+      detecting renames for relevant_sources)
+    * cherry-pick/rebase in a bare repository
+
+
+======================================================================
+
+Bugs found in Palantir internal testing:
+
+  * Wrong tree sort order (fixed before ef2b369387 ("merge-ort: add
+    implementation of record_conflicted_index_entries()", 2020-12-13)
+    was submitted)
+  * Stable sort algorithm relied upon for proper handling of rename/rename
+    conflicts (see 3ca16a5e34 ("merge-ort: use STABLE_QSORT instead of
+    QSORT where required", 2021-03-04))
+  * Crash on conflicted file that is SKIP_WORKTREE in index but present
+    anyway; note that merge-recursive (still) silently overwrites user
+    modifications, while merge-ort previously crashed (fixed before
+    90a57ade62 ("merge-ort: implement CE_SKIP_WORKTREE handling with
+    conflicted entries", 2021-03-02) was submitted)
+
+======================================================================
+
+Subject: RFC -- making a plan for merging/reviewing merge-ort
+
+Hi everyone,
+
+There will be ~11 more series (with about ~6-7 patches per series)
+before merge-ort is complete.  Once gitster/en/merge-ort-perf merges
+to next, I can start submitting them.  Some questions:
+
+  * What's the right rate to submit them to not overwhelm reviewers?
+    One per week?  I didn't get much feedback on this for the past
+    series.
+
+  * My focus for the next few series is on diffcore-rename.c, which
+    will also affect things other than merge-ort.  While each series
+    is self standing, I'm curious if it makes more sense to have all
+    the changes be part of the same git release.  Given that 2.31-rc0
+    is just 3.5 weeks away and there's no way to get all my
+    diffcore-rename.c changes in before then, I'm wondering if it'd
+    make sense to just hold all future diffcore-rename series I submit
+    back until after git-2.31 is released.  Thoughts?
+
+If we can manage one series per week and the git-2.32 cycle is 3
+months long, then we should be able to complete merge-ort a few weeks
+before git-2.32-rc0...

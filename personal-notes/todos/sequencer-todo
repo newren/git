@@ -1,0 +1,27 @@
+Basic ideas:
+  * Fast
+  * Avoid touching files unnecessarily
+  * Function even if worktree is dirty
+  * Allow ignore-HEAD behavior
+  * Better picking of merge commits
+
+* avoid useless file writing
+  * testcase that rebases multiple commits
+  * test that ONLY files different between oldstart and newend are touched
+  * test that strace shows
+    * single call to merge_switch_to_result() (based on output)
+    * no files opened for writing prior to the above (except .git/objects...)
+    * no subprocesses
+
+* --perf option
+  * --no-reapply-cherry-picks (for both cherry-pick & rebase)
+  * --no-intermediate-reflog-update
+  * --no-useless-hook-invocation (post-commit)
+
+* rewriting commit hashes in range
+
+* picking merges:
+  * three-way merge of: automerge original,  automerge new, merge commit
+
+* incompatible options -- are they really incompatible?
+

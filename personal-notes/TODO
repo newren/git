@@ -1,0 +1,36 @@
+Investigate other valgrind failures:
+   t0005-signals.sh
+   t1700-split-index.sh
+   t1701-racy-split-index.sh
+   t3600-rm.sh
+   t4202-log.sh
+   t4216-log-bloom.sh
+
+
+Optimizations:
+  * Add a second loop in find_basename_matches() for irrelevant sources, but
+    only go down that route if relevant sources remain and
+       cost of checking relevant sources + O(P + N*(M-?P)) < O(N*M)
+    where:
+       P = number of irrelevant sources that *might* be matchable by basename
+       N = number of relevant sources
+       M = number of destinations (relevant or not)
+
+* Does trivial directory merge apply for both no source and for no dests?
+
+
+Other git things:
+  * make `replace` references more robust
+    https://lore.kernel.org/git/YGLNBFJv8NKmrbvz@coredump.intra.peff.net/
+  * sparse-checkout fixes, such as one reported by Tim (don't delete
+    or overwrite dirty-present-despite-SKIP_WORKTREE when switching branches)
+    https://lore.kernel.org/git/CABPp-BHs0ACvkCJMB-tO8xkiidB12NrN1hOhLRvm3U_Q=r2YcQ@mail.gmail.com/
+    (Possibly already since fixed as part of `reapply` work?)
+
+Follow up on:
+  * XDL_MERGE_FAVOR_BASE
+    https://lore.kernel.org/git/20210611190235.1970106-1-newren@gmail.com/
+  * XDL_MERGE_FAVOR_{OURS,THEIRS} incompatible with opts->virtual_ancestor
+    https://lore.kernel.org/git/CABPp-BGhaSJmqXFKpCVcUKexNXaa8sLEms-6q-qno7uETzGQ=A@mail.gmail.com/
+
+* maybe attempt replace refs bugfix

@@ -1,0 +1,18 @@
+[newren@tiger linux-stable (hwmon-updates)]$ time git log -p origin/master | wc -l
+warning: inexact rename detection was skipped due to too many files.
+warning: you may want to set your diff.renameLimit variable to at least 446 and retry the command.
+147220705
+
+real	25m44.845s
+user	24m48.240s
+sys	0m57.934s
+[newren@tiger linux-stable (hwmon-updates)]$ git rev-list --count origin/master
+900759
+[newren@tiger linux-stable (hwmon-updates)]$ git rev-list --no-merges --count origin/master
+834310
+
+147220705/834310 = 176.458 lines/commit
+(25*60+14.810)/834310 = 0.0018 secs/commit
+
+My merge rate:  (0.25 secs - 0.1 secs )/35 commits = .0042857 secs/commit;
+                2.5x slower

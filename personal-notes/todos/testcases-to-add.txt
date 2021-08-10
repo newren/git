@@ -1,0 +1,7 @@
+* symlink differences in recursive merge
+* three-way merge where a->mode == b->mode, but o->mode is different
+  * files: merge-recursive:merge_3way would die("unable to read blob object...")
+  * submod: merge-recursive:merge_submodule would ("Failed to merge
+    submodule %s (commits not present)") -- even if commits were
+    present for a & b
+
