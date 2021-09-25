@@ -20,7 +20,7 @@ static char *better_branch_name(const char *branch)
 	return xstrdup(name ? name : branch);
 }
 
-int cmd_merge_recursive(int argc, const char **argv, const char *prefix)
+static int via_merge_recursive_generic(int argc, const char **argv, const char *prefix)
 {
 	const struct object_id *bases[21];
 	unsigned bases_count = 0;
@@ -89,4 +89,78 @@ int cmd_merge_recursive(int argc, const char **argv, const char *prefix)
 	if (failed < 0)
 		return 128; /* die() error code */
 	return failed;
+}
+
+static int via_merge_ort(int argc, const char **argv, const char *prefix)
+{
+	const struct commit_list *merge_bases = NULL;
+	int i, failed;
+	struct commit side1, side2;
+	struct merge_options o;
+	char *better1, *better2;
+	struct merge_result result;
+
+	init_merge_options(&o, the_repository);
+	if (argv[0] && ends_with(argv[0], "-subtree"))
+		o.subtree_shift = "";
+
+	if (argc < 4)
+		usagef(builtin_merge_recursive_usage, argv[0]);
+
+	for (i = 1; i < argc; ++i) {
+		const char *arg = argv[i];
+
+		if (starts_with(arg, "--")) {
+			if (!arg[2])
+				break;
+			if (parse_merge_opt(&o, arg + 2))
+				die(_("unknown option %s"), arg);
+			continue;
+		}
+		struct object_id oid;
+		if (!get_oid_commit(argv[i], &oid))
+			die(_("could not parse object '%s'"), argv[i]);
+		commit_list_insert(lookup_commit_or_die(&oid, argv[i]),
+				   &merge_bases);
+	}
+	if (argc - i != 3) /* "--" "<head>" "<remote>" */
+		die(_("not handling anything other than two heads merge."));
+
+	if (repo_read_index_unmerged(the_repository))
+		die_resolve_conflict("merge");
+
+	o.branch1 = argv[++i];
+	o.branch2 = argv[++i];
+
+	if (get_oid(o.branch1, &h1))
+		die(_("could not resolve ref '%s'"), o.branch1);
+	if (get_oid(o.branch2, &h2))
+		die(_("could not resolve ref '%s'"), o.branch2);
+
+	o.branch1 = better1 = better_branch_name(o.branch1);
+	o.branch2 = better2 = better_branch_name(o.branch2);
+
+	if (o.verbosity >= 3)
+		printf(_("Merging %s with %s\n"), o.branch1, o.branch2);
+
+	merge_incore_recursive(&o, bases, side1, side2, &result);
+			    struct commit_list *merge_bases,
+			    struct commit *side1,
+			    struct commit *side2,
+			    struct merge_result *result);
+
+	failed = merge_recursive_generic(&o, &h1, &h2, bases_count, bases, &result);
+
+	free(better1);
+	free(better2);
+
+	if (failed < 0)
+		return 128; /* die() error code */
+	return failed;
+}
+
+int cmd_merge_recursive(int argc, const char **argv, const char *prefix)
+{
+	return via_merge_recursive_generic(argc, argv, prefix);
+	return via_merge_ort(argc, argv, prefix);
 }
