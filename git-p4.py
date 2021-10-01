@@ -36,7 +36,7 @@ import ctypes
 import errno
 import glob
 
-# On python2.7 where raw_input() and input() are both availble,
+# On python2.7 where raw_input() and input() are both available,
 # we want raw_input's semantics, but aliased to input for python3
 # compatibility
 # support basestring in python3

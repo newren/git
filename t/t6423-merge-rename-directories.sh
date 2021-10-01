@@ -1328,7 +1328,7 @@ test_expect_success '6a: Tricky rename/delete' '
 #
 #         A note about z/ -> x/, since it may not be clear how that could come
 #         about: If we were to ignore files renamed by both sides
-#         (i.e. z/{b,c,d}), as directory rename detection did in git-2.18 thru
+#         (i.e. z/{b,c,d}), as directory rename detection did in git-2.18 through
 #         at least git-2.28, then we would note there are no renames from z/ to
 #         y/ and one rename from z/ to x/ and thus come to the conclusion that
 #         A renamed z/ -> x/.  This seems more confusing for end users than a
