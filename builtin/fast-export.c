@@ -165,7 +165,7 @@ static void get_weak_commit_references(struct commit *commit)
 	}
 }
 
-static int has_unshown_parent(struct commit *commit)
+static int has_unshown_parent(struct commit *commit, int include_weak_refs)
 {
 	struct commit_list *parent;
 	struct string_list_item *weak_refs;
@@ -174,6 +174,9 @@ static int has_unshown_parent(struct commit *commit)
 		if (!(parent->item->object.flags & SHOWN) &&
 		    !(parent->item->object.flags & UNINTERESTING))
 			return 1;
+
+	if (!include_weak_refs)
+		return 0;
 
 	weak_refs = string_list_lookup(&commit_weak_parents,
 				       oid_to_hex(&commit->object.oid));
@@ -825,15 +828,23 @@ static char *anonymize_tag(void *data)
 static void handle_tail(struct object_array *commits, struct rev_info *revs,
 			struct string_list *paths_of_changed_objects)
 {
-	struct commit *commit;
+	struct commit *commit, *first;
 	struct object_array deferred = OBJECT_ARRAY_INIT;
+	int include_weak_refs = 1;
 	while (commits->nr) {
 		while (commits->nr) {
 			commit = (struct commit *)object_array_pop(commits);
-			if (has_unshown_parent(commit))
+			if (commit == first)
+				include_weak_refs = 0;
+			else if (!first)
+				first = commit;
+			if (has_unshown_parent(commit, include_weak_refs))
 				add_object_array(&commit->object, NULL, &deferred);
-			else
+			else {
 				handle_commit(commit, revs, paths_of_changed_objects);
+				include_weak_refs = 1;
+				first = NULL;
+			}
 		}
 		if (deferred.nr) {
 			struct object_array temporary = *commits;
@@ -1370,7 +1381,7 @@ int cmd_fast_export(int argc, const char **argv, const char *prefix)
 		refname = *revision_sources_at(&revision_sources, commit);
 		if (!strncmp(refname, "refs/notes/", 11))
 			add_object_array(&commit->object, NULL, &notes);
-		else if (has_unshown_parent(commit))
+		else if (has_unshown_parent(commit, 1))
 			add_object_array(&commit->object, NULL, &commits);
 		else
 			handle_commit(commit, &revs, &paths_of_changed_objects);
