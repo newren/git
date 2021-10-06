@@ -165,8 +165,6 @@ static void get_weak_commit_references(struct commit *commit)
 	}
 }
 
-static int get_object_mark(struct object *object);
-
 static int has_unshown_parent(struct commit *commit)
 {
 	struct commit_list *parent;
@@ -184,8 +182,6 @@ static int has_unshown_parent(struct commit *commit)
 	for (parent = weak_refs->util; parent; parent = parent->next) {
 		if (!(parent->item->object.flags & SHOWN) &&
 		    !(parent->item->object.flags & UNINTERESTING))
-			return 1;
-		if (!get_object_mark(&parent->item->object))
 			return 1;
 	}
 
