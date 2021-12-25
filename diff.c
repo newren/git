@@ -6680,6 +6680,19 @@ static void diff_flush_patch_all_file_pairs(struct diff_options *o)
 	if (o->color_moved)
 		o->emitted_symbols = &esm;
 
+#if 0
+	/* FIXME: Add additional headers here, and set pair_status */
+	for (i = 0; i < q->nr; i++) {
+		struct diff_filepair *cur = q->queue[i];
+		struct diff_filepair *next = q->queue[i+1];
+		if (cur->one->mode && next->one->mode) {
+			if (strcmp(cur->one->path, next->one->path) > 0)
+				fprintf(stderr, "cur: %s, next: %s\n",
+				       cur->one->path, next->one->path);
+			assert(strcmp(cur->one->path, next->one->path) <= 0);
+		}
+	}
+#endif
 	if (o->additional_path_headers)
 		create_filepairs_for_header_only_notifications(o);
 
