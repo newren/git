@@ -77,53 +77,35 @@ static void get_negative_and_positive_refs(struct rev_cmdline_info *info,
 					   struct commit **onto,
 					   struct string_list *replay_refs)
 {
+	struct commit *new_base = NULL;
 	int i;
-	struct commit *provisional_onto = NULL;
-
-	char *descriptions[] = {
-			"REV_CMD_REF",
-			"REV_CMD_PARENTS_ONLY",
-			"REV_CMD_LEFT",
-			"REV_CMD_RIGHT",
-			"REV_CMD_MERGE_BASE",
-			"REV_CMD_REV" };
 
 	for (i = 0; i < info->nr; i++) {
 		struct rev_cmdline_entry *e = info->rev + i;
 		struct object_id oid;
-		//struct commit *commit;
 		char *full_name = NULL;
 		int can_uniquely_dwim = 1;
 
 		if (dwim_ref(e->name, strlen(e->name), &oid, &full_name, 0) != 1)
 			can_uniquely_dwim = 0;
 
-		printf("%2d %s %20s %04x %s %s\n",
-		       i, oid_to_hex(&e->item->oid),
-		       descriptions[e->whence], e->flags,
-		       e->name, full_name);
 		if (!(e->flags & BOTTOM)) {
 			/* positive ref we need to update */
 			if (can_uniquely_dwim)
 				string_list_append(replay_refs, full_name);
 		} else if (!*onto) {
-			if (provisional_onto)
+			if (new_base)
 				die(_("cannot determine where to replay commits; please specify --onto"));
 			else
-				provisional_onto = lookup_commit_reference_gently(the_repository, &e->item->oid, 1);
+				new_base = lookup_commit_reference_gently(the_repository, &e->item->oid, 1);
 		}
 
 		free(full_name);
 	}
-	if (provisional_onto)
-		*onto = provisional_onto;
+	if (new_base)
+		*onto = new_base;
 
 	string_list_sort(replay_refs);
-
-#if 0
-		if (!*revision_sources_at(&revision_sources, commit))
-			*revision_sources_at(&revision_sources, commit) = full_name;
-#endif
 }
 
 int cmd_replay(int argc, const char **argv, const char *prefix)
@@ -137,7 +119,6 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	struct tree *next_tree, *base_tree;
 	struct merge_result result;
 	struct string_list replay_refs = STRING_LIST_INIT_DUP;
-	int i;
 
 	const char * const replay_usage[] = {
 		N_("git replay [--onto <newbase>] <revision-range>"),
@@ -170,14 +151,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	if (onto_name)
 		onto = peel_committish(onto_name);
 
-	printf("Before, onto=%s, replay_refs.nr=%d\n",
-	       onto_name ? oid_to_hex(&onto->object.oid) : "NULL", replay_refs.nr);
 	get_negative_and_positive_refs(&revs.cmdline, &onto, &replay_refs);
-	printf("After:\n");
-	printf("  onto=%s\n", onto ? oid_to_hex(&onto->object.oid) : "NULL");
-	for (i = 0; i < replay_refs.nr; i++)
-		printf("  replay_refs[%d] = %s\n", i, replay_refs.items[i].string);
-	exit(0);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
