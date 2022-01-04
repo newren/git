@@ -7,6 +7,7 @@
 
 #include "builtin.h"
 #include "merge-ort.h"
+#include "refs.h"
 #include "revision.h"
 #include "strvec.h"
 
@@ -72,44 +73,111 @@ static struct commit *create_commit(struct tree *tree,
 	return (struct commit *)obj;
 }
 
+static void get_negative_and_positive_refs(struct rev_cmdline_info *info,
+					   struct commit **onto,
+					   struct string_list *replay_refs)
+{
+	int i;
+	struct commit *provisional_onto = NULL;
+
+	char *descriptions[] = {
+			"REV_CMD_REF",
+			"REV_CMD_PARENTS_ONLY",
+			"REV_CMD_LEFT",
+			"REV_CMD_RIGHT",
+			"REV_CMD_MERGE_BASE",
+			"REV_CMD_REV" };
+
+	for (i = 0; i < info->nr; i++) {
+		struct rev_cmdline_entry *e = info->rev + i;
+		struct object_id oid;
+		//struct commit *commit;
+		char *full_name = NULL;
+		int can_uniquely_dwim = 1;
+
+		if (dwim_ref(e->name, strlen(e->name), &oid, &full_name, 0) != 1)
+			can_uniquely_dwim = 0;
+
+		printf("%2d %s %20s %04x %s %s\n",
+		       i, oid_to_hex(&e->item->oid),
+		       descriptions[e->whence], e->flags,
+		       e->name, full_name);
+		if (!(e->flags & BOTTOM)) {
+			/* positive ref we need to update */
+			if (can_uniquely_dwim)
+				string_list_append(replay_refs, full_name);
+		} else if (!*onto) {
+			if (provisional_onto)
+				die(_("cannot determine where to replay commits; please specify --onto"));
+			else
+				provisional_onto = lookup_commit_reference_gently(the_repository, &e->item->oid, 1);
+		}
+
+		free(full_name);
+	}
+	if (provisional_onto)
+		*onto = provisional_onto;
+
+	string_list_sort(replay_refs);
+
+#if 0
+		if (!*revision_sources_at(&revision_sources, commit))
+			*revision_sources_at(&revision_sources, commit) = full_name;
+#endif
+}
+
 int cmd_replay(int argc, const char **argv, const char *prefix)
 {
-	struct commit *onto;
+	const char *onto_name = NULL;
+	struct commit *onto = NULL;
 	struct commit *last_commit = NULL;
-	struct strvec rev_walk_args = STRVEC_INIT;
 	struct rev_info revs;
 	struct commit *commit;
 	struct merge_options merge_opt;
 	struct tree *next_tree, *base_tree;
 	struct merge_result result;
-	struct strbuf branch_name = STRBUF_INIT;
+	struct string_list replay_refs = STRING_LIST_INIT_DUP;
+	int i;
 
-	if (argc == 2 && !strcmp(argv[1], "-h")) {
-		printf("Sorry, I am not a psychiatrist; I can not give you the help you need.  Oh, you meant usage...\n");
-		exit(129);
-	}
+	const char * const replay_usage[] = {
+		N_("git replay [--onto <newbase>] <revision-range>"),
+		NULL
+	};
+	struct option replay_options[] = {
+		OPT_STRING(0, "onto", &onto_name,
+			   N_("revision"),
+			   N_("rebase onto given commit")),
+		OPT_END()
+	};
 
-	if (argc != 5 || strcmp(argv[1], "--onto"))
-		die("usage: read the code, figure out how to use it, then do so");
+	if (argc == 2 && !strcmp(argv[1], "-h"))
+		usage_with_options(replay_usage, replay_options);
 
-	onto = peel_committish(argv[2]);
-	strbuf_addf(&branch_name, "refs/heads/%s", argv[4]);
+	argc = parse_options(argc, argv, prefix, replay_options, replay_usage,
+			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN);
 
-	repo_init_revisions(the_repository, &revs, NULL);
-	revs.verbose_header = 1;
-	revs.max_parents = 1;
-	revs.cherry_mark = 1;
-	revs.limited = 1;
-	revs.reverse = 1;
-	revs.right_only = 1;
+	repo_init_revisions(the_repository, &revs, prefix);
+	/* defaults for revs */
 	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 	revs.topo_order = 1;
-	strvec_pushl(&rev_walk_args, "", argv[4], "--not", argv[3], NULL);
 
-	if (setup_revisions(rev_walk_args.nr, rev_walk_args.v, &revs, NULL) > 1)
-		return error(_("unhandled options"));
+	argc = setup_revisions(argc, argv, &revs, NULL);
+	if (argc > 1)
+		die(_("unrecognized argument: %s"), argv[1]);
+	/* requirements for revs */
+	revs.reverse = 1;
 
-	strvec_clear(&rev_walk_args);
+	if (onto_name)
+		onto = peel_committish(onto_name);
+
+	printf("Before, onto=%s, replay_refs.nr=%d\n",
+	       onto_name ? oid_to_hex(&onto->object.oid) : "NULL", replay_refs.nr);
+	get_negative_and_positive_refs(&revs.cmdline, &onto, &replay_refs);
+	printf("After:\n");
+	printf("  onto=%s\n", onto ? oid_to_hex(&onto->object.oid) : "NULL");
+	for (i = 0; i < replay_refs.nr; i++)
+		printf("  replay_refs[%d] = %s\n", i, replay_refs.items[i].string);
+	exit(0);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
