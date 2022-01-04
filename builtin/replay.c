@@ -6,15 +6,9 @@
 #include "git-compat-util.h"
 
 #include "builtin.h"
-#include "cache-tree.h"
-#include "commit.h"
-#include "lockfile.h"
 #include "merge-ort.h"
-#include "refs.h"
 #include "revision.h"
-#include "sequencer.h"
 #include "strvec.h"
-#include "tree.h"
 
 static const char *short_commit_name(struct commit *commit)
 {
@@ -81,23 +75,14 @@ static struct commit *create_commit(struct tree *tree,
 int cmd_replay(int argc, const char **argv, const char *prefix)
 {
 	struct commit *onto;
-	struct commit *last_commit = NULL, *last_picked_commit = NULL;
-	struct object_id head;
-	struct lock_file lock = LOCK_INIT;
+	struct commit *last_commit = NULL;
 	struct strvec rev_walk_args = STRVEC_INIT;
 	struct rev_info revs;
 	struct commit *commit;
 	struct merge_options merge_opt;
-	struct tree *next_tree, *base_tree, *head_tree;
+	struct tree *next_tree, *base_tree;
 	struct merge_result result;
-	struct strbuf reflog_msg = STRBUF_INIT;
 	struct strbuf branch_name = STRBUF_INIT;
-
-	/*
-	 * test-tool stuff doesn't set up the git directory by default; need to
-	 * do that manually.
-	 */
-	setup_git_directory();
 
 	if (argc == 2 && !strcmp(argv[1], "-h")) {
 		printf("Sorry, I am not a psychiatrist; I can not give you the help you need.  Oh, you meant usage...\n");
@@ -109,15 +94,6 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 
 	onto = peel_committish(argv[2]);
 	strbuf_addf(&branch_name, "refs/heads/%s", argv[4]);
-
-	/* Sanity check */
-	if (get_oid("HEAD", &head))
-		die(_("Cannot read HEAD"));
-	assert(oideq(&onto->object.oid, &head));
-
-	hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
-	if (repo_read_index(the_repository) < 0)
-		BUG("Could not read index");
 
 	repo_init_revisions(the_repository, &revs, NULL);
 	revs.verbose_header = 1;
@@ -140,22 +116,19 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 
 	init_merge_options(&merge_opt, the_repository);
 	memset(&result, 0, sizeof(result));
-	merge_opt.show_rename_progress = 1;
-	merge_opt.branch1 = "HEAD";
-	head_tree = get_commit_tree(onto);
-	result.tree = head_tree;
+	merge_opt.show_rename_progress = 0;
+	result.tree = get_commit_tree(onto);
 	last_commit = onto;
 	while ((commit = get_revision(&revs))) {
 		struct commit *base;
 
-		fprintf(stderr, "Rebasing %s...\r",
-			oid_to_hex(&commit->object.oid));
 		assert(commit->parents && !commit->parents->next);
 		base = commit->parents->item;
 
 		next_tree = get_commit_tree(commit);
 		base_tree = get_commit_tree(base);
 
+		merge_opt.branch1 = short_commit_name(commit);
 		merge_opt.branch2 = short_commit_name(commit);
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
 
@@ -169,50 +142,20 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		merge_opt.ancestor = NULL;
 		if (!result.clean)
 			break;
-		last_picked_commit = commit;
 		last_commit = create_commit(result.tree, commit, last_commit);
 	}
-	/* TODO: There should be some kind of rev_info_free(&revs) call... */
-	memset(&revs, 0, sizeof(revs));
 
-	merge_switch_to_result(&merge_opt, head_tree, &result, 1, !result.clean);
+	/* Output */
+	printf("%s\n", oid_to_hex(&last_commit->object.oid));
+	if (result.clean == 0)
+		printf("%s\n", oid_to_hex(&commit->object.oid));
 
+	/* Cleanup */
+	memset(&revs, 0, sizeof(revs)); /* TODO: write&call rev_info_free()? */
+	merge_finalize(&merge_opt, &result);
+
+	/* Return */
 	if (result.clean < 0)
 		exit(128);
-
-	if (result.clean) {
-		fprintf(stderr, "\nDone.\n");
-		strbuf_addf(&reflog_msg, "finish rebase %s onto %s",
-			    oid_to_hex(&last_picked_commit->object.oid),
-			    oid_to_hex(&last_commit->object.oid));
-		if (update_ref(reflog_msg.buf, branch_name.buf,
-			       &last_commit->object.oid,
-			       &last_picked_commit->object.oid,
-			       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR)) {
-			error(_("could not update %s"), argv[4]);
-			die("Failed to update %s", argv[4]);
-		}
-		if (create_symref("HEAD", branch_name.buf, reflog_msg.buf) < 0)
-			die(_("unable to update HEAD"));
-		strbuf_release(&reflog_msg);
-		strbuf_release(&branch_name);
-
-		prime_cache_tree(the_repository, the_repository->index,
-				 result.tree);
-	} else {
-		fprintf(stderr, "\nAborting: Hit a conflict.\n");
-		strbuf_addf(&reflog_msg, "rebase progress up to %s",
-			    oid_to_hex(&last_picked_commit->object.oid));
-		if (update_ref(reflog_msg.buf, "HEAD",
-			       &last_commit->object.oid,
-			       &head,
-			       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR)) {
-			error(_("could not update %s"), argv[4]);
-			die("Failed to update %s", argv[4]);
-		}
-	}
-	if (write_locked_index(&the_index, &lock,
-			       COMMIT_LOCK | SKIP_IF_UNCHANGED))
-		die(_("unable to write %s"), get_index_file());
-	return (result.clean == 0);
+	return result.clean ? 0 : 1;
 }
