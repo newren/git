@@ -1,0 +1,297 @@
+Next steps:
+  X Switch to parseopt
+  * Automatic range handling
+    / rewrite multiple branches if they are found in the range
+    X multiple negative refs? error. (unless --onto)
+    X one negative ref? default for onto.
+    * no negative refs?  like --root.
+    * Figure out update-onto (cherry-pick) vs. update-range (rebase)
+    * ensure we either have exactly one non-bottom commit in rev_cmdline_info,
+      or else that all non-bottom commits are decorated by branch names.
+    * 
+  * New todo-lists need extra stuff:
+    X lookup refs pointing at any given commit as we walk (so we can rewrite)
+    * mark
+  * when rebasing, if commit->parents == last_commit->parents &&
+    commit->tree == last_commit->tree, then replace last_commit with commit.
+    (fast-forwardability)
+  * interactivity (todo lists)
+  * rebasing merges
+  * packing new objects using tmp-dir
+  * ensure commit signing works (bleh...)
+  * sparse-checkout/new-worktrees for resolving
+  * rewrite hashes in commit messages on the fly
+  * special options to match rebase
+    * ability to have operation stop and affect current worktree
+    * --no-reapply-cherry-picks
+    * --exec handling
+    * --autostash[-if-needed?]
+  * make sure
+    * handle commit signing
+    * handle dirty working trees
+    * can obsolete rebase
+
+git replay [--onto BASE] range
+
+* Provide enough flags, options that rebase & cherry-pick can be implemented
+  atop the new thing
+
+Default output:
+  List of positive ref branches and commit they _would_ be updated to
+
+Differs from cherry-pick & rebase:
+  Performance:
+    - --reapply-cherry-picks is the default
+    - skip the can_fast_forward() crap -- if trying to reapply a commit on the
+      same base, then skip the merge and take the commit (unless --force-rebase,
+      of course).  That does commit-by-commit fast-forwarding correctly,
+      without the expensive pre-emptive revision walk.
+    - skip the other expensive revision walking of upstream too
+
+      ...except that we need to add potentially expensive upstream walking
+      for rebasing merges, so we know if they become degenerate and can be
+      pruned (think about the merges to start some topics in git.git; if
+      rebasing the topic, the merges of other topics into master may be
+      unnecessary)
+    - No per-commit hooks (unless special flag?  don't make sense in bare repos)
+    - No updating of working directory or index
+      (unless special flag, or hooks, or conflict, or interactive-edit)
+    - Avoid writing control structures unless replay stops
+    - Avoid forking processes unless explicitly requested (e.g. --exec
+      or --strategy, or --run-hooks), also allows avoiding updating
+      working directory & index & control structures & refreshing
+      index afterward
+    - add new worktree, with very sparse-checkout for resolving conflicts
+      (at least by default)
+    - 
+  Non-performance:
+  - Simpler control structures; single file if possible
+  - do not update any ref by default; just output resulting commit ID
+    (flag to allow updating, with another for force updating)
+  Behavioral (besides above):
+  - --abort takes you back to original branch, and applies autostash there
+  - works with dirty working trees (will error if hits conflict or would need
+    --autostash and it isn't supplied)
+  - use tmp-objdir and pack objects at end of exercise to avoid explosion of
+    loose objects (if nr objects > 100 or so, that is)
+  - see also new features below
+  - NOTE: needs to still handle gpg signing
+
+New features:
+  - rewrite hashes in commit messages on the fly
+  - rebase/cherry-pick (2-parent) merges
+  - works in bare repositories, or non-checked-out branches
+  - rewrite multiple branches at once, not just one branch at a time
+    (and no need for `--root` flag)
+  - performance (see above)
+
+Bad wording:
+  - cherry-pick implies --allow-empty isn't default; --allow-become-empty
+    certainly isn't, but --allow-start-empty should be
+  - cherry-pick implies --allow-empty-message is not the default
+
+
+Alternate notes; oort merge strategy, for handling octupii
+  - code needs to return maximum conflict marker size used
+  - can't auto-merge, because binary files could have N>3 versions
+    (but index can store multiple stage 3 entries...)
+
+======================================================================
+
+          Conflicting options:
+            -m (--mainline, --merge)
+            -n (--no-commit, --no-stat)
+            -s (--signoff, --strategy)
+            -x (mark as cherry-pick, --exec)
+
+          Shared options:
+            --abort
+            --allow-empty-message
+            --continue
+            --[no-]gpg-sign,-S
+	    --quit
+	    --[no-]rerere-autoupdate
+	    --signoff (but not -s)
+	    --skip
+            --strategy,-s=<strategy>
+            --strategy-option,-X=<strategy-option>
+
+          Synonym options:
+            --keep-redundant-commits, --empty=keep
+
+Notes:
+  1-important, keep
+  2-important, reimplement
+  3-idiotic, should be dropped
+  4-dumb name, rename
+
+
+Option map:
+
+1         --abort
+  3       --allow-empty
+  3       --allow-empty-message
+ 2        --cleanup=<mode>
+1         --continue
+?         --edit, -e
+?         --ff
+1         --[no-]gpg-sign,-S[=<keyid>]
+   4      --keep-redundant-commits
+  3       --mainline <parent-number>, -m
+?         --no-commit, -n
+1         --quit
+  3       -r
+?         --[no-]rerere-autoupdate
+1         --signoff, -s
+1         --skip
+?         --strategy=<strategy>
+1         --strategy-option,-X=<option>
+   4      -x
+
+
+Notes:
+  1-important, keep
+  2-important, reimplement
+  3-idiotic, should be dropped
+  4-dumb name, rename
+  5-good command, but bad default
+
+1         --abort
+  3       --allow-empty-message
+1         --[no-]autosquash
+1?        --[no-]autostash
+1         --committer-date-is-author-date
+1         --continue
+1         --edit-todo
+   4      --empty={drop,keep,ask}    # stop (ask), drop, roll (keep)
+1         --exec, -x <cmd>
+1  4?     --force-rebase,-f,--no-ff
+??        --[no-]fork-point
+1         --[no-]gpg-sign,-S[=<keyid>]
+ 2        --ignore-whitespace
+1         --interactive, -i
+??        --keep-base
+  3       --[no-]keep-empty
+  3       --merge,-m
+1         --onto <newbase>
+  ?       --quiet,-q
+1?        --quit
+    5     --[no-]reapply-cherry-picks
+    5     --rebase-merges[=(rebase-cousins|no-rebase-cousins)],-r
+??        --[no-]rerere-autoupdate
+   4      --reset-author-date, --ignore-date
+    5?    --[no-]reschedule-failed-exec
+  3       --root
+  3       --show-current-patch
+1         --signoff
+1         --skip
+  3?      --[no-]stat,-n
+  3       --strategy,-s=<strategy>
+1         --strategy-option,-X=<strategy-option>
+  3?      --verbose,-v
+  3?      --[no-]verify
+ 2        --whitespace=<option>
+
+
+======================================================================
+
+From email to Christian:
+
+  * When a merge/rebase can be done successfully, what is the expected
+output?  Should a new toplevel tree be created and its hash be shown?
+A new commit?  Should branches be automatically updated, or is this
+something that external tools want to consume so they can do updates?
+(What if the branch is tied to another git-worktree for client-side
+users?)  What about all the other output shown during a merge?  (See
+also two points below for an item which discusses the 4 types of
+output from a merge.)
+  * When a merge/rebase hits a conflict, do we just error out?  What
+types of output do we provide, and does it include anything about the
+nature or types of conflicts?  (See also the next point.)
+  * merging has 4 kinds of output: success/failure, hash of the tree
+that represents what would have been put in the working directory
+(possibly including conflict markers if the merge had conflicts),
+special messages normally sent to stdout such as conflict notices or
+info about which paths are being 3-way merged, and an index.  (The
+index is irrelevant if the merge is clean, but might be considered
+important when the merge hits conflicts.)  Which of these 4 pieces are
+relevant to someone doing a merge/revert/rebase/cherry-pick without a
+worktree by default?  How do we display it in a way that is relevant
+for them to consume?  Which forms of output should they be able to add
+or remove from the default using extra options?  If the index
+information is of interest, do we need to display it a different way
+or create a temporary index somewhere for inspection?
+  * If this is client side and we hit a conflict, do we want to allow
+something other than just erroring out.  For example, stashing the
+changes in the working copy, checking out the appropriate commit,
+putting the conflict markers in place in the working tree and index,
+and letting the user continue?  I suspect both abort on conflict, and
+continue with the user's worktree are of interest, so how do users
+specify which one they want?
+  * git-rebase, git-cherry-pick, git-revert, git-merge, and
+git-merge-recursive all have hardcoded assumptions surrounding HEAD
+built into them.  Do we extend these tools with more flags allowing us
+to use something other than HEAD, or do we just write new toplevel
+command(s)?  What do those flags look like or, if going with the new
+toplevel command(s), what is the structure of the syntax for the new
+command(s)?
+  * When thinking about merges (rather than rebases/cherry-picks),
+what's the appropriate command to modify for those?  Is it git-merge?
+git-merge-recursive?  Or is it some new toplevel command?
+  * rebase & cherry-pick are pretty glacially slow due to all kinds of
+things (I think at least 5 causes)[1], but some of those things might
+not be fixable by default due to backward compatibility concerns.  Do
+we create a bunch of flags to turn those things off?  Do we create a
+single new flag to turn all those flags off?  Do we just create a new
+toplevel command?  (Do users want those things even if they are slow?)
+  * There is no longer a user-facing distinction between rebase and
+cherry-pick once you're no longer tied to HEAD.  Do we unify these
+into a single command?  Keep them separate but modify them to use
+similar control structures?  Create a new command that replaces the
+two?  (What about backward compatibility questions -- command names
+and flags, control structures, abilities like being able to call
+cherry-pick in the middle of a rebase despite the fact that you cannot
+call rebase in the middle of a rebase?)
+  * rebasing several branches that depended on each other has always
+been slightly painful (something I felt with my merge-ort work, as I
+had 6-7 stacked series back in January all ready to submit, and I had
+to continually rebase the whole set).  After rebasing the first
+series, you have to look up the appropriate commit ranges for
+subsequent ones.  It'd be nice to allow rebasing multiple branches at
+once.  And the fact that HEAD is no longer intrinsically tied to
+operations might make this easier...but what's the UI for handling
+this?  What if the multiple branches do not form a single linear
+history?  How do users specify what to transplant and where?
+  * Related to rebasing multiple branches, it'd be nice to also have a
+better --rebase-merges, one that reapplied "evil merge" changes (which
+may not be evil, e.g. making changes necessary to fix semantic
+conflicts).  merge-ort provides some new options here, particularly
+with the (not yet submitted upstream) --remerge-diff capabilities for
+log/show.
+  * Once your operation is no longer tied to a worktree, it can make
+perfect sense to allow another replay operation in the middle of the
+interrupted replay operation.  That kind of thing sort of exists today
+in that you can do a cherry-pick during an interrupted rebase, but you
+can't rebase in the middle of a rebase or cherry-pick in the middle of
+a cherry-pick.  But with a non-worktree-connected replay, why not?
+However, doing so would probably require us to simplify the data
+structures, likely using a single INI-style file rather than the
+directory of files approach that is currently used.  Does that present
+backward compatibility concerns?
+  * Besides special handling for no worktrees, we should also improve
+handling with worktrees.  This means multiple things: (1) Not
+needlessly rewriting (and updating mtimes) of worktree files that were
+the same before and after the rebase.  (2) Folks can run "git merge"
+with a dirty worktree.  Shouldn't we be able to do a "git rebase" or
+"git cherry-pick" with a dirty worktree...presuming we don't have to
+stop for conflicts and the rebase/cherry-pick doesn't need to touch
+any of the dirty paths?
+
+...and there are probably other things that I just haven't thought of yet.
+
+I suspect Dscho and Phillip (Wood) probably have numerous thoughts and
+opinions too.  However, I worry the design space is so large that it
+might be helpful to first write a prototype tool or two that does some
+of these things, and then let people play with it and provide feedback
+about how to rewrite it to solve the relevant sets of problems in a
+better way.

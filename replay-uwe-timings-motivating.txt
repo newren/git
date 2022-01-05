@@ -1,0 +1,64 @@
+Based on "git clone https://git.pengutronix.de/git/ukl/linux" and first
+running "git config merge.renamelimit 9999", though we'll override that
+occasionally below:
+
+v2.32.0-rc1
+  53.908s   git rebase v5.10
+  47.668s   git rebase --onto v5.10 v5.4
+
+  18.574s   git -c merge.renamelimit=1000 rebase v5.10
+  11.800s   git -c merge.renamelimit=1000 rebase --onto v5.10 v5.4
+
+  16.610s   git rebase -sort v5.10
+  10.780s   git rebase -sort --onto v5.10 v5.4
+
+  10.670s   git rebase -sort --reapply-cherry-picks v5.10
+  10.589s   git rebase -sort --reapply-cherry-picks --onto v5.10 v5.4
+
+version: remerge-diff
+  16.073s   git rebase -sort v5.10
+   9.778s   git rebase -sort --onto v5.10 v5.4
+
+   9.541s   git rebase -sort --reapply-cherry-picks v5.10
+   9.062s   git rebase -sort --reapply-cherry-picks --onto v5.10 v5.4
+
+With can_fast_forward() replaced with return 0:
+   9.221s   git rebase -sort --reapply-cherry-picks v5.10
+   8.124s   git rebase -sort --reapply-cherry-picks --onto v5.10 v5.4
+
+Others:
+   6.495s   git switch --quiet --detach v5.10
+   1.741s   git merge-base v5.10 origin/rebase-timing
+
+Also:
+   6.495s   git switch --quiet --detach v5.10
+   0.005s   git branch -f rebase-timing origin/rebase-timing
+   0.176s   test-tool fast-rebase --onto HEAD v5.4 rebase-timing
+   TOTAL: 6.676s.  So rebase is wasting a LOT of time.
+
+summarize-perf highlights:
+   2.104 : <unmeasured> (21.3%)
+
+       A full 2 seconds wasted in rebase somewhere.  0.5-1.0 of that in
+       can_fast_forward(), but where else is it wasting time?
+
+   6.628 : 7 : unpack_trees
+
+       This seems like checkout related, though why 7 calls?  Also, this is
+       separate and in addition to the 4 unpack_trees calls from checkout
+
+   0.515 : 4 : refresh
+   0.103 : 4 : preload
+
+       Completely wasted time, from resync due to using "git commit"
+
+   0.380 : 6 : do_write_index
+   0.081 : 4 : checkout
+   0.069 : 7 : do_read_index
+
+       Why 6 and 7??  I thought 4 represented a waste of 3, but here there is
+       even more waste.  Crazy.
+
+   0.011 : 4 : incore_nonrecursive
+
+       Actual merging including rename detection was only 11 milliseconds.
