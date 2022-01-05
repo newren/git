@@ -150,15 +150,16 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN);
 
 	repo_init_revisions(the_repository, &revs, prefix);
-	/* defaults for revs */
-	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
-	revs.topo_order = 1;
 
 	argc = setup_revisions(argc, argv, &revs, NULL);
 	if (argc > 1)
 		die(_("unrecognized argument: %s"), argv[1]);
-	/* requirements for revs */
+
+	/* requirements/overrides for revs */
+	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
+	revs.topo_order = 1;
 	revs.reverse = 1;
+	revs.simplify_history = 0;
 
 	if (onto_name)
 		onto = peel_committish(onto_name);
@@ -175,6 +176,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	last_commit = onto;
 	while ((commit = get_revision(&revs))) {
 		struct commit *base;
+		const struct name_decoration *decoration;
 
 		assert(commit->parents && !commit->parents->next);
 		base = commit->parents->item;
@@ -197,9 +199,22 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		if (!result.clean)
 			break;
 		last_commit = create_commit(result.tree, commit, last_commit);
+		decoration = get_name_decoration(&commit->object);
+		if (!decoration)
+			continue;
+
+		while (decoration) {
+			if (decoration->type == DECORATION_REF_LOCAL) {
+				printf("update %s %s %s\n",
+				       decoration->name,
+				       oid_to_hex(&last_commit->object.oid),
+				       oid_to_hex(&commit->object.oid));
+			}
+			decoration = decoration->next;
+		}
 	}
 
-	/* Output */
+	/* Output, which assumes no decorated objects, so FIXME FIXME FIXME */
 	printf("%s\n", oid_to_hex(&last_commit->object.oid));
 	if (result.clean == 0)
 		printf("%s\n", oid_to_hex(&commit->object.oid));
