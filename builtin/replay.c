@@ -73,39 +73,52 @@ static struct commit *create_commit(struct tree *tree,
 	return (struct commit *)obj;
 }
 
-static void get_negative_and_positive_refs(struct rev_cmdline_info *info,
-					   struct commit **onto,
-					   struct string_list *replay_refs)
+static struct commit *guess_new_base(struct rev_cmdline_info *info)
 {
 	struct commit *new_base = NULL;
-	int i;
+	int i, bottom_commits = 0;
 
+	/*
+	 * When the user specifies e.g.
+	 *   git replay origin/main..mybranch
+	 *   git replay ^origin/next mybranch1 mybranch2
+	 * we want to be able to determine where to replay the commits.  In
+	 * these examples, the branches are probably based on an old version
+	 * of either origin/main or origin/next, so we want to replay on the
+	 * newest version of that branch.  In contrast we would want to error
+	 * out if they ran
+	 *   git replay ^origin/master ^origin/next mybranch
+	 *   git replay mybranch~2..mybranch
+	 * the first of those because there's no unique base to choose, and
+	 * the second because they'd likely just be replaying commits on top
+	 * of the same commit and not making any difference.
+	 */
 	for (i = 0; i < info->nr; i++) {
 		struct rev_cmdline_entry *e = info->rev + i;
 		struct object_id oid;
-		char *full_name = NULL;
-		int can_uniquely_dwim = 1;
+		char *fullname = NULL;
 
-		if (dwim_ref(e->name, strlen(e->name), &oid, &full_name, 0) != 1)
-			can_uniquely_dwim = 0;
+		if (!(e->flags & BOTTOM))
+			continue;
 
-		if (!(e->flags & BOTTOM)) {
-			/* positive ref we need to update */
-			if (can_uniquely_dwim)
-				string_list_append(replay_refs, full_name);
-		} else if (!*onto) {
-			if (new_base)
-				die(_("cannot determine where to replay commits; please specify --onto"));
-			else
-				new_base = lookup_commit_reference_gently(the_repository, &e->item->oid, 1);
-		}
+		/*
+		 * We need a unique base commit to know where to replay; error
+		 * out if not unique.
+		 *
+		 * Also, we usually don't want to replay commits on the same
+		 * base they started on, so only accept this as the base if
+		 * it uniquely names some ref.
+		 */
+		if (bottom_commits++ ||
+		    dwim_ref(e->name, strlen(e->name), &oid, &fullname, 0) != 1)
+			die(_("cannot determine where to replay commits; please specify --onto"));
 
-		free(full_name);
+		free(fullname);
+		new_base = lookup_commit_reference_gently(the_repository,
+							  &e->item->oid, 1);
 	}
-	if (new_base)
-		*onto = new_base;
 
-	string_list_sort(replay_refs);
+	return new_base;
 }
 
 int cmd_replay(int argc, const char **argv, const char *prefix)
@@ -118,7 +131,6 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	struct merge_options merge_opt;
 	struct tree *next_tree, *base_tree;
 	struct merge_result result;
-	struct string_list replay_refs = STRING_LIST_INIT_DUP;
 
 	const char * const replay_usage[] = {
 		N_("git replay [--onto <newbase>] <revision-range>"),
@@ -127,7 +139,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	struct option replay_options[] = {
 		OPT_STRING(0, "onto", &onto_name,
 			   N_("revision"),
-			   N_("rebase onto given commit")),
+			   N_("replay onto given commit")),
 		OPT_END()
 	};
 
@@ -150,8 +162,8 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 
 	if (onto_name)
 		onto = peel_committish(onto_name);
-
-	get_negative_and_positive_refs(&revs.cmdline, &onto, &replay_refs);
+	else
+		onto = guess_new_base(&revs.cmdline);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
