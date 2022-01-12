@@ -5,10 +5,30 @@ Next steps:
     X multiple negative refs? error. (unless --onto)
     X one negative ref? default for onto.
     * no negative refs?  like --root.
-    * Figure out update-onto (cherry-pick) vs. update-range (rebase)
-    * ensure we either have exactly one non-bottom commit in rev_cmdline_info,
-      or else that all non-bottom commits are decorated by branch names.
-    * 
+    * Different modes:
+      * update-target (cherry-pick), --advance or negative ref a branch
+      * update-source (rebase), --onto or negative ref not a branch
+        * --contained(-c)/--implicit vs. --no-contained/--explicit ?
+      * if neither --advance or --onto, ensure we either have exactly
+        one non-bottom commit in rev_cmdline_info, or else that all
+        non-bottom commits are decorated by branch names.
+
+
+  --onto:
+    * onto arg need not be ref
+    * no bottoms necessary.
+    * positive refexprs must all be refs.  Any (positive) number allowed.
+  --advance:
+    * advance arg must be ref.
+    * no bottoms necessary?
+    * only one positive refexpr needed (are more allowed?)
+  --contained:
+    * --onto must be given, or implied
+  neither --advance --nor --onto:
+    * either one real ref bottom, or all postive refs are real, but not both.
+    * if zero bottoms, or zero positive refexprs: error
+
+
   * New todo-lists need extra stuff:
     X lookup refs pointing at any given commit as we walk (so we can rewrite)
     * mark
@@ -133,7 +153,7 @@ Option map:
   3       --allow-empty-message
  2        --cleanup=<mode>
 1         --continue
-?         --edit, -e
+  3?      --edit, -e   (this is what interactivity is for)
 ?         --ff
 1         --[no-]gpg-sign,-S[=<keyid>]
    4      --keep-redundant-commits
