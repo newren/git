@@ -9,7 +9,6 @@
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
-#include "strvec.h"
 
 static const char *short_commit_name(struct commit *commit)
 {
