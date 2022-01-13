@@ -9,6 +9,7 @@
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
+#include "strmap.h"
 
 static const char *short_commit_name(struct commit *commit)
 {
@@ -72,10 +73,24 @@ static struct commit *create_commit(struct tree *tree,
 	return (struct commit *)obj;
 }
 
-static struct commit *guess_new_base(struct rev_cmdline_info *info)
+struct ref_info {
+	struct commit *onto;
+	struct strset positive_refs;
+	struct strset negative_refs;
+	int positive_refexprs;
+	int negative_refexprs;
+};
+
+static void get_ref_information(struct rev_cmdline_info *cmd_info,
+				struct ref_info *ref_info)
 {
-	struct commit *new_base = NULL;
-	int i, bottom_commits = 0;
+	int i;
+
+	ref_info->onto = NULL;
+	strset_init(&ref_info->positive_refs);
+	strset_init(&ref_info->negative_refs);
+	ref_info->positive_refexprs = 0;
+	ref_info->negative_refexprs = 0;
 
 	/*
 	 * When the user specifies e.g.
@@ -92,53 +107,134 @@ static struct commit *guess_new_base(struct rev_cmdline_info *info)
 	 * the second because they'd likely just be replaying commits on top
 	 * of the same commit and not making any difference.
 	 */
-	for (i = 0; i < info->nr; i++) {
-		struct rev_cmdline_entry *e = info->rev + i;
+	for (i = 0; i < cmd_info->nr; i++) {
+		struct rev_cmdline_entry *e = cmd_info->rev + i;
+		struct object_id oid;
+		const char *refexpr = e->name;
+		char *fullname = NULL;
+		int can_uniquely_dwim = 1;
+
+		if (*refexpr == '^')
+			refexpr++;
+		if (dwim_ref(refexpr, strlen(refexpr), &oid, &fullname, 0) != 1)
+			can_uniquely_dwim = 0;
+
+		if (e->flags & BOTTOM) {
+			if (can_uniquely_dwim)
+				strset_add(&ref_info->negative_refs, fullname);
+			if (!ref_info->negative_refexprs)
+				ref_info->onto = lookup_commit_reference_gently(the_repository,
+										&e->item->oid, 1);
+			ref_info->negative_refexprs++;
+		} else {
+			if (can_uniquely_dwim)
+				strset_add(&ref_info->positive_refs, fullname);
+			ref_info->positive_refexprs++;
+		}
+
+		free(fullname);
+	}
+}
+
+static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
+				  const char *onto_name,
+				  const char **advance_name,
+				  struct commit **onto)
+{
+	struct ref_info rinfo;
+
+	get_ref_information(cmd_info, &rinfo);
+	if (!rinfo.positive_refexprs)
+		die(_("need some commits to replay"));
+	if (onto_name && *advance_name)
+		die(_("--onto and --advance are incompatible"));
+	else if (onto_name) {
+		*onto = peel_committish(onto_name);
+		if (rinfo.positive_refexprs <
+		    strset_get_size(&rinfo.positive_refs))
+			die(_("all positive revisions given must be references"));
+	} else if (*advance_name) {
 		struct object_id oid;
 		char *fullname = NULL;
 
-		if (!(e->flags & BOTTOM))
-			continue;
-
+		*onto = peel_committish(*advance_name);
+		if (dwim_ref(*advance_name, strlen(*advance_name),
+			     &oid, &fullname, 0) == 1) {
+			free((char*)*advance_name);
+			*advance_name = fullname;
+		} else {
+			die(_("argument to --advance must be a reference"));
+		}
+		if (rinfo.positive_refexprs > 1)
+			die(_("cannot advance target with multiple source branches because ordering would be ill-defined"));
+	} else {
+		int positive_refs_complete = (
+			rinfo.positive_refexprs ==
+			strset_get_size(&rinfo.positive_refs));
+		int negative_refs_complete = (
+			rinfo.negative_refexprs ==
+			strset_get_size(&rinfo.negative_refs));
 		/*
-		 * We need a unique base commit to know where to replay; error
-		 * out if not unique.
-		 *
-		 * Also, we usually don't want to replay commits on the same
-		 * base they started on, so only accept this as the base if
-		 * it uniquely names some ref.
+		 * We need either positive_refs_complete or
+		 * negative_refs_complete, but not both.
 		 */
-		if (bottom_commits++ ||
-		    dwim_ref(e->name, strlen(e->name), &oid, &fullname, 0) != 1)
-			die(_("cannot determine where to replay commits; please specify --onto"));
+		if (rinfo.negative_refexprs > 0 &&
+		    positive_refs_complete == negative_refs_complete)
+			die(_("cannot implicitly determine whether this is an --advance or --onto operation"));
+		if (negative_refs_complete) {
+			struct hashmap_iter iter;
+			struct strmap_entry *entry;
 
-		free(fullname);
-		new_base = lookup_commit_reference_gently(the_repository,
-							  &e->item->oid, 1);
+			if (rinfo.negative_refexprs == 0)
+				die(_("all positive revisions given must be references"));
+			else if (rinfo.negative_refexprs > 1)
+				die(_("cannot implicitly determine whether this is an --advance or --onto operation"));
+			else if (rinfo.positive_refexprs > 1)
+				die(_("cannot advance target with multiple source branches because ordering would be ill-defined"));
+
+			/* Only one entry, but we have to loop to get it */
+			strset_for_each_entry(&rinfo.negative_refs,
+					      &iter, entry) {
+				*advance_name = entry->key;
+			}
+		} else { /* positive_refs_complete */
+			if (rinfo.negative_refexprs > 1)
+				die(_("cannot implicitly determine correct base for --onto"));
+			if (rinfo.negative_refexprs == 1)
+				*onto = rinfo.onto;
+		}
 	}
-
-	return new_base;
+	/* FIXME: Clean up unnecessary memory from rinfo */
 }
 
 int cmd_replay(int argc, const char **argv, const char *prefix)
 {
+	const char *advance_name = NULL;
 	const char *onto_name = NULL;
 	struct commit *onto = NULL;
-	struct commit *last_commit = NULL;
+	int contained = 0;
+
 	struct rev_info revs;
+	struct commit *last_commit = NULL;
 	struct commit *commit;
 	struct merge_options merge_opt;
 	struct tree *next_tree, *base_tree;
 	struct merge_result result;
+	struct strset *update_refs = NULL;
 
 	const char * const replay_usage[] = {
 		N_("git replay [--onto <newbase>] <revision-range>"),
 		NULL
 	};
 	struct option replay_options[] = {
+		OPT_STRING(0, "advance", &advance_name,
+			   N_("branch"),
+			   N_("make replay advance given branch")),
 		OPT_STRING(0, "onto", &onto_name,
 			   N_("revision"),
 			   N_("replay onto given commit")),
+		OPT_BOOL(0, "contained", &contained,
+			 N_("advance all branches contained in revision-range")),
 		OPT_END()
 	};
 
@@ -160,10 +256,8 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	revs.reverse = 1;
 	revs.simplify_history = 0;
 
-	if (onto_name)
-		onto = peel_committish(onto_name);
-	else
-		onto = guess_new_base(&revs.cmdline);
+	determine_replay_mode(&revs.cmdline, onto_name, &advance_name, &onto);
+	/* FIXME: Get update_refs from determine_replay_mode */
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
@@ -171,6 +265,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	init_merge_options(&merge_opt, the_repository);
 	memset(&result, 0, sizeof(result));
 	merge_opt.show_rename_progress = 0;
+	assert(onto); /* FIXME: Should handle replaying down to root commit */
 	result.tree = get_commit_tree(onto);
 	last_commit = onto;
 	while ((commit = get_revision(&revs))) {
@@ -198,12 +293,17 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		if (!result.clean)
 			break;
 		last_commit = create_commit(result.tree, commit, last_commit);
+
+		/* Update any necessary branches */
+		if (advance_name)
+			continue;
 		decoration = get_name_decoration(&commit->object);
 		if (!decoration)
 			continue;
-
 		while (decoration) {
-			if (decoration->type == DECORATION_REF_LOCAL) {
+			if (decoration->type == DECORATION_REF_LOCAL &&
+			    (contained || strset_contains(update_refs,
+							  decoration->name))) {
 				printf("update %s %s %s\n",
 				       decoration->name,
 				       oid_to_hex(&last_commit->object.oid),
@@ -213,12 +313,17 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		}
 	}
 
-	/* Output, which assumes no decorated objects, so FIXME FIXME FIXME */
-	printf("%s\n", oid_to_hex(&last_commit->object.oid));
-	if (result.clean == 0)
-		printf("%s\n", oid_to_hex(&commit->object.oid));
+	/* In --advance mode, advance the target ref */
+	if (result.clean == 0 && advance_name) {
+		printf("update %s %s %s\n",
+		       advance_name,
+		       oid_to_hex(&last_commit->object.oid),
+		       oid_to_hex(&commit->object.oid));
+	}
 
 	/* Cleanup */
+	if (update_refs)
+		strset_clear(update_refs);
 	memset(&revs, 0, sizeof(revs)); /* TODO: write&call rev_info_free()? */
 	merge_finalize(&merge_opt, &result);
 
