@@ -505,19 +505,22 @@ int cmd_merge_tree(int argc, const char **argv, const char *prefix)
 	};
 
 	/* Parse arguments */
-	original_argc = argc;
+	original_argc = argc - 1; /* ignoring argv[0] */
 	argc = parse_options(argc, argv, prefix, mt_options,
 			     merge_tree_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 	if (o.mode) {
 		expected_remaining_argc = (o.mode == 'w' ? 2 : 3);
 		if (argc != expected_remaining_argc)
 			usage_with_options(merge_tree_usage, mt_options);
+		if (o.mode == 't')
+			/* Removal of `--trivial-merge` is expected */
+			original_argc--;
 	} else {
 		if (argc < 2 || argc > 3)
 			usage_with_options(merge_tree_usage, mt_options);
 		o.mode = (argc == 2 ? 'w' : 't');
 	}
-	if (o.mode == 't' && original_argc < argc)
+	if (o.mode == 't' && argc < original_argc)
 		die(_("--trivial-merge is incompatible with all other options"));
 
 	/* Do the relevant type of merge */

@@ -201,4 +201,16 @@ test_expect_success 'can override merge of unrelated histories' '
 	test_cmp expect actual
 '
 
+for opt in $(git merge-tree --git-completion-helper-all)
+do
+	if test $opt = "--trivial-merge" || test $opt = "--write-tree"
+	then
+		continue
+	fi
+
+	test_expect_success "usage: --trivial-merge is incompatible with $opt" '
+		test_expect_code 128 git merge-tree --trivial-merge $opt side1 side2 side3
+	'
+done
+
 test_done
