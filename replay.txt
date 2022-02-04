@@ -117,6 +117,77 @@ Alternate notes; oort merge strategy, for handling octupii
     (but index can store multiple stage 3 entries...)
 
 ======================================================================
+Quick intro:
+
+[Might need to revisit this if my implementation attempts don't align]
+[with my grandiose ideas.]
+
+* Basics -- rebasing
+
+`git replay`, at a basic level, can perhaps be thought of as a
+"dry-run rebase" -- meaning no updates to the working tree, or to the
+index, or to any references.  It can be performed in a bare
+repository, or for a branch that is not checked out (thus there is no
+implicit assumption that HEAD is part of what is being rebased):
+
+    $ git replay --onto target origin/main..mybranch
+    update refs/heads/mybranch ${NEW_mybranch_HASH} ${OLD_mybranch_HASH}
+
+Note that several new commits were created, with the tip represented by
+$NEWHASH.  The output format is specifically designed to be usable as
+input to `git update-ref --stdin`.
+
+* Basics -- cherry-picking
+
+If you want to cherry-pick rather than rebase, just change one flag:
+
+    $ git replay --advance target origin/main..mybranch
+    update refs/heads/target ${NEW_target_HASH} ${OLD_target_HASH}
+
+With both --onto and --advance, the range of commits represented by
+origin/main..mybranch are being replayed on top of target, the only
+question is whether mybranch or target is moved to point to the top of
+the replayed commits.
+
+* Scaling up -- rebasing a stack of branches
+
+What if you have a stack of branches, one depending upon another, and
+you'd really like to rebase the whole set?
+
+    $ git replay --contained --onto origin/main origin/main..tipbranch
+    update refs/heads/branch1 ${NEW_branch1_HASH} ${OLD_branch1_HASH}
+    update refs/heads/branch2 ${NEW_branch2_HASH} ${OLD_branch2_HASH}
+    update refs/heads/tipbranch ${NEW_tipbranch_HASH} ${OLD_tipbranch_HASH}
+
+So much nicer than trying to run N separate rebases, each of which
+involves a different <ONTO> and <UPSTREAM> and forces you to first
+check out each branch in turn.
+
+* Scaling up -- generic ranges
+
+When calling `git replay`, one does not to specify a range of commits
+to replay using the syntax `A..B`; any range expression will do:
+
+    $ git replay --onto origin/main ^base branch1 branch2 branch3
+    update refs/heads/branch1 ${NEW_branch1_HASH} ${OLD_branch1_HASH}
+    update refs/heads/branch2 ${NEW_branch2_HASH} ${OLD_branch2_HASH}
+    update refs/heads/branch3 ${NEW_branch3_HASH} ${OLD_branch3_HASH}
+
+This will simultaneously rebase branch1, branch2, and branch3 -- all
+commits they have since base, playing them on top of origin/main.
+These three branches may have commits on top of base that they have in
+common, but that does not need to be the case.
+
+* Scaling up -- replaying merges
+
+Unlike rebase, if the range contains merges, the merges are not
+dropped -- it is instead replayed.  This is not a simple re-merge, because
+it carries over any "fixups" made in the original merge relative to an
+automatic merge.[1]
+
+[1] https://lore.kernel.org/git/CABPp-BHp+d62dCyAaJfh1cZ8xVpGyb97mZryd02aCOX=Qn=Ltw@mail.gmail.com/
+
+======================================================================
 
           Conflicting options:
             -m (--mainline, --merge)
