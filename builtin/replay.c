@@ -269,6 +269,18 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 
 	determine_replay_mode(&revs.cmdline, onto_name, &advance_name,
 			      &onto, &update_refs);
+	{
+		struct hashmap_iter iter;
+		struct strmap_entry *entry;
+	printf("onto_name = %s\n", onto_name);
+	printf("advance_name = %s\n", advance_name);
+	printf("onto = %s\n", oid_to_hex(&onto->object.oid));
+	printf("update_refs: (size = %d)\n", update_refs ? strset_get_size(update_refs) : 0);
+	if (update_refs)
+		strset_for_each_entry(update_refs, &iter, entry) {
+			printf("  %s\n", entry->key);
+		}
+	}
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
