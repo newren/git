@@ -222,7 +222,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	struct strset *update_refs = NULL;
 
 	const char * const replay_usage[] = {
-		N_("git replay [--onto <newbase>] <revision-range>"),
+		N_("git replay [--onto <newbase> | --advance <branch>] <revision-range>"),
 		NULL
 	};
 	struct option replay_options[] = {
