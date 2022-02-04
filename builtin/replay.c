@@ -160,7 +160,6 @@ static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 		*onto = peel_committish(*advance_name);
 		if (dwim_ref(*advance_name, strlen(*advance_name),
 			     &oid, &fullname, 0) == 1) {
-			free((char*)*advance_name);
 			*advance_name = fullname;
 		} else {
 			die(_("argument to --advance must be a reference"));
