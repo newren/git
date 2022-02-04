@@ -243,6 +243,10 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, replay_options, replay_usage,
 			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN);
 
+	if (advance_name && contained)
+		die(_("options '%s' and '%s' cannot be used together"),
+		    "--advance", "--contained");
+
 	repo_init_revisions(the_repository, &revs, prefix);
 
 	argc = setup_revisions(argc, argv, &revs, NULL);
@@ -313,11 +317,11 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	}
 
 	/* In --advance mode, advance the target ref */
-	if (result.clean == 0 && advance_name) {
+	if (result.clean == 1 && advance_name) {
 		printf("update %s %s %s\n",
 		       advance_name,
 		       oid_to_hex(&last_commit->object.oid),
-		       oid_to_hex(&commit->object.oid));
+		       oid_to_hex(&onto->object.oid));
 	}
 
 	/* Cleanup */
