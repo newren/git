@@ -139,7 +139,8 @@ static void get_ref_information(struct rev_cmdline_info *cmd_info,
 static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 				  const char *onto_name,
 				  const char **advance_name,
-				  struct commit **onto)
+				  struct commit **onto,
+				  struct strset **update_refs)
 {
 	struct ref_info rinfo;
 
@@ -203,7 +204,13 @@ static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 				*onto = rinfo.onto;
 		}
 	}
-	/* FIXME: Clean up unnecessary memory from rinfo */
+	if (!*advance_name) {
+		*update_refs = xcalloc(1, sizeof(**update_refs));
+		**update_refs = rinfo.positive_refs;
+		memset(&rinfo.positive_refs, 0, sizeof(**update_refs));
+	}
+	strset_clear(&rinfo.negative_refs);
+	strset_clear(&rinfo.positive_refs);
 }
 
 int cmd_replay(int argc, const char **argv, const char *prefix)
@@ -259,8 +266,8 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	revs.reverse = 1;
 	revs.simplify_history = 0;
 
-	determine_replay_mode(&revs.cmdline, onto_name, &advance_name, &onto);
-	/* FIXME: Get update_refs from determine_replay_mode */
+	determine_replay_mode(&revs.cmdline, onto_name, &advance_name,
+			      &onto, &update_refs);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
@@ -325,8 +332,10 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	}
 
 	/* Cleanup */
-	if (update_refs)
+	if (update_refs) {
 		strset_clear(update_refs);
+		free(update_refs);
+	}
 	memset(&revs, 0, sizeof(revs)); /* TODO: write&call rev_info_free()? */
 	merge_finalize(&merge_opt, &result);
 
