@@ -227,6 +227,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	struct tree *next_tree, *base_tree;
 	struct merge_result result;
 	struct strset *update_refs = NULL;
+	kh_oid_map_t *replayed_commits;
 
 	const char * const replay_usage[] = {
 		N_("git replay [--onto <newbase> | --advance <branch>] <revision-range>"),
@@ -276,18 +277,35 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	memset(&result, 0, sizeof(result));
 	merge_opt.show_rename_progress = 0;
 	assert(onto); /* FIXME: Should handle replaying down to root commit */
-	result.tree = get_commit_tree(onto);
 	last_commit = onto;
+	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(&revs))) {
 		struct commit *base;
+		struct commit *replayed_base;
 		const struct name_decoration *decoration;
+		khint_t pos;
+		int hr;
 
+		/* Determine parentage of "commit" */
 		assert(commit->parents && !commit->parents->next);
 		base = commit->parents->item;
 
+		/*
+		 * Get the tree we are replaying onto.  If "base" was replayed,
+		 * replay "commit" on it; otherwise, replay on "onto".
+		 */
+		pos = kh_get_oid_map(replayed_commits, base->object.oid);
+		if (pos == kh_end(replayed_commits))
+			replayed_base = onto;
+		else
+			replayed_base = kh_value(replayed_commits, pos);
+		result.tree = get_commit_tree(replayed_base);
+
+		/* Get the trees for "commit" and "base" too. */
 		next_tree = get_commit_tree(commit);
 		base_tree = get_commit_tree(base);
 
+		/* Setup and do the merge */
 		merge_opt.branch1 = short_commit_name(commit);
 		merge_opt.branch2 = short_commit_name(commit);
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
@@ -302,7 +320,14 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		merge_opt.ancestor = NULL;
 		if (!result.clean)
 			break;
-		last_commit = create_commit(result.tree, commit, last_commit);
+
+		/* Create new commit, record commit -> last_commit mapping */
+		last_commit = create_commit(result.tree, commit, replayed_base);
+		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
+		if (hr == 0)
+			BUG("Duplicate rewritten commit: %s\n",
+			    oid_to_hex(&commit->object.oid));
+		kh_value(replayed_commits, pos) = last_commit;
 
 		/* Update any necessary branches */
 		if (advance_name)
@@ -332,6 +357,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	}
 
 	/* Cleanup */
+	kh_destroy_oid_map(replayed_commits);
 	if (update_refs) {
 		strset_clear(update_refs);
 		free(update_refs);
