@@ -213,6 +213,70 @@ static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 	strset_clear(&rinfo.positive_refs);
 }
 
+static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
+				    struct commit *commit,
+				    struct commit *fallback)
+{
+	khint_t pos = kh_get_oid_map(replayed_commits, commit->object.oid);
+	if (pos == kh_end(replayed_commits))
+		return fallback;
+	return kh_value(replayed_commits, pos);
+}
+
+static struct commit *pick_regular_commit(struct commit *pickme,
+					  kh_oid_map_t *replayed_commits,
+					  struct commit *onto,
+					  struct merge_options *merge_opt,
+					  struct merge_result *result)
+{
+	struct commit *base, *replayed_base;
+	struct tree *pickme_tree, *base_tree;
+
+	base = pickme->parents->item;
+	replayed_base = mapped_commit(replayed_commits, base, onto);
+
+	result->tree = get_commit_tree(replayed_base);
+	pickme_tree = get_commit_tree(pickme);
+	base_tree = get_commit_tree(base);
+
+	merge_opt->branch1 = short_commit_name(replayed_base);
+	merge_opt->branch2 = short_commit_name(pickme);
+	merge_opt->ancestor = xstrfmt("parent of %s", merge_opt->branch2);
+
+	merge_incore_nonrecursive(merge_opt,
+				  base_tree,
+				  result->tree,
+				  pickme_tree,
+				  result);
+
+	free((char*)merge_opt->ancestor);
+	merge_opt->ancestor = NULL;
+	if (!result->clean)
+		return NULL;
+
+	return create_commit(result->tree, pickme, replayed_base);
+}
+
+static struct commit *pick_merge_commit(struct commit *pickme,
+					kh_oid_map_t *replayed_commits,
+					struct commit *onto,
+					struct merge_options *merge_opt,
+					struct merge_result *result)
+{
+	/* Remember: do not capitalize first letter of the error message! */
+	BUG("nOT IMPLEMENTED!!!");
+}
+
+static struct commit *pick_octopus_commit(struct commit *pickme,
+					  kh_oid_map_t *replayed_commits,
+					  struct commit *onto,
+					  struct merge_options *merge_opt,
+					  struct merge_result *result)
+{
+	/* Remember: do not capitalize first letter of the error message! */
+	BUG("nOT IMPLEMENTED!!!");
+}
+
 int cmd_replay(int argc, const char **argv, const char *prefix)
 {
 	const char *advance_name = NULL;
@@ -221,10 +285,9 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	int contained = 0;
 
 	struct rev_info revs;
-	struct commit *last_commit = NULL;
+	struct commit *pick = NULL;
 	struct commit *commit;
 	struct merge_options merge_opt;
-	struct tree *next_tree, *base_tree;
 	struct merge_result result;
 	struct strset *update_refs = NULL;
 	kh_oid_map_t *replayed_commits;
@@ -277,57 +340,33 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	memset(&result, 0, sizeof(result));
 	merge_opt.show_rename_progress = 0;
 	assert(onto); /* FIXME: Should handle replaying down to root commit */
-	last_commit = onto;
+	pick = onto;
 	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(&revs))) {
-		struct commit *base;
-		struct commit *replayed_base;
 		const struct name_decoration *decoration;
 		khint_t pos;
 		int hr;
 
-		/* Determine parentage of "commit" */
-		assert(commit->parents && !commit->parents->next);
-		base = commit->parents->item;
-
-		/*
-		 * Get the tree we are replaying onto.  If "base" was replayed,
-		 * replay "commit" on it; otherwise, replay on "onto".
-		 */
-		pos = kh_get_oid_map(replayed_commits, base->object.oid);
-		if (pos == kh_end(replayed_commits))
-			replayed_base = onto;
+		/* Pick the commit */
+		if (!commit->parents)
+			/* TODO: Handle root commits */
+			BUG("Cannot handle root commits yet!");
+		if (!commit->parents->next)
+			pick = pick_regular_commit(commit, replayed_commits,
+						   onto, &merge_opt, &result);
+		else if (!commit->parents->next->next)
+			pick = pick_merge_commit(commit, replayed_commits,
+						 onto, &merge_opt, &result);
 		else
-			replayed_base = kh_value(replayed_commits, pos);
-		result.tree = get_commit_tree(replayed_base);
+			pick = pick_octopus_commit(commit, replayed_commits,
+						   onto, &merge_opt, &result);
 
-		/* Get the trees for "commit" and "base" too. */
-		next_tree = get_commit_tree(commit);
-		base_tree = get_commit_tree(base);
-
-		/* Setup and do the merge */
-		merge_opt.branch1 = short_commit_name(replayed_base);
-		merge_opt.branch2 = short_commit_name(commit);
-		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
-
-		merge_incore_nonrecursive(&merge_opt,
-					  base_tree,
-					  result.tree,
-					  next_tree,
-					  &result);
-
-		free((char*)merge_opt.ancestor);
-		merge_opt.ancestor = NULL;
-		if (!result.clean)
-			break;
-
-		/* Create new commit, record commit -> last_commit mapping */
-		last_commit = create_commit(result.tree, commit, replayed_base);
+		/* Record commit -> pick mapping */
 		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
 		if (hr == 0)
 			BUG("Duplicate rewritten commit: %s\n",
 			    oid_to_hex(&commit->object.oid));
-		kh_value(replayed_commits, pos) = last_commit;
+		kh_value(replayed_commits, pos) = pick;
 
 		/* Update any necessary branches */
 		if (advance_name)
@@ -341,7 +380,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 							  decoration->name))) {
 				printf("update %s %s %s\n",
 				       decoration->name,
-				       oid_to_hex(&last_commit->object.oid),
+				       oid_to_hex(&pick->object.oid),
 				       oid_to_hex(&commit->object.oid));
 			}
 			decoration = decoration->next;
@@ -352,7 +391,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	if (result.clean == 1 && advance_name) {
 		printf("update %s %s %s\n",
 		       advance_name,
-		       oid_to_hex(&last_commit->object.oid),
+		       oid_to_hex(&pick->object.oid),
 		       oid_to_hex(&onto->object.oid));
 	}
 
