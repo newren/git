@@ -133,9 +133,9 @@ implicit assumption that HEAD is part of what is being rebased):
     $ git replay --onto target origin/main..mybranch
     update refs/heads/mybranch ${NEW_mybranch_HASH} ${OLD_mybranch_HASH}
 
-Note that several new commits were created, with the tip represented by
-$NEWHASH.  The output format is specifically designed to be usable as
-input to `git update-ref --stdin`.
+Note that several new commits were created, with the tip represented
+by ${NEW_mybranch_HASH}.  The output format is specifically designed
+to be usable as input to `git update-ref --stdin`.
 
 * Basics -- cherry-picking
 

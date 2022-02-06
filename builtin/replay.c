@@ -306,7 +306,7 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		base_tree = get_commit_tree(base);
 
 		/* Setup and do the merge */
-		merge_opt.branch1 = short_commit_name(commit);
+		merge_opt.branch1 = short_commit_name(replayed_base);
 		merge_opt.branch2 = short_commit_name(commit);
 		merge_opt.ancestor = xstrfmt("parent of %s", merge_opt.branch2);
 
