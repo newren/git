@@ -40,11 +40,13 @@ static char *get_author(const char *message)
 static struct commit *create_commit(struct repository *repo,
 				    struct tree *tree,
 				    struct commit *based_on,
-				    struct commit *parent)
+				    ... /* a bunch of struct commit * parent */)
 {
+	va_list parent_list;
+	struct commit *parent;
 	struct object_id ret;
 	struct object *obj = NULL;
-	struct commit_list *parents = NULL;
+	struct commit_list *parents = NULL, **tmp = &parents;
 	char *author;
 	char *sign_commit = NULL; /* FIXME: cli users might want to sign again */
 	struct commit_extra_header *extra = NULL;
@@ -55,7 +57,11 @@ static struct commit *create_commit(struct repository *repo,
 	const char *orig_message = NULL;
 	const char *exclude_gpgsig[] = { "gpgsig", "gpgsig-sha256", NULL };
 
-	commit_list_insert(parent, &parents);
+	va_start(parent_list, based_on);
+	while ((parent = va_arg(parent_list, struct commit *)))
+		tmp = commit_list_append(parent, tmp);
+	va_end(parent_list);
+
 	extra = read_commit_extra_headers(based_on, exclude_gpgsig);
 	find_commit_subject(message, &orig_message);
 	strbuf_addstr(&msg, orig_message);
@@ -253,7 +259,8 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	if (oideq(&replayed_base_tree->object.oid, &result->tree->object.oid) &&
 	    !oideq(&pickme_tree->object.oid, &base_tree->object.oid))
 		return replayed_base;
-	return create_commit(repo, result->tree, pickme, replayed_base);
+
+	return create_commit(repo, result->tree, pickme, replayed_base, NULL);
 }
 
 void replay_result_release(struct replay_result *result)
