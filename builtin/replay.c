@@ -36,11 +36,13 @@ static char *get_author(const char *message)
 
 static struct commit *create_commit(struct tree *tree,
 				    struct commit *based_on,
-				    struct commit *parent)
+				    ... /* a bunch of struct commit * parent */)
 {
+	va_list parent_list;
+	struct commit *parent;
 	struct object_id ret;
 	struct object *obj;
-	struct commit_list *parents = NULL;
+	struct commit_list *parents = NULL, **tmp = &parents;
 	char *author;
 	char *sign_commit = NULL; /* FIXME */
 	struct commit_extra_header *extra;
@@ -50,7 +52,11 @@ static struct commit *create_commit(struct tree *tree,
 	const char *orig_message = NULL;
 	const char *exclude_gpgsig[] = { "gpgsig", NULL };
 
-	commit_list_insert(parent, &parents);
+	va_start(parent_list, based_on);
+	while ((parent = va_arg(parent_list, struct commit *)))
+		tmp = commit_list_append(parent, tmp);
+	va_end(parent_list);
+
 	extra = read_commit_extra_headers(based_on, exclude_gpgsig);
 	find_commit_subject(message, &orig_message);
 	strbuf_addstr(&msg, orig_message);
@@ -257,7 +263,7 @@ static struct commit *pick_regular_commit(struct commit *pickme,
 	if (!result->clean)
 		return NULL;
 
-	return create_commit(result->tree, pickme, replayed_base);
+	return create_commit(result->tree, pickme, replayed_base, NULL);
 }
 
 static struct commit *pick_merge_commit(struct commit *pickme,
