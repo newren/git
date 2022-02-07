@@ -11,13 +11,6 @@
 #include "strmap.h"
 #include "tree.h"
 
-static const char *short_commit_name(struct repository *repo,
-				     struct commit *commit)
-{
-	return repo_find_unique_abbrev(repo, &commit->object.oid,
-				       DEFAULT_ABBREV);
-}
-
 static struct commit *peel_committish(struct repository *repo,
 				      const char *name,
 				      const char *mode)
@@ -219,6 +212,9 @@ static struct commit *pick_regular_commit(struct repository *repo,
 {
 	struct commit *base;
 	struct tree *pickme_tree, *base_tree, *replayed_base_tree;
+	struct pretty_print_context ctx = {0};
+	struct strbuf parent1_desc = STRBUF_INIT;
+	struct strbuf parent2_desc = STRBUF_INIT;
 
 	base = pickme->parents ? pickme->parents->item : NULL;
 	if (!replayed_base)
@@ -232,8 +228,13 @@ static struct commit *pick_regular_commit(struct repository *repo,
 		repo_get_commit_tree(repo, base) :
 		lookup_tree(merge_opt->repo, merge_opt->repo->hash_algo->empty_tree);
 
-	merge_opt->branch1 = short_commit_name(repo, replayed_base);
-	merge_opt->branch2 = short_commit_name(repo, pickme);
+	ctx.abbrev = DEFAULT_ABBREV;
+	repo_format_commit_message(repo, replayed_base, "%h (%s)",
+				   &parent1_desc, &ctx);
+	repo_format_commit_message(repo, pickme,        "%h (%s)",
+				   &parent2_desc, &ctx);
+	merge_opt->branch1 = parent1_desc.buf;
+	merge_opt->branch2 = parent2_desc.buf;
 	merge_opt->ancestor = xstrfmt("parent of %s", merge_opt->branch2);
 
 	merge_incore_nonrecursive(merge_opt,
@@ -244,6 +245,8 @@ static struct commit *pick_regular_commit(struct repository *repo,
 
 	free((char*)merge_opt->ancestor);
 	merge_opt->ancestor = NULL;
+	strbuf_release(&parent1_desc);
+	strbuf_release(&parent2_desc);
 	if (!result->clean)
 		return NULL;
 	/* Drop commits that become empty */
