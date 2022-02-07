@@ -11,11 +11,6 @@
 #include "revision.h"
 #include "strmap.h"
 
-static const char *short_commit_name(struct commit *commit)
-{
-	return find_unique_abbrev(&commit->object.oid, DEFAULT_ABBREV);
-}
-
 static struct commit *peel_committish(const char *name)
 {
 	struct object *obj;
@@ -231,6 +226,9 @@ static struct commit *pick_regular_commit(struct commit *pickme,
 {
 	struct commit *base, *replayed_base;
 	struct tree *pickme_tree, *base_tree;
+	struct pretty_print_context ctx = {0};
+	struct strbuf parent1_desc = STRBUF_INIT;
+	struct strbuf parent2_desc = STRBUF_INIT;
 
 	base = pickme->parents->item;
 	replayed_base = mapped_commit(replayed_commits, base, onto);
@@ -239,8 +237,11 @@ static struct commit *pick_regular_commit(struct commit *pickme,
 	pickme_tree = get_commit_tree(pickme);
 	base_tree = get_commit_tree(base);
 
-	merge_opt->branch1 = short_commit_name(replayed_base);
-	merge_opt->branch2 = short_commit_name(pickme);
+	ctx.abbrev = DEFAULT_ABBREV;
+	format_commit_message(replayed_base, "%h (%s)", &parent1_desc, &ctx);
+	format_commit_message(pickme,        "%h (%s)", &parent2_desc, &ctx);
+	merge_opt->branch1 = parent1_desc.buf;
+	merge_opt->branch2 = parent2_desc.buf;
 	merge_opt->ancestor = xstrfmt("parent of %s", merge_opt->branch2);
 
 	merge_incore_nonrecursive(merge_opt,
@@ -251,6 +252,8 @@ static struct commit *pick_regular_commit(struct commit *pickme,
 
 	free((char*)merge_opt->ancestor);
 	merge_opt->ancestor = NULL;
+	strbuf_release(&parent1_desc);
+	strbuf_release(&parent2_desc);
 	if (!result->clean)
 		return NULL;
 
