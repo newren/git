@@ -157,14 +157,14 @@ test_expect_success 'using replay to rebase multiple divergent branches' '
 	done
 '
 
-test_expect_failure 'using replay to rebase merges too, even evil ones' '
+test_expect_success 'using replay to rebase merges too, even evil ones' '
 	git replay --contained --onto main ^main next >result &&
 
 	test_line_count = 5 result &&
 	cut -f 3 -d " " result >new-branch-tips &&
 
 	>expect &&
-	for i in 2 1 3 4
+	for i in 1 2 3 4
 	do
 		printf "update refs/heads/topic$i " >>expect &&
 		printf "%s " $(grep topic$i result | cut -f 3 -d " ") >>expect &&
@@ -207,7 +207,7 @@ test_expect_failure 'using replay to rebase merges too, even evil ones' '
 		git log --format=%s $(grep topic$i result | cut -f 3 -d " ") >actual &&
 		test_cmp expect$i actual
 	done &&
-	git log --format=%s $(cat new-next) >actual &&
+	git log --format=%s --topo-order $(cat new-next) >actual &&
 	test_cmp expect-next actual &&
 
 	cat <<-\EOF >expect &&
@@ -219,11 +219,11 @@ test_expect_failure 'using replay to rebase merges too, even evil ones' '
 	git log --format=%s --min-parents=2 $(cat new-next) >actual &&
 	test_cmp expect actual &&
 
-	git show --remerge-diff --name-status $(cat new-next)~1 >actual &&
-	cat <<-\EOF >expect &&
+	git show --remerge-diff --format=%s --name-status $(cat new-next)~1 >actual &&
+	q_to_tab <<-\EOF >expect &&
 	Merge topic3
 
-	A       evil
+	AQevil
 	EOF
 	test_cmp expect actual
 '

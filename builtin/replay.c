@@ -6,6 +6,7 @@
 #include "git-compat-util.h"
 
 #include "builtin.h"
+#include "commit-reach.h"
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
@@ -266,14 +267,102 @@ static struct commit *pick_regular_commit(struct commit *pickme,
 	return create_commit(result->tree, pickme, replayed_base, NULL);
 }
 
+static void do_merge(struct commit *parent1,
+		     struct commit *parent2,
+		     struct merge_options *o,
+		     struct merge_result *result)
+{
+	/* Caller must call merge_finalize */
+	struct commit_list *bases;
+
+	/* Setup merge options */
+	init_merge_options(o, the_repository);
+	o->show_rename_progress = 0;
+	o->record_conflict_msgs_as_headers = 1;
+	o->msg_header_prefix = "remerge";
+
+	o->branch1 = "parent1"; /* TODO */
+	o->branch2 = "parent2";
+
+	/* Parse the relevant commits and get the merge bases */
+	//parse_commit_or_die(parent1);
+	//parse_commit_or_die(parent2);
+	bases = get_merge_bases(parent1, parent2);
+
+	/* Re-merge the parents */
+	merge_incore_recursive(o, bases, parent1, parent2, result);
+}
+
 static struct commit *pick_merge_commit(struct commit *pickme,
 					kh_oid_map_t *replayed_commits,
 					struct commit *onto,
 					struct merge_options *merge_opt,
 					struct merge_result *result)
 {
-	/* Remember: do not capitalize first letter of the error message! */
-	BUG("nOT IMPLEMENTED!!!");
+	struct commit *parent1, *parent2, *replayed_par1, *replayed_par2;
+	struct tree *remerge_tree, *pickme_tree, *new_merge_tree;
+	struct pretty_print_context ctx = {0};
+	struct strbuf remerge_desc = STRBUF_INIT;
+	struct strbuf pickme_desc = STRBUF_INIT;
+	struct strbuf new_merge_desc = STRBUF_INIT;
+	struct merge_options remerge_opt = { 0 }, new_merge_opt = { 0 };
+	struct merge_result remerge_res = { 0 }, new_merge_res = { 0 };
+
+	parent1 = pickme->parents->item;
+	replayed_par1 = mapped_commit(replayed_commits, parent1, onto);
+	parent2 = pickme->parents->next->item;
+	replayed_par2 = mapped_commit(replayed_commits, parent2, parent2);
+
+	/*
+	 * We need the trees from 3 merges:
+	 *   1. remerge of pickme (may have conflicts, but get the tree)
+	 *   2. pickme (already have it above as pickme_tree)
+	 *   3. merge of replayed_par[12] (may also have conflicts)
+	 *
+	 * Once we have these 3 merge commits, we take their trees and do
+	 * a non-recursive merges on those, treating #2 as the base.  The
+	 * result of "merge of merges" is our picked commit.
+	 */
+
+	do_merge(parent1, parent2, &remerge_opt, &remerge_res);
+	do_merge(replayed_par1, replayed_par2, &new_merge_opt, &new_merge_res);
+
+	remerge_tree = remerge_res.tree;
+	pickme_tree = get_commit_tree(pickme);
+	new_merge_tree = new_merge_res.tree;
+
+	ctx.abbrev = DEFAULT_ABBREV;
+	format_commit_message(pickme, "remerge of %h (%s)",
+			      &remerge_desc, &ctx);
+	format_commit_message(pickme, "%h (%s)",
+			      &pickme_desc, &ctx);
+	format_commit_message(pickme, "new merge of %h (%s)",
+			      &new_merge_desc, &ctx);
+	merge_opt->ancestor = remerge_desc.buf;
+	merge_opt->branch1 = pickme_desc.buf;
+	merge_opt->branch2 = new_merge_desc.buf;
+
+	merge_incore_nonrecursive(merge_opt,
+				  remerge_tree,
+				  pickme_tree,
+				  new_merge_tree,
+				  result);
+
+	free((char*)merge_opt->ancestor);
+	merge_opt->ancestor = NULL;
+	free((char*)merge_opt->branch1);
+	free((char*)merge_opt->branch2);
+	/*
+	 * TODO: relax this; intermediate results can have conflicts
+	 * without outer one having some
+	 */
+	if (result->clean != 1 ||
+	    remerge_res.clean != 1 ||
+	    new_merge_res.clean != 1)
+		return NULL;
+
+	return create_commit(result->tree, pickme,
+			     replayed_par1, replayed_par2, NULL);
 }
 
 static struct commit *pick_octopus_commit(struct commit *pickme,
