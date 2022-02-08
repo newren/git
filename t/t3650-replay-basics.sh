@@ -95,12 +95,6 @@ test_expect_success 'cannot advance target ... ordering would be ill-defined' '
 	test_cmp expect actual
 '
 
-test_expect_success 'replaying merge commits is not supported yet' '
-	echo "fatal: replaying merge commits is not supported yet!" >expect &&
-	test_must_fail git replay --advance=main main..topic-with-merge 2>actual &&
-	test_cmp expect actual
-'
-
 test_expect_success 'using replay to rebase two branches, one on top of other' '
 	git replay --ref-action=print --onto main topic1..topic2 >result &&
 
@@ -435,6 +429,77 @@ test_expect_success 'replaying between unrelated histories' '
 	! grep -w "refs/heads/unrelated " out &&
 	git replay --ref-action=print --onto unrelated-onto unrelated-orphan on-top-2^! >out &&
 	! grep -w "refs/heads/unrelated " out
+'
+
+test_expect_success 'using replay to rebase merges too, even basic evil ones' '
+	git replay --ref-action=print --contained --onto main ^main next >result &&
+
+	test_line_count = 5 result &&
+	cut -f 3 -d " " result >new-branch-tips &&
+
+	>expect &&
+	for i in 1 2 3 4
+	do
+		printf "update refs/heads/topic$i " >>expect &&
+		printf "%s " $(grep topic$i result | cut -f 3 -d " ") >>expect &&
+		git rev-parse topic$i >>expect || return 1
+	done &&
+	grep next result | cut -f 3 -d " " >new-next &&
+	printf "update refs/heads/next " >>expect &&
+	printf "%s " $(cat new-next) >>expect &&
+	git rev-parse next >>expect &&
+
+	test_cmp expect result &&
+
+	test_write_lines F C M L B A >expect1 &&
+	test_write_lines E D C M L B A >expect2 &&
+	test_write_lines H G F C M L B A >expect3 &&
+	test_write_lines J I M L B A >expect4 &&
+
+	cat <<-\EOF >expect-next &&
+	Merge topic4
+	J
+	I
+	Merge topic3
+	H
+	G
+	Merge topic2
+	E
+	D
+	Merge topic1
+	F
+	C
+	K
+	M
+	L
+	B
+	A
+	EOF
+
+	for i in 1 2 3 4
+	do
+		git log --format=%s $(grep topic$i result | cut -f 3 -d " ") >actual &&
+		test_cmp expect$i actual || return 1
+	done &&
+	git log --format=%s --topo-order $(cat new-next) >actual &&
+	test_cmp expect-next actual &&
+
+	cat <<-\EOF >expect &&
+	Merge topic4
+	Merge topic3
+	Merge topic2
+	Merge topic1
+	EOF
+	git log --format=%s --min-parents=2 $(cat new-next) >actual &&
+	test_cmp expect actual &&
+
+	git show --remerge-diff --format=%s --name-status $(cat new-next)~1 >actual &&
+	q_to_tab <<-\EOF >expect &&
+	Merge topic3
+
+	AQevil
+	EOF
+	test_cmp expect actual
 '
 
 test_done
