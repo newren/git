@@ -108,7 +108,7 @@ test_expect_success '--update-refs handles conflict gracefully in atomic mode' '
 	git rev-parse atomic-conflict >conflict-before &&
 	
 	# This should fail due to conflict
-	test_expect_code 1 git replay --update-refs --onto conflict atomic-conflict^..atomic-conflict &&
+	test_expect_code 128 git replay --update-refs --onto conflict atomic-conflict^..atomic-conflict &&
 	
 	# In atomic mode, branch should remain unchanged
 	git rev-parse atomic-conflict >conflict-after &&

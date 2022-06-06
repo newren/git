@@ -329,7 +329,6 @@ static void do_merge(struct repository *repo,
 	merge_incore_recursive(o, bases, parent1, parent2, result);
 }
 
-UNUSED
 static struct commit *pick_merge_commit(struct repository *repo,
 					struct commit *pickme,
 					kh_oid_map_t *replayed_commits,
@@ -403,7 +402,6 @@ static struct commit *pick_merge_commit(struct repository *repo,
 			     replayed_par1, replayed_par2, NULL);
 }
 
-UNUSED
 static struct commit *pick_octopus_commit(struct repository *repo UNUSED,
 					  struct commit *pickme UNUSED,
 					  kh_oid_map_t *replayed_commits UNUSED,
@@ -623,15 +621,22 @@ int cmd_replay(int argc,
 
 		if (!commit->parents)
 			die(_("replaying down to root commit is not supported yet!"));
-		if (commit->parents->next)
-			die(_("replaying merge commits is not supported yet!"));
+		if (!commit->parents->next)
+			last_commit = pick_regular_commit(repo, commit, replayed_commits,
+							  onto, &merge_opt, &result);
+		else if (!commit->parents->next->next)
+			last_commit = pick_merge_commit(repo, commit, replayed_commits,
+							onto, &merge_opt, &result);
+		else
+			last_commit = pick_octopus_commit(repo, commit, replayed_commits,
+							  onto, &merge_opt, &result);
 
-		last_commit = pick_regular_commit(repo, commit, replayed_commits,
-						  onto, &merge_opt, &result);
+		/* TODO: Handle conflicts */
 		if (!last_commit)
-			break;
+			die("failure to pick %s; cannot handle conflicts yet",
+			       oid_to_hex(&commit->object.oid));
 
-		/* Record commit -> last_commit mapping */
+		/* Record commit -> pick mapping */
 		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
 		if (hr == 0)
 			BUG("Duplicate rewritten commit: %s\n",

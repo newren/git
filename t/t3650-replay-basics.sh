@@ -73,11 +73,11 @@ test_expect_success 'using replay on bare repo to rebase two branches, one on to
 '
 
 test_expect_success 'using replay to rebase with a conflict' '
-	test_expect_code 1 git replay --onto topic1 B..conflict
+	test_expect_code 128 git replay --onto topic1 B..conflict
 '
 
 test_expect_success 'using replay on bare repo to rebase with a conflict' '
-	test_expect_code 1 git -C bare replay --onto topic1 B..conflict
+	test_expect_code 128 git -C bare replay --onto topic1 B..conflict
 '
 
 test_expect_success 'using replay to perform basic cherry-pick' '
@@ -311,7 +311,7 @@ test_expect_success '--update-refs with conflicting replay (atomic mode fails co
 	git rev-parse conflict-test >conflict-test.old &&
 	
 	# This should fail due to conflict, and branch should remain unchanged
-	test_expect_code 1 git replay --update-refs --onto topic1 main..conflict-test &&
+	test_expect_code 128 git replay --update-refs --onto topic1 main..conflict-test &&
 	
 	# Verify branch was not updated (atomic transaction rolled back)
 	git rev-parse conflict-test >conflict-test.new &&
