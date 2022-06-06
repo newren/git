@@ -459,6 +459,11 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 			pick = pick_octopus_commit(commit, replayed_commits,
 						   onto, &merge_opt, &result);
 
+		/* TODO: Handle conflicts */
+		if (!pick)
+			die("failure to pick %s; cannot handle conflicts yet",
+			       oid_to_hex(&commit->object.oid));
+
 		/* Record commit -> pick mapping */
 		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
 		if (hr == 0)
