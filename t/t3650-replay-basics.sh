@@ -129,7 +129,7 @@ test_expect_success 'using replay to rebase multiple divergent branches' '
 	test_cmp expect result
 '
 
-test_expect_success 'using replay to rebase multiple divergent branches' '
+test_expect_success 'using replay to rebase multiple divergent branches, including contained ones' '
 	git replay --contained --onto main ^main topic2 topic3 topic4 >result &&
 
 	test_line_count = 4 result &&
@@ -157,7 +157,7 @@ test_expect_success 'using replay to rebase multiple divergent branches' '
 	done
 '
 
-test_expect_success 'using replay to rebase merges too, even evil ones' '
+test_expect_success 'using replay to rebase merges too, even basic evil one' '
 	git replay --contained --onto main ^main next >result &&
 
 	test_line_count = 5 result &&
