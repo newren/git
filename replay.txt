@@ -1,7 +1,7 @@
 Next steps:
   X Switch to parseopt
-  * Automatic range handling
-    / rewrite multiple branches if they are found in the range
+  / Automatic range handling
+    X rewrite multiple branches if they are found in the range
     X multiple negative refs? error. (unless --onto)
     X one negative ref? default for onto.
     * no negative refs?  like --root.
@@ -29,14 +29,24 @@ Next steps:
     * if zero bottoms, or zero positive refexprs: error
 
 
+REAL TODO
   * New todo-lists need extra stuff:
     X lookup refs pointing at any given commit as we walk (so we can rewrite)
     * mark
-  * when rebasing, if commit->parents == last_commit->parents &&
-    commit->tree == last_commit->tree, then replace last_commit with commit.
-    (fast-forwardability)
+  * fast-forwardability
+    (when rebasing, if commit->parents == last_commit->parents &&
+     commit->tree == last_commit->tree, then replace last_commit with commit)
   * interactivity (todo lists)
   * rebasing merges
+    * Johannes testcase (see [1])
+    * git replay --onto main --first-parent main..next
+    * git replay --onto main --first-parent main..next $TOPIC
+      (latter assumes $TOPIC is linear, which is typical)
+      * Does this drop "Sync with 'master'" cases?
+      * Can it be made to drop other series already merged to master?
+    * git replay --onto main --first-parent next..seen $TOPIC
+      (latter assumes $TOPIC is linear, which is typical.  But what if we want
+       $TOPIC to keep its base, while things in seen are rebased?)
   * packing new objects using tmp-dir
   * ensure commit signing works (bleh...)
   * sparse-checkout/new-worktrees for resolving
@@ -269,6 +279,9 @@ Notes:
 1?        --quit
     5     --[no-]reapply-cherry-picks
     5     --rebase-merges[=(rebase-cousins|no-rebase-cousins)],-r
+       (Note: [no-]rebase-counsins is idiotic and came from using an implied
+        revision range.  If users specify the range of commits to rebase, then
+	there's no need for rebase-cousins vs. no-rebase-cousins.)
 ??        --[no-]rerere-autoupdate
    4      --reset-author-date, --ignore-date
     5?    --[no-]reschedule-failed-exec
