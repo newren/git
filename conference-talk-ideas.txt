@@ -1,0 +1,63 @@
+
+Discussing improvements in "Git Merge" at "Git Merge".  
+
+
+Alternate viewpoint; how I discovered the optimizations:
+  * Repository approximately the size of the linux kernel
+  * Approximately 28K renames merged in a period of a week or two as part of
+    a big refactoring
+  * We supported many stable versions at the time; so fixes had to be backported
+    to many versions
+  * `git cherry-pick` failed, so changes had to be manually backported -- one
+    team burned a _lot_ of time doing so...and called a meeting to try to
+    enforce a rule that there would not be any further code refactorings
+    whatsoever.
+  * How I discovered the optimizations
+
+
+  Review of merge-ort:
+    * Correctness, Performance, Features
+      * Perf ideas
+        * point of renames: merging content changes made on both sides
+	  * what if there are no changes?  Two cases:
+	    * renamed side: old content, unrenamed side: new content
+	      * 
+	    * renamed side: new content, unrenamed side: old content
+
+
+Items to hit on:
+  1) Quick explanation of optimizations
+     * Merging content changes made on *both* sides
+       * no changes on renamed side: exact rename detection (made better)
+       * no changes on unrenamed side: rename source is irrelevant
+     * Smarter preliminary pairing
+     * Caching when replaying a sequence of commits
+     * Trivial directory resolutions
+     * Brute-force optimizations (drop O(N^2), measure & check)
+     * (In Progress) Avoiding working tree and index
+  2) Other areas benefitting from optimizations
+     * Rebasy-only, vs. mergy-only, vs. all diffs
+     * partial clones
+  3) Optimization could not be done by a smarter compiler; differences:
+     * exact rename detection relies on same hash means same contents;
+       that theoretical could be false and thus an optimizer couldn't do it.
+       Humans can make that call
+     * "relevant renames" can cause behavioral differences when two
+       very similar files exist, both disappear, and a new file similar to
+       the two appears.  If one of the two original files is unmodified on
+       the other side of history, it can no longer be matched up via rename
+       detection.
+     * "basename similarity" causes very clear behavioral differences
+     * "cached renames" causes one minor behavioral difference
+     (trivial directory resolves does not cause behavioral differences)
+     (other optimizations don't cause differences)
+  3.5) Other differences
+     * histogram vs. myers diffs
+  4) Rename oddities:
+     * Big files are always similar
+     * Directories of similar files do weird things
+  5) Features enabled
+     * AUTO_MERGE
+     * remerge-diff
+     * merge-tree
+     * replay ... including rebasing merges

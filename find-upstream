@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+
+'''
+This script shows which local branches and github/* remote tracking branches
+have already been cherry-picked into origin/master.
+
+It will then print commands that can be used to prune these branches.  This
+script makes no modifications; it is read-only.
+'''
+
+import re
+import subprocess
+
+def get_output(cmd):
+  return subprocess.check_output(cmd.split(), text=True)
+
+cmd = "git for-each-ref --format=%(refname) refs/heads/* refs/remotes/github/*"
+branches = get_output(cmd)
+nukable = set([])
+for branch in branches.splitlines():
+  print("\r"+" "*70 + f"\rChecking {branch}", end="")
+  cmd=f"git log --decorate --oneline --cherry-mark --right-only origin/master...{branch}"
+  output = get_output(cmd)
+  if all(x.startswith('= ') for x in output.splitlines()):
+    m = re.match(r'^= [0-9a-f]+ \(([^\)]*)\)', output)
+    if not m:
+      #print(f"No match: {output.rstrip()}")
+      continue
+    #print(output)
+    decorations = m.group(1)
+    if decorations.startswith('HEAD -> '):
+      decorations = decorations[8:]
+    individual_decorations = decorations.split(', ')
+    for decoration in individual_decorations:
+      if not decoration.startswith('tag:'):
+        nukable.add(decoration)
+
+print("\r"+" "*70+"\rDone.")
+local_branches = ' '.join(x for x in nukable
+                          if not any(x.startswith(y)
+                                     for y in ['github/', 'gitgitgadget/']))
+if local_branches:
+  print("To prune local branches:")
+  print(f"  git branch -D {local_branches}")
+else:
+  print("No local branches to prune.")
+
+remote_branches = ' '.join(x[7:] for x in nukable if x.startswith('github/'))
+if remote_branches:
+  print("To prune remote branches:")
+  print(f"  git push --delete github {remote_branches}")
+else:
+  print("No remote branches to prune.")

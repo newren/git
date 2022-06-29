@@ -1,0 +1,29 @@
+Timing of running
+   time git log --min-parents=2 --max-parents=2 $DIFF_FLAG | wc -l
+
+in linux.git (with v5.4 checked out, my copy is out of date) is as follows:
+  DIFF_FLAG=--cc:            71m 31.536s
+  DIFF_FLAG=--remerge-diff:  31m  3.170s
+
+Also, output size (wc -l) is:
+  DIFF_FLAG=--cc:            2169111 lines
+  DIFF_FLAG=--remerge-diff:  2458020 lines
+
+Given that there are 62476 merges in that history, --remerge-diff is remerging
+33.5 commits/second.
+
+
+Non-merge commits:
+  * 808826 non-merge commits.
+  * $ time git log -p --max-parents=1 | wc -l
+    142278323
+  * real	27m24.123s
+  * Rate: 491.9498 commits/second
+
+
+Here are some interesting commits to try this out on (with `git show --remerge-diff $COMMIT`):
+  * git.git conflicted merge:      07601b5b36
+  * git.git non-conflicted change: bf04590ecd
+  * linux.git conflicted merge:      eab3540562fb
+  * linux.git non-conflicted change: 223cea6a4f05
+Many more can be found by just running `git log --merges --remerge-diff` in your repository of choice and searching for diffs (most merges tend to be clean and unmodified and thus show now diff under --remerge-diff; a search of '^diff' in the log output tends to find the examples nicely).

@@ -1,0 +1,185 @@
+Original:
+                      Not using merges
+    no-renames-am:     6.940 s ±  0.485 s
+    
+                       merge-recursive           merge-ort
+    no-renames:       18.912 s ±  0.174 s    14.263 s ±  0.053 s
+    mega-renames:   5964.031 s ± 10.459 s  5504.231 s ±  5.150 s
+    just-one-mega:   149.583 s ±  0.751 s   158.534 s ±  0.498 s
+
+Breakdowns
+                                    ---  no-renames  ---
+                              merge-recursive   merge-ort
+    overall runtime:              19.302 s        14.257 s
+    inexact rename detection:      7.603 s         7.906 s
+    everything else:              11.699 s         6.351 s
+
+                                    --- mega-renames ---
+                              merge-recursive   merge-ort
+    overall runtime:            5950.195 s      5499.672 s
+    inexact rename detection:   5746.309 s      5487.120 s
+    everything else:             203.886 s        17.552 s
+
+                                    --- just-one-mega ---
+                              merge-recursive   merge-ort
+    overall runtime:             151.001 s       158.582 s
+    inexact rename detection:    143.448 s       157.835 s
+    everything else:               7.553 s         0.747 s
+
+
+=== Batch 6 (2 patches) ===
+Fully remove exact renames:
+    no-renames:       14.263 s ±  0.053 s    14.119 s ±  0.101 s
+    mega-renames:   5504.231 s ±  5.150 s  1802.044 s ±  0.828 s
+    just-one-mega:   158.534 s ±  0.498 s    51.391 s ±  0.028 s
+
+Filter rename_src:
+    no-renames:       14.119 s ±  0.101 s    13.815 s ±  0.062 s
+    mega-renames:   1802.044 s ±  0.828 s  1799.937 s ±  0.493 s
+    just-one-mega:    51.391 s ±  0.028 s    51.289 s ±  0.019 s
+
+=== Batch 7 (5 patches) ===
+Basic basename guidance
+    no-renames:       13.815 s ±  0.062 s    13.294 s ±  0.103 s
+    mega-renames:   1799.937 s ±  0.493 s   187.248 s ±  0.882 s
+    just-one-mega:    51.289 s ±  0.019 s     5.557 s ±  0.017 s
+
+  Tweaks:  13.254 s ±  0.067 s
+          185.317 s ±  0.528 s
+	    5.523 s ±  0.049 s
+
+Call diffcore_rename directly: (could consider leaving out...)
+    no-renames:       13.294 s ±  0.103 s    12.775 s ±  0.062 s
+    mega-renames:    187.248 s ±  0.882 s   188.754 s ±  0.284 s
+    just-one-mega:     5.557 s ±  0.017 s     5.599 s ±  0.019 s
+					    
+=== Batch 8 (11 patches) ===
+Directed basename guidance:
+    no-renames:       12.775 s ±  0.062 s    12.596 s ±  0.061 s
+    mega-renames:    188.754 s ±  0.284 s   130.465 s ±  0.259 s
+    just-one-mega:     5.599 s ±  0.019 s     3.958 s ±  0.010 s
+
+OVERALL:
+    no-renames:       13.294 s ±  0.103 s    12.596 s ±  0.061 s
+    mega-renames:    187.248 s ±  0.882 s   130.465 s ±  0.259 s
+    just-one-mega:     5.557 s ±  0.017 s     3.958 s ±  0.010 s
+
+=== Batch 9 (7 patches) ===
+Add relevant_source filtering:
+    no-renames:       12.596 s ±  0.061 s     6.003 s ±  0.048 s
+    mega-renames:    130.465 s ±  0.259 s   114.009 s ±  0.236 s
+    just-one-mega:     3.958 s ±  0.010 s     3.489 s ±  0.017 s
+
+Skip rename detection entirely if unnecessary:
+    no-renames:        6.003 s ±  0.048 s     5.708 s ±  0.111 s
+    mega-renames:    114.009 s ±  0.236 s   102.171 s ±  0.440 s
+    just-one-mega:     3.489 s ±  0.017 s     3.471 s ±  0.015 s
+
+Filter basename searching with relevant_sources too:
+    no-renames:        5.708 s ±  0.111 s     5.680 s ±  0.096 s 
+    mega-renames:    102.171 s ±  0.440 s    13.812 s ±  0.162 s
+    just-one-mega:     3.471 s ±  0.015 s   506.0  ms ±  3.9  ms
+
+OVERALL:
+    no-renames:       12.596 s ±  0.061 s     5.680 s ±  0.096 s
+    mega-renames:    130.465 s ±  0.259 s    13.812 s ±  0.162 s
+    just-one-mega:     3.958 s ±  0.010 s   506.0  ms ±  3.9  ms
+
+=== Batch 10 (8 patches) ===
+Directory renames sometimes get sufficient info from exact and basenames:
+    no-renames:        5.680 s ±  0.096 s     5.665 s ±  0.129 s
+    mega-renames:     13.812 s ±  0.162 s    11.435 s ±  0.158 s
+    just-one-mega:   506.0  ms ±  3.9  ms   494.2  ms ±  6.1  ms
+
+=== Batch 11 (7 patches) ===
+Remembering renames when doing a sequence of merges (rebase/cherry-pick)
+    no-renames:        5.665 s ±  0.129 s     5.622 s ±  0.059 s
+    mega-renames:     11.435 s ±  0.158 s    10.127 s ±  0.073 s
+    just-one-mega:   494.2  ms ±  6.1  ms   500.3  ms ±  3.8  ms
+
+=== Batch 12 (6 patches) ===
+Faster sort function
+    no-renames:        5.622 s ±  0.059 s     5.235 s ±  0.042 s
+    mega-renames:     10.127 s ±  0.073 s     9.419 s ±  0.107 s
+    just-one-mega:   500.3  ms ±  3.8  ms   480.1  ms ±  3.9  ms
+
+=== Batch 14 (7 patches) ===
+Trivial file resolution
+(Don't show?)
+    no-renames:        5.131 s ±  0.039 s     5.175 s ±  0.054 s
+    mega-renames:      9.402 s ±  0.086 s     9.529 s ±  0.084 s
+    just-one-mega:   477.4  ms ±  5.7  ms   484.6  ms ±  3.4  ms
+
+Avoid recursing into directories unnecessarily
+(Start times from two ago)
+    no-renames:        5.235 s ±  0.042 s   205.1  ms ±  3.8  ms
+    mega-renames:      9.419 s ±  0.107 s     1.564 s ±  0.010 s
+    just-one-mega:   480.1  ms ±  3.9  ms   479.5  ms ±  3.9  ms
+
+Redoing collect_merge_info() after detecting renames
+    no-renames:      205.1  ms ±  3.8  ms   204.2  ms ±  3.0  ms
+    mega-renames:      1.564 s ±  0.010 s     1.076 s ±  0.015 s
+    just-one-mega:   479.5  ms ±  3.9  ms   364.1  ms ±  7.0  ms
+
+OVERALL:
+    no-renames:        5.235 s ±  0.042 s   204.2  ms ±  3.0  ms
+    mega-renames:      9.419 s ±  0.107 s     1.076 s ±  0.015 s
+    just-one-mega:   480.1  ms ±  3.9  ms   364.1  ms ±  7.0  ms
+
+=== Batch 15 (7 patches) ===
+Use mempool for exact rename detection
+    no-renames:      204.2  ms ±  3.0  ms   202.5  ms ±  3.2  ms
+    mega-renames:      1.076 s ±  0.015 s     1.072 s ±  0.012 s
+    just-one-mega:   364.1  ms ±  7.0  ms   357.3  ms ±  3.9  ms
+
+Use mempool for strmaps
+    no-renames:      202.5  ms ±  3.2  ms    198.1 ms ±  2.6 ms
+    mega-renames:      1.072 s ±  0.012 s    715.8 ms ±  4.0 ms
+    just-one-mega:   357.3  ms ±  3.9  ms    276.8 ms ±  4.2 ms
+
+Use mempool for pairs
+    no-renames:       198.1 ms ±  2.6 ms     198.5 ms ±  3.4 ms
+    mega-renames:     715.8 ms ±  4.0 ms     679.1 ms ±  5.6 ms
+    just-one-mega:    276.8 ms ±  4.2 ms     271.9 ms ±  2.8 ms
+
+Reuse paths from strmaps in pairs
+    no-renames:       198.5 ms ±  3.4 ms     198.3 ms ±  2.9 ms
+    mega-renames:     679.1 ms ±  5.6 ms     661.8 ms ±  5.9 ms
+    just-one-mega:    271.9 ms ±  2.8 ms     264.6 ms ±  2.5 ms
+
+
+OVERALL:
+    no-renames:      204.2  ms ±  3.0  ms    198.3 ms ±  2.9 ms
+    mega-renames:      1.076 s ±  0.015 s    661.8 ms ±  5.9 ms
+    just-one-mega:   364.1  ms ±  7.0  ms    264.6 ms ±  2.5 ms
+
+=== Other notes ===
+Overall, git rebase -s ort instead of test-tool fast-rebase (not fresh reboot):
+    no-renames:       			      3.835 s ±  0.243 s
+    mega-renames:     			      6.798 s ±  0.035 s
+    just-one-mega:    			      1.235 s ±  0.015 s
+
+So, 2.43 to 2.85 times slower on cases with lots of renames
+
+
+=== Overall Improvements ===
+                    Original   Infinite Parallelism    My optimizations
+                               of rename detection
+Timings
+    no-renames:       18.912 s       11.699 s             198.3 ms
+    mega-renames:   5964.031 s      203.886 s             661.8 ms
+    just-one-mega:   149.583 s        7.553 s             264.6 ms
+
+Speedup factors
+    no-renames:        1              1.6                  95
+    mega-renames:      1             29                  9012
+    just-one-mega:     1             20                   565
+
+
+
+CC: Derrick Stolee <dstolee@microsoft.com>
+CC: Jonathan Tan <jonathantanmy@google.com>
+CC: Taylor Blau <me@ttaylorr.com>
+CC: Junio C Hamano <gitster@pobox.com>
+CC: Jeff King <peff@peff.net>
+CC: Karsten Blees <blees@dcon.de>

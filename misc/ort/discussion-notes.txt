@@ -1,0 +1,67 @@
+tinyurl.com/gitsummit20
+
+aspects of merge-ort: cool, or atrocities against humanity?
+
+
+Basic design of how previous code worked, and problems
+  * Call unpack_trees (which updates as it goes), then "fix it up"
+  * unpack_trees unaware of renames, so "would be overwritten" has both
+    false positives and false negatives
+  * four-way-merge
+  * considerations of multiple issues added to each conflict path
+    * D/F conflicts
+    * dirty and untracked contents
+    * casename sensitivty
+    * sparse entries
+    * submodule handling
+
+Stuff to include:
+  * Create tree, then pass it to checkout machinery
+    * Nukes all working-tree related code in merge machinery (shotgun blast)
+    * Puts consideration for multiple issues into one place:
+  * Why skip unpack_trees()
+    * callbacks don't get enough information (masks)
+    * can't avoid traversing into subtrees
+    * a lot of irrelevant comparing to and updating of index
+    * allows me to avoid strcmp and just do pointer comparisons of filenames
+  * Perf restructures
+    * Reduce number of tree traversals
+      * Old: unpack_trees (1), diff-for-renames (2),
+             get_files_dirs (read_tree_recursive) (2),
+             get_tree_entry_if_blob (3 * 2 * unmerged entries)
+      * New: traverse_trees (1), unpack_trees (1)
+    * Call diffcore_rename() directly
+  * API splitting; now three calls instead of one.
+
+Implementation details
+  * khash vs. hashmap?
+  * mempool or other block allocations
+  
+
+New features?
+  * .git/AUTOMERGE ?
+  * fast-import-like direct writing to a packfile & read as we go?
+
+* Important stuff to call out for reviewers to double-check:
+  * write_tree() -- yet another place trees are written (builtin/mktree,
+    fast-import, cache-tree); is that okay?
+  * checkout() (overwrite_ignore? refresh_index?)
+  * record_unmerged_index_entries() (cache-tree invalidation?
+    state flags correct?  should I avoid ADD_CACHE_JUST_APPEND if
+    strmap_size(unmerged) < O(log(opt->repo->index->cache_nr)/3) ?
+
+
+Priority order:
+  * strmap & strintmap
+  * Layering violations:
+    * no unpack_trees()
+    * direct call to diffcore_rename()
+    * even have to wrap traverse_trees()
+  * write_tree()
+  * checkout() -- overwrite_ignore?
+  * .git/AUTOMERGE
+  * stop detecting renames of large files?
+  * fast-import-like packfile
+  * khash vs. hashmap?
+  * mempool or other block allocations
+  * API splitting

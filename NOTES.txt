@@ -1,0 +1,52 @@
+[1] tensorflow/lite/g3doc/models/convert/metadata_writer_tutorial.ipynb
+[2] tensorflow/lite/g3doc/convert/metadata_writer_tutorial.ipynb
+[3] tensorflow/lite/g3doc/models/convert/metadata_writer_tutorial.ipynb
+
+
+
+mb -> side1:
+  Rename tensorflow/lite/g3doc/models/ -> tensorflow/lite/g3doc/examples
+  Add tensorflow/lite/g3doc/convert/metadata_writer_tutorial.ipynb
+
+mb -> side2:
+  Rename tensorflow/lite/g3doc/convert/ -> tensorflow/lite/g3doc/models/convert/
+  Add tensorflow/lite/g3doc/models/convert/metadata_writer_tutorial.ipynb
+
+
+So:
+    side1:tensorflow/lite/g3doc/convert/metadata_writer_tutorial.ipynb
+gets affected by the side2 directory rename to become
+    tensorflow/lite/g3doc/models/convert/metadata_writer_tutorial.ipynb
+which would match the name of the file on side2, BUT the side2 version of
+that file, i.e.:
+    side2:tensorflow/lite/g3doc/models/convert/metadata_writer_tutorial.ipynb
+would be affected by the side1 directory rename to become
+    tensorflow/lite/g3doc/examples/convert/metadata_writer_tutorial.ipynb
+
+
+
+mb -> side1:
+  Rename topdir/sub1 -> topdir/sub3
+  Add topdir/sub2/metadata_writer_tutorial.ipynb
+
+mb -> side2:
+  Rename topdir/sub2/ -> topdir/sub1/sub2/
+  Add topdir/sub1/sub2/metadata_writer_tutorial.ipynb
+
+
+
+mb:
+    models/foo
+    convert/bar
+
+mb -> side1:
+  Rename models/ -> examples/
+  Add convert/metadata_writer_tutorial.ipynb
+
+mb -> side2:
+  Rename convert/ -> models/convert/
+  Add models/convert/metadata_writer_tutorial.ipynb
+
+
+
+

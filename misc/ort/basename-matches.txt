@@ -1,0 +1,20 @@
+Original, not using basename-guided rename detection:
+    no-renames:       13.815 s ±  0.062 s
+    mega-renames:   1799.937 s ±  0.493 s
+    just-one-mega:    51.289 s ±  0.019 s
+
+Using basename_min_score = minimum_score, i.e. 50%:
+    no-renames:       13.428 s ±  0.119 s
+    mega-renames:    172.137 s ±  0.958 s
+    just-one-mega:     5.154 s ±  0.025 s
+
+Using basename_min_score = 0.5 * (minimum_score + MAX_SCORE), i.e. 75%:
+    no-renames:       13.543 s ±  0.094 s
+    mega-renames:    189.598 s ±  0.726 s
+    just-one-mega:     5.647 s ±  0.016 s
+
+Using basename_min_score = 0.1 * (minimum_score + 9*MAX_SCORE), i.e. 95%:
+    no-renames:       13.733 s ±  0.086 s
+    mega-renames:    353.479 s ±  2.574 s
+    just-one-mega:    10.351 s ±  0.030 s
+

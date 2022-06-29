@@ -1,0 +1,14 @@
+. wip~1 -- tests for expensiveness of index update in merge-recursive
+. ort-working~0 -- treat large files as dissimilar in diffcore-rename
+. ort-verbosity~3..ort-verbosity -- testcase fixups and verbosity handling
+. ort-misc~1 -- allow rename detection to be disabled
+. ort-misc~2 -- enable limiting rename detection to relevant destinations
+. ort-misc~3 -- important note for redo-after-renames and cached pairs
+. remerge-diff-all~0 -- make relevant repository explicit for a few functions
+. remerge-diff-all~1 -- make --remerge-diff the default
+X ort-default~0 -- fix default merge strategy in git-gui
+X ort-default~1 -- fix trivial comment typo in trace2.h
+X merge-into~0 -- fix completely wrong comment in merge-ort
+
+
+fix-stash-middle-of-op
