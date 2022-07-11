@@ -7,6 +7,7 @@
 
 #include "builtin.h"
 #include "commit-reach.h"
+#include "lockfile.h"
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
@@ -459,10 +460,30 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 			pick = pick_octopus_commit(commit, replayed_commits,
 						   onto, &merge_opt, &result);
 
-		/* TODO: Handle conflicts */
-		if (!pick)
+		if (!pick) {
+			/* TODO: handle conflicts in sparse worktree instead */
+			struct object_id head;
+			struct tree *head_tree;
+			struct lock_file lock = LOCK_INIT;
+
+			hold_locked_index(&lock, LOCK_DIE_ON_ERROR);
+			if (repo_read_index(the_repository) < 0)
+				BUG("Could not read index");
+
+			get_oid("HEAD", &head);
+			head_tree = parse_tree_indirect(&head);
+			printf("Switching from %s to %s.\n",
+			       oid_to_hex(&head_tree->object.oid),
+			       oid_to_hex(&result.tree->object.oid));
+			merge_switch_to_result(&merge_opt, head_tree, &result,
+					       1, 1);
+			if (write_locked_index(&the_index, &lock,
+					       COMMIT_LOCK | SKIP_IF_UNCHANGED))
+				die(_("unable to write %s"), get_index_file());
+
 			die("failure to pick %s; cannot handle conflicts yet",
 			       oid_to_hex(&commit->object.oid));
+		}
 
 		/* Record commit -> pick mapping */
 		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
