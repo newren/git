@@ -280,10 +280,10 @@ test_auto_fixup_fixup () {
 		parent2=$(git rev-parse --short HEAD^^) &&
 		parent3=$(git rev-parse --short HEAD^^^) &&
 		cat >expected <<-EOF &&
-		pick $parent3 first commit
-		$1 $parent1 $1! first
-		$1 $head $1! $2! first
-		pick $parent2 second commit
+		pick $parent3 # first commit
+		$1 $parent1 # $1! first
+		$1 $head # $1! $2! first
+		pick $parent2 # second commit
 		EOF
 		test_cmp expected actual
 	) &&
@@ -358,7 +358,7 @@ test_expect_success 'autosquash with empty custom instructionFormat' '
 		set_cat_todo_editor &&
 		test_must_fail git -c rebase.instructionFormat= \
 			rebase --autosquash  --force-rebase -i HEAD^ >actual &&
-		git log -1 --format="pick %h %s" >expect &&
+		git log -1 --format="pick %h # %s" >expect &&
 		test_cmp expect actual
 	)
 '

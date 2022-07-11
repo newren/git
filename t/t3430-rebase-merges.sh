@@ -106,18 +106,18 @@ test_expect_success 'generate correct todo list' '
 	label onto
 
 	reset onto
-	pick $b B
+	pick $b # B
 	label E
 
 	reset onto
-	pick $c C
+	pick $c # C
 	label branch-point
-	pick $f F
-	pick $g G
+	pick $f # F
+	pick $g # G
 	label H
 
 	reset branch-point # C
-	pick $d D
+	pick $d # D
 	merge -C $e E # E
 	merge -C $h H # H
 

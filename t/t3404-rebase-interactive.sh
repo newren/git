@@ -1388,7 +1388,7 @@ test_expect_success 'rebase -i respects rebase.missingCommitsCheck = warn' '
 	cat >expect <<-EOF &&
 	Warning: some commits may have been dropped accidentally.
 	Dropped commits (newer to older):
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary)
+	 - $(git log --format="%h # %s" -1 primary)
 	To avoid this message, use "drop" to explicitly remove a commit.
 	EOF
 	test_config rebase.missingCommitsCheck warn &&
@@ -1406,8 +1406,8 @@ test_expect_success 'rebase -i respects rebase.missingCommitsCheck = error' '
 	cat >expect <<-EOF &&
 	Warning: some commits may have been dropped accidentally.
 	Dropped commits (newer to older):
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary)
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary~2)
+	 - $(git log --format="%h # %s" -1 primary)
+	 - $(git log --format="%h # %s" -1 primary~2)
 	To avoid this message, use "drop" to explicitly remove a commit.
 
 	Use '\''git config rebase.missingCommitsCheck'\'' to change the level of warnings.
@@ -1449,11 +1449,11 @@ test_expect_success 'rebase --edit-todo respects rebase.missingCommitsCheck = ig
 
 test_expect_success 'rebase --edit-todo respects rebase.missingCommitsCheck = warn' '
 	cat >expect <<-EOF &&
-	error: invalid line 1: badcmd $(git rev-list --pretty=oneline --abbrev-commit -1 primary~4)
+	error: invalid line 1: badcmd $(git log --format="%h # %s" -1 primary~4)
 	Warning: some commits may have been dropped accidentally.
 	Dropped commits (newer to older):
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary)
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary~4)
+	 - $(git log --format="%h # %s" -1 primary)
+	 - $(git log --format="%h # %s" -1 primary~4)
 	To avoid this message, use "drop" to explicitly remove a commit.
 	EOF
 	head -n4 expect >expect.2 &&
@@ -1483,11 +1483,11 @@ test_expect_success 'rebase --edit-todo respects rebase.missingCommitsCheck = wa
 
 test_expect_success 'rebase --edit-todo respects rebase.missingCommitsCheck = error' '
 	cat >expect <<-EOF &&
-	error: invalid line 1: badcmd $(git rev-list --pretty=oneline --abbrev-commit -1 primary~4)
+	error: invalid line 1: badcmd $(git log --format="%h # %s" -1 primary~4)
 	Warning: some commits may have been dropped accidentally.
 	Dropped commits (newer to older):
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary)
-	 - $(git rev-list --pretty=oneline --abbrev-commit -1 primary~4)
+	 - $(git log --format="%h # %s" -1 primary)
+	 - $(git log --format="%h # %s" -1 primary~4)
 	To avoid this message, use "drop" to explicitly remove a commit.
 
 	Use '\''git config rebase.missingCommitsCheck'\'' to change the level of warnings.
@@ -1560,11 +1560,11 @@ test_expect_success 'respects rebase.abbreviateCommands with fixup, squash and e
 	test_commit "fixup! first" file2.txt "first line again" first_fixup &&
 	test_commit "squash! second" file1.txt "another line here" second_squash &&
 	cat >expected <<-EOF &&
-	p $(git rev-list --abbrev-commit -1 first) first
-	f $(git rev-list --abbrev-commit -1 first_fixup) fixup! first
+	p $(git rev-list --abbrev-commit -1 first) # first
+	f $(git rev-list --abbrev-commit -1 first_fixup) # fixup! first
 	x git show HEAD
-	p $(git rev-list --abbrev-commit -1 second) second
-	s $(git rev-list --abbrev-commit -1 second_squash) squash! second
+	p $(git rev-list --abbrev-commit -1 second) # second
+	s $(git rev-list --abbrev-commit -1 second_squash) # squash! second
 	x git show HEAD
 	EOF
 	git checkout abbrevcmd &&
@@ -1583,7 +1583,7 @@ test_expect_success 'static check of bad command' '
 		set_fake_editor &&
 		test_must_fail env FAKE_LINES="1 2 3 bad 4 5" \
 		git rebase -i --root 2>actual &&
-		test_i18ngrep "badcmd $(git rev-list --oneline -1 primary~1)" \
+		test_i18ngrep "badcmd $(git log --format="%h # %s" -1 primary~1)" \
 				actual &&
 		test_i18ngrep "You can fix this with .git rebase --edit-todo.." \
 				actual &&
