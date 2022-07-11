@@ -175,8 +175,8 @@ check out each branch in turn.
 
 * Scaling up -- generic ranges
 
-When calling `git replay`, one does not to specify a range of commits
-to replay using the syntax `A..B`; any range expression will do:
+When calling `git replay`, one can use more generic range expressions than
+just a simple `A..B`:
 
     $ git replay --onto origin/main ^base branch1 branch2 branch3
     update refs/heads/branch1 ${NEW_branch1_HASH} ${OLD_branch1_HASH}
@@ -235,7 +235,7 @@ Option map:
  2        --cleanup=<mode>
 1         --continue
   3?      --edit, -e   (this is what interactivity is for)
-?         --ff
+  ?       --ff
 1         --[no-]gpg-sign,-S[=<keyid>]
    4      --keep-redundant-commits
   3       --mainline <parent-number>, -m
