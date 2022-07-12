@@ -5098,6 +5098,255 @@ static const char *label_oid(struct object_id *oid, const char *label,
 	return string_entry->string;
 }
 
+static int make_replay_script(struct pretty_print_context *pp,
+			      struct rev_info *revs, struct strbuf *out,
+			      unsigned flags)
+{
+	// int keep_empty = flags & TODO_LIST_KEEP_EMPTY;
+	// int rebase_cousins = flags & TODO_LIST_REBASE_COUSINS;
+	int rebase_cousins = 1;
+	//int root_with_onto = flags & TODO_LIST_ROOT_WITH_ONTO;
+	int root_with_onto = 0;
+	// int skipped_commit = 0;
+	struct strbuf buf = STRBUF_INIT, oneline = STRBUF_INIT;
+	struct strbuf label = STRBUF_INIT;
+	struct commit_list *commits = NULL, **tail = &commits, *iter;
+	struct commit_list *tips = NULL, **tips_tail = &tips;
+	struct commit *commit;
+	struct oidmap commit2todo = OIDMAP_INIT;
+	struct string_entry *entry;
+	struct oidset interesting = OIDSET_INIT, child_seen = OIDSET_INIT,
+		shown = OIDSET_INIT;
+	struct label_state state = { OIDMAP_INIT, { NULL }, STRBUF_INIT };
+
+	// int abbr = flags & TODO_LIST_ABBREVIATE_CMDS;
+	int abbr = 0;
+	const char *cmd_play = abbr ? "p" : "play",
+		*cmd_label = abbr ? "l" : "label",
+		*cmd_reset = abbr ? "t" : "reset";
+
+	oidmap_init(&commit2todo, 0);
+	oidmap_init(&state.commit2label, 0);
+	hashmap_init(&state.labels, labels_cmp, NULL, 0);
+	strbuf_init(&state.buf, 32);
+
+	/* FIXME: This isn't how you get onto... */
+	if (revs->cmdline.nr && (revs->cmdline.rev[0].flags & BOTTOM)) {
+		struct labels_entry *onto_label_entry;
+		struct object_id *oid = &revs->cmdline.rev[0].item->oid;
+		FLEX_ALLOC_STR(entry, string, "onto");
+		oidcpy(&entry->entry.oid, oid);
+		oidmap_put(&state.commit2label, entry);
+
+		FLEX_ALLOC_STR(onto_label_entry, label, "onto");
+		hashmap_entry_init(&onto_label_entry->entry, strihash("onto"));
+		hashmap_add(&state.labels, &onto_label_entry->entry);
+	}
+
+	/*
+	 * First phase:
+	 * - get onelines for all commits
+	 * - gather all branch tips (i.e. 2nd or later parents of merges)
+	 * - label all branch tips
+	 */
+	while ((commit = get_revision(revs))) {
+		struct commit_list *to_merge;
+		const char *p1, *p2;
+		struct object_id *oid;
+		//int is_empty;
+
+		tail = &commit_list_insert(commit, tail)->next;
+		oidset_insert(&interesting, &commit->object.oid);
+
+		/* Lame skipping
+		is_empty = is_original_commit_empty(commit);
+		if (!is_empty && (commit->object.flags & PATCHSAME)) {
+			if (flags & TODO_LIST_WARN_SKIPPED_CHERRY_PICKS)
+				warning(_("skipped previously applied commit %s"),
+					short_commit_name(commit));
+			skipped_commit = 1;
+			continue;
+		}
+		if (is_empty && !keep_empty)
+			continue;
+		*/
+
+		strbuf_reset(&oneline);
+		pretty_print_commit(pp, commit, &oneline);
+
+		to_merge = commit->parents ? commit->parents->next : NULL;
+		if (!to_merge) {
+			/* non-merge commit: easy case */
+			strbuf_reset(&buf);
+			strbuf_addf(&buf, "%s %s %s", cmd_play,
+				    oid_to_hex(&commit->object.oid),
+				    oneline.buf);
+			/* Lame skipping
+			if (is_empty)
+				strbuf_addf(&buf, " %c empty",
+					    comment_line_char);
+			*/
+
+			FLEX_ALLOC_MEM(entry, string, buf.buf, buf.len);
+			oidcpy(&entry->entry.oid, &commit->object.oid);
+			oidmap_put(&commit2todo, entry);
+
+			continue;
+		}
+
+		/* Create a label */
+		strbuf_reset(&label);
+		if (skip_prefix(oneline.buf, "# Merge ", &p1) &&
+		    (p1 = strchr(p1, '\'')) &&
+		    (p2 = strchr(++p1, '\'')))
+			strbuf_add(&label, p1, p2 - p1);
+		else if (skip_prefix(oneline.buf, "# Merge pull request ",
+				     &p1) &&
+			 (p1 = strstr(p1, " from ")))
+			strbuf_addstr(&label, p1 + strlen(" from "));
+		else
+			strbuf_addbuf(&label, &oneline);
+
+		strbuf_reset(&buf);
+		strbuf_addf(&buf, "%s %s relative to",
+			    cmd_play, oid_to_hex(&commit->object.oid));
+
+		/* label the tips of merged branches */
+		for (; to_merge; to_merge = to_merge->next) {
+			oid = &to_merge->item->object.oid;
+			strbuf_addch(&buf, ' ');
+
+			if (!oidset_contains(&interesting, oid)) {
+				strbuf_addstr(&buf, label_oid(oid, NULL,
+							      &state));
+				continue;
+			}
+
+			tips_tail = &commit_list_insert(to_merge->item,
+							tips_tail)->next;
+
+			strbuf_addstr(&buf, label_oid(oid, label.buf, &state));
+		}
+		strbuf_addf(&buf, " %s", oneline.buf);
+
+		FLEX_ALLOC_MEM(entry, string, buf.buf, buf.len);
+		oidcpy(&entry->entry.oid, &commit->object.oid);
+		oidmap_put(&commit2todo, entry);
+	}
+	/* Lame skipping
+	if (skipped_commit)
+		advise_if_enabled(ADVICE_SKIPPED_CHERRY_PICKS,
+				  _("use --reapply-cherry-picks to include skipped commits"));
+	*/
+
+	/*
+	 * Second phase:
+	 * - label branch points
+	 * - add HEAD to the branch tips
+	 */
+	for (iter = commits; iter; iter = iter->next) {
+		struct commit_list *parent = iter->item->parents;
+		for (; parent; parent = parent->next) {
+			struct object_id *oid = &parent->item->object.oid;
+			if (!oidset_contains(&interesting, oid))
+				continue;
+			if (oidset_insert(&child_seen, oid))
+				label_oid(oid, "branch-point", &state);
+		}
+
+		/* Add HEAD as implicit "tip of branch" */
+		if (!iter->next)
+			tips_tail = &commit_list_insert(iter->item,
+							tips_tail)->next;
+	}
+
+	/*
+	 * Third phase: output the todo list. This is a bit tricky, as we
+	 * want to avoid jumping back and forth between revisions. To
+	 * accomplish that goal, we walk backwards from the branch tips,
+	 * gathering commits not yet shown, reversing the list on the fly,
+	 * then outputting that list (labeling revisions as needed).
+	 */
+	strbuf_addf(out, "%s onto\n", cmd_label);
+	for (iter = tips; iter; iter = iter->next) {
+		struct commit_list *list = NULL, *iter2;
+
+		commit = iter->item;
+		if (oidset_contains(&shown, &commit->object.oid))
+			continue;
+		entry = oidmap_get(&state.commit2label, &commit->object.oid);
+
+		if (entry)
+			strbuf_addf(out, "\n%c Branch %s\n", comment_line_char, entry->string);
+		else
+			strbuf_addch(out, '\n');
+
+		while (oidset_contains(&interesting, &commit->object.oid) &&
+		       !oidset_contains(&shown, &commit->object.oid)) {
+			commit_list_insert(commit, &list);
+			if (!commit->parents) {
+				commit = NULL;
+				break;
+			}
+			commit = commit->parents->item;
+		}
+
+		if (!commit)
+			strbuf_addf(out, "%s %s\n", cmd_reset,
+				    rebase_cousins || root_with_onto ?
+				    "onto" : "[new root]");
+		else {
+			const char *to = NULL;
+
+			entry = oidmap_get(&state.commit2label,
+					   &commit->object.oid);
+			if (entry)
+				to = entry->string;
+			else if (!rebase_cousins)
+				to = label_oid(&commit->object.oid, NULL,
+					       &state);
+
+			if (!to || !strcmp(to, "onto"))
+				strbuf_addf(out, "%s onto\n", cmd_reset);
+			else {
+				strbuf_reset(&oneline);
+				pretty_print_commit(pp, commit, &oneline);
+				strbuf_addf(out, "%s %s %s\n",
+					    cmd_reset, to, oneline.buf);
+			}
+		}
+
+		for (iter2 = list; iter2; iter2 = iter2->next) {
+			struct object_id *oid = &iter2->item->object.oid;
+			entry = oidmap_get(&commit2todo, oid);
+			/* only show if not already upstream */
+			if (entry)
+				strbuf_addf(out, "%s\n", entry->string);
+			entry = oidmap_get(&state.commit2label, oid);
+			if (entry)
+				strbuf_addf(out, "%s %s\n",
+					    cmd_label, entry->string);
+			oidset_insert(&shown, oid);
+		}
+
+		free_commit_list(list);
+	}
+
+	free_commit_list(commits);
+	free_commit_list(tips);
+
+	strbuf_release(&label);
+	strbuf_release(&oneline);
+	strbuf_release(&buf);
+
+	oidmap_free(&commit2todo, 1);
+	oidmap_free(&state.commit2label, 1);
+	hashmap_clear_and_free(&state.labels, struct labels_entry, entry);
+	strbuf_release(&state.buf);
+
+	return 0;
+}
+
 static int make_script_with_merges(struct pretty_print_context *pp,
 				   struct rev_info *revs, struct strbuf *out,
 				   unsigned flags)
@@ -5348,12 +5597,16 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 	int keep_empty = flags & TODO_LIST_KEEP_EMPTY;
 	const char *insn = flags & TODO_LIST_ABBREVIATE_CMDS ? "p" : "pick";
 	int rebase_merges = flags & TODO_LIST_REBASE_MERGES;
+	int use_replay = flags & TODO_LIST_REPLAY;
 	int reapply_cherry_picks = flags & TODO_LIST_REAPPLY_CHERRY_PICKS;
 	int skipped_commit = 0;
 
+	if (rebase_merges && use_replay)
+		BUG("Cannot use both TODO_LIST_REBASE_MERGES and TODO_LIST_REPLAY");
+
 	repo_init_revisions(r, &revs, NULL);
 	revs.verbose_header = 1;
-	if (!rebase_merges)
+	if (!rebase_merges && !use_replay)
 		revs.max_parents = 1;
 	revs.cherry_mark = !reapply_cherry_picks;
 	revs.limited = 1;
@@ -5361,6 +5614,8 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 	revs.right_only = 1;
 	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 	revs.topo_order = 1;
+	if (use_replay)
+		revs.limited = revs.right_only = revs.cherry_mark = revs.simplify_history = 0;
 
 	git_config_get_string("rebase.instructionFormat", &format);
 	if (!format || !*format) {
@@ -5386,6 +5641,8 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 
 	if (rebase_merges)
 		return make_script_with_merges(&pp, &revs, out, flags);
+	if (use_replay)
+		return make_replay_script(&pp, &revs, out, flags);
 
 	while ((commit = get_revision(&revs))) {
 		int is_empty = is_original_commit_empty(commit);
