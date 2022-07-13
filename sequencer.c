@@ -5612,23 +5612,18 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 			  const char **argv, unsigned flags)
 {
-	char *format = NULL;
 	struct pretty_print_context pp = {0};
 	struct rev_info revs;
 	struct commit *commit;
 	int keep_empty = flags & TODO_LIST_KEEP_EMPTY;
 	const char *insn = flags & TODO_LIST_ABBREVIATE_CMDS ? "p" : "pick";
 	int rebase_merges = flags & TODO_LIST_REBASE_MERGES;
-	int use_replay = flags & TODO_LIST_REPLAY;
 	int reapply_cherry_picks = flags & TODO_LIST_REAPPLY_CHERRY_PICKS;
 	int skipped_commit = 0;
 
-	if (rebase_merges && use_replay)
-		BUG("Cannot use both TODO_LIST_REBASE_MERGES and TODO_LIST_REPLAY");
-
 	repo_init_revisions(r, &revs, NULL);
 	revs.verbose_header = 1;
-	if (!rebase_merges && !use_replay)
+	if (!rebase_merges)
 		revs.max_parents = 1;
 	revs.cherry_mark = !reapply_cherry_picks;
 	revs.limited = 1;
@@ -5636,9 +5631,6 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 	revs.right_only = 1;
 	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 	revs.topo_order = 1;
-	if (use_replay)
-		revs.limited = revs.right_only = revs.cherry_mark = revs.simplify_history = 0;
-
 	setup_commit_format(&revs, &pp);
 
 	if (setup_revisions(argc, argv, &revs, NULL) > 1)
@@ -5649,8 +5641,6 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 
 	if (rebase_merges)
 		return make_script_with_merges(&pp, &revs, out, flags);
-	if (use_replay)
-		return make_replay_script(&pp, &revs, out, flags);
 
 	while ((commit = get_revision(&revs))) {
 		int is_empty = is_original_commit_empty(commit);
