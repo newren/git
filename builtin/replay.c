@@ -521,6 +521,37 @@ static int interactive_restartable_replay(const char *advance_name,
 	struct todo_list todo_list = TODO_LIST_INIT;
 	int flags;
 
+	struct rev_info revs;
+	struct commit *onto = NULL;
+	struct strset *update_refs = NULL;
+
+	int use_oldstyle_rebase_merges = 0;
+	if (!use_oldstyle_rebase_merges) {
+
+	repo_init_revisions(the_repository, &revs, prefix);
+
+	argc = setup_revisions(argc, argv, &revs, NULL);
+	if (argc > 1)
+		die(_("unrecognized argument: %s"), argv[1]);
+
+	/* requirements/overrides for revs */
+	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
+	revs.topo_order = 1;
+	revs.reverse = 1;
+	revs.simplify_history = 0;
+
+	determine_replay_mode(&revs.cmdline, onto_name, &advance_name,
+			      &onto, &update_refs);
+
+	if (prepare_revision_walk(&revs) < 0)
+		return error(_("error preparing revisions"));
+
+	if (make_replay_script(&revs, onto, advance_name, update_refs,
+			       &todo_list.buf))
+		die(_("could not generate todo list"));
+
+	} else {
+
 	flags = TODO_LIST_APPEND_TODO_HELP |
 		TODO_LIST_SHORTEN_IDS |
 		//TODO_LIST_REPLAY;
@@ -528,6 +559,8 @@ static int interactive_restartable_replay(const char *advance_name,
 	if (sequencer_make_script(the_repository, &todo_list.buf,
 				  argc, argv, flags))
 		die(_("could not generate todo list"));
+	}
+
 	puts(todo_list.buf.buf);
 	die("I quit.");
 }

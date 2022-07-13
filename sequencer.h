@@ -7,6 +7,7 @@
 
 struct commit;
 struct repository;
+struct strset;
 
 const char *git_path_commit_editmsg(void);
 const char *rebase_path_todo(void);
@@ -159,6 +160,11 @@ int sequencer_remove_state(struct replay_opts *opts);
 #define TODO_LIST_REAPPLY_CHERRY_PICKS (1U << 7)
 #define TODO_LIST_WARN_SKIPPED_CHERRY_PICKS (1U << 8)
 
+int make_replay_script(struct rev_info *revs,
+		       struct commit *onto,
+		       const char *advance_refname,
+		       struct strset *replayed_refs_to_update,
+		       struct strbuf *out);
 int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 			  const char **argv, unsigned flags);
 

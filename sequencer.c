@@ -35,6 +35,7 @@
 #include "commit-reach.h"
 #include "rebase-interactive.h"
 #include "reset.h"
+#include "strmap.h"
 
 #define GIT_REFLOG_ACTION "GIT_REFLOG_ACTION"
 
@@ -5120,10 +5121,14 @@ static void setup_commit_format(struct rev_info *revs,
 	pp->output_encoding = get_log_output_encoding();
 }
 
-static int make_replay_script(struct pretty_print_context *pp,
-			      struct rev_info *revs, struct strbuf *out,
-			      unsigned flags)
+int make_replay_script(struct rev_info *revs,
+		       struct commit *onto,
+		       const char *advance_refname,
+		       struct strset *replayed_refs_to_update,
+		       struct strbuf *out)
 {
+	struct pretty_print_context pp = {0};
+
 	// int keep_empty = flags & TODO_LIST_KEEP_EMPTY;
 	// int rebase_cousins = flags & TODO_LIST_REBASE_COUSINS;
 	int rebase_cousins = 1;
@@ -5194,7 +5199,7 @@ static int make_replay_script(struct pretty_print_context *pp,
 		*/
 
 		strbuf_reset(&oneline);
-		pretty_print_commit(pp, commit, &oneline);
+		pretty_print_commit(&pp, commit, &oneline);
 
 		to_merge = commit->parents ? commit->parents->next : NULL;
 		if (!to_merge) {
@@ -5332,7 +5337,7 @@ static int make_replay_script(struct pretty_print_context *pp,
 				strbuf_addf(out, "%s onto\n", cmd_reset);
 			else {
 				strbuf_reset(&oneline);
-				pretty_print_commit(pp, commit, &oneline);
+				pretty_print_commit(&pp, commit, &oneline);
 				strbuf_addf(out, "%s %s %s\n",
 					    cmd_reset, to, oneline.buf);
 			}
