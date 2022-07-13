@@ -5151,24 +5151,28 @@ int make_replay_script(struct rev_info *revs,
 	const char *cmd_play = abbr ? "p" : "play",
 		*cmd_label = abbr ? "l" : "label",
 		*cmd_reset = abbr ? "t" : "reset";
+	char *new_base_name;
+	struct labels_entry *base_label_entry;
+	struct object_id *oid;
 
 	oidmap_init(&commit2todo, 0);
 	oidmap_init(&state.commit2label, 0);
 	hashmap_init(&state.labels, labels_cmp, NULL, 0);
 	strbuf_init(&state.buf, 32);
 
-	/* FIXME: This isn't how you get onto... */
-	if (revs->cmdline.nr && (revs->cmdline.rev[0].flags & BOTTOM)) {
-		struct labels_entry *onto_label_entry;
-		struct object_id *oid = &revs->cmdline.rev[0].item->oid;
-		FLEX_ALLOC_STR(entry, string, "onto");
-		oidcpy(&entry->entry.oid, oid);
-		oidmap_put(&state.commit2label, entry);
+	setup_commit_format(revs, &pp);
 
-		FLEX_ALLOC_STR(onto_label_entry, label, "onto");
-		hashmap_entry_init(&onto_label_entry->entry, strihash("onto"));
-		hashmap_add(&state.labels, &onto_label_entry->entry);
-	}
+	/* Setup label for base/onto commit */
+	new_base_name = advance_refname ? "base" : "onto";
+	oid = &onto->object.oid;
+
+	FLEX_ALLOC_STR(entry, string, new_base_name);
+	oidcpy(&entry->entry.oid, oid);
+	oidmap_put(&state.commit2label, entry);
+
+	FLEX_ALLOC_STR(base_label_entry, label, new_base_name);
+	hashmap_entry_init(&base_label_entry->entry, strihash(new_base_name));
+	hashmap_add(&state.labels, &base_label_entry->entry);
 
 	/*
 	 * First phase:
@@ -5294,7 +5298,11 @@ int make_replay_script(struct rev_info *revs,
 	 * gathering commits not yet shown, reversing the list on the fly,
 	 * then outputting that list (labeling revisions as needed).
 	 */
-	strbuf_addf(out, "%s onto\n", cmd_label);
+	strbuf_reset(&oneline);
+	pretty_print_commit(&pp, onto, &oneline);
+	strbuf_addf(out, "%s %s %s\n", cmd_reset, oid_to_hex(&onto->object.oid),
+		    oneline.buf);
+	strbuf_addf(out, "%s %s\n", cmd_label, new_base_name);
 	for (iter = tips; iter; iter = iter->next) {
 		struct commit_list *list = NULL, *iter2;
 
@@ -5321,7 +5329,7 @@ int make_replay_script(struct rev_info *revs,
 		if (!commit)
 			strbuf_addf(out, "%s %s\n", cmd_reset,
 				    rebase_cousins || root_with_onto ?
-				    "onto" : "[new root]");
+				    new_base_name : "[new root]");
 		else {
 			const char *to = NULL;
 
@@ -5333,8 +5341,9 @@ int make_replay_script(struct rev_info *revs,
 				to = label_oid(&commit->object.oid, NULL,
 					       &state);
 
-			if (!to || !strcmp(to, "onto"))
-				strbuf_addf(out, "%s onto\n", cmd_reset);
+			if (!to || !strcmp(to, new_base_name))
+				strbuf_addf(out, "%s %s\n", cmd_reset,
+					    new_base_name);
 			else {
 				strbuf_reset(&oneline);
 				pretty_print_commit(&pp, commit, &oneline);
