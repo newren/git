@@ -376,46 +376,22 @@ static struct commit *pick_octopus_commit(struct commit *pickme,
 	BUG("nOT IMPLEMENTED!!!");
 }
 
-int cmd_replay(int argc, const char **argv, const char *prefix)
+/* replay without making an interactive script; not restartable */
+static int one_shot_replay(const char *advance_name,
+			   const char *onto_name,
+			   int contained,
+			   int argc,
+			   const char **argv,
+			   const char *prefix)
 {
-	const char *advance_name = NULL;
-	const char *onto_name = NULL;
-	struct commit *onto = NULL;
-	int contained = 0;
-
 	struct rev_info revs;
+	struct commit *onto = NULL;
 	struct commit *pick = NULL;
 	struct commit *commit;
 	struct merge_options merge_opt;
 	struct merge_result result;
 	struct strset *update_refs = NULL;
 	kh_oid_map_t *replayed_commits;
-
-	const char * const replay_usage[] = {
-		N_("git replay [--onto <newbase> | --advance <branch>] <revision-range>"),
-		NULL
-	};
-	struct option replay_options[] = {
-		OPT_STRING(0, "advance", &advance_name,
-			   N_("branch"),
-			   N_("make replay advance given branch")),
-		OPT_STRING(0, "onto", &onto_name,
-			   N_("revision"),
-			   N_("replay onto given commit")),
-		OPT_BOOL(0, "contained", &contained,
-			 N_("advance all branches contained in revision-range")),
-		OPT_END()
-	};
-
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage_with_options(replay_usage, replay_options);
-
-	argc = parse_options(argc, argv, prefix, replay_options, replay_usage,
-			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN);
-
-	if (advance_name && contained)
-		die(_("options '%s' and '%s' cannot be used together"),
-		    "--advance", "--contained");
 
 	repo_init_revisions(the_repository, &revs, prefix);
 
@@ -531,5 +507,43 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 	/* Return */
 	if (result.clean < 0)
 		exit(128);
-	return result.clean ? 0 : 1;
+	return result.clean;
+}
+
+int cmd_replay(int argc, const char **argv, const char *prefix)
+{
+	const char *advance_name = NULL;
+	const char *onto_name = NULL;
+	int contained = 0;
+	int clean;
+
+	const char * const replay_usage[] = {
+		N_("git replay [--onto <newbase> | --advance <branch>] <revision-range>"),
+		NULL
+	};
+	struct option replay_options[] = {
+		OPT_STRING(0, "advance", &advance_name,
+			   N_("branch"),
+			   N_("make replay advance given branch")),
+		OPT_STRING(0, "onto", &onto_name,
+			   N_("revision"),
+			   N_("replay onto given commit")),
+		OPT_BOOL(0, "contained", &contained,
+			 N_("advance all branches contained in revision-range")),
+		OPT_END()
+	};
+
+	if (argc == 2 && !strcmp(argv[1], "-h"))
+		usage_with_options(replay_usage, replay_options);
+
+	argc = parse_options(argc, argv, prefix, replay_options, replay_usage,
+			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN);
+
+	if (advance_name && contained)
+		die(_("options '%s' and '%s' cannot be used together"),
+		    "--advance", "--contained");
+
+	clean = one_shot_replay(advance_name, onto_name, contained,
+				argc, argv, prefix);
+	return clean ? 0 : 1;
 }
