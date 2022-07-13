@@ -5098,6 +5098,28 @@ static const char *label_oid(struct object_id *oid, const char *label,
 	return string_entry->string;
 }
 
+static void setup_commit_format(struct rev_info *revs,
+				struct pretty_print_context *pp)
+{
+	char *format = NULL;
+
+	git_config_get_string("rebase.instructionFormat", &format);
+	if (!format || !*format) {
+		free(format);
+		format = xstrdup("# %s");
+	}
+	if (*format != '#') {
+		char *temp = format;
+		format = xstrfmt("# %s", temp);
+		free(temp);
+	}
+
+	get_commit_format(format, revs);
+	free(format);
+	pp->fmt = revs->commit_format;
+	pp->output_encoding = get_log_output_encoding();
+}
+
 static int make_replay_script(struct pretty_print_context *pp,
 			      struct rev_info *revs, struct strbuf *out,
 			      unsigned flags)
@@ -5617,21 +5639,7 @@ int sequencer_make_script(struct repository *r, struct strbuf *out, int argc,
 	if (use_replay)
 		revs.limited = revs.right_only = revs.cherry_mark = revs.simplify_history = 0;
 
-	git_config_get_string("rebase.instructionFormat", &format);
-	if (!format || !*format) {
-		free(format);
-		format = xstrdup("# %s");
-	}
-	if (*format != '#') {
-		char *temp = format;
-		format = xstrfmt("# %s", temp);
-		free(temp);
-	}
-
-	get_commit_format(format, &revs);
-	free(format);
-	pp.fmt = revs.commit_format;
-	pp.output_encoding = get_log_output_encoding();
+	setup_commit_format(&revs, &pp);
 
 	if (setup_revisions(argc, argv, &revs, NULL) > 1)
 		return error(_("make_script: unhandled options"));
