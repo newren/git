@@ -11,6 +11,7 @@
 #include "merge-ort.h"
 #include "refs.h"
 #include "revision.h"
+#include "sequencer.h"
 #include "strmap.h"
 
 static struct commit *peel_committish(const char *name)
@@ -510,6 +511,27 @@ static int one_shot_replay(const char *advance_name,
 	return result.clean;
 }
 
+static int interactive_restartable_replay(const char *advance_name,
+					  const char *onto_name,
+					  int contained,
+					  int argc,
+					  const char **argv,
+					  const char *prefix)
+{
+	struct todo_list todo_list = TODO_LIST_INIT;
+	int flags;
+
+	flags = TODO_LIST_APPEND_TODO_HELP |
+		TODO_LIST_SHORTEN_IDS |
+		//TODO_LIST_REPLAY;
+		TODO_LIST_REBASE_MERGES | TODO_LIST_REBASE_COUSINS;
+	if (sequencer_make_script(the_repository, &todo_list.buf,
+				  argc, argv, flags))
+		die(_("could not generate todo list"));
+	puts(todo_list.buf.buf);
+	die("I quit.");
+}
+
 int cmd_replay(int argc, const char **argv, const char *prefix)
 {
 	const char *advance_name = NULL;
@@ -543,7 +565,13 @@ int cmd_replay(int argc, const char **argv, const char *prefix)
 		die(_("options '%s' and '%s' cannot be used together"),
 		    "--advance", "--contained");
 
-	clean = one_shot_replay(advance_name, onto_name, contained,
-				argc, argv, prefix);
+	if (0) {
+		clean = one_shot_replay(advance_name, onto_name, contained,
+					argc, argv, prefix);
+	} else {
+		clean = interactive_restartable_replay(advance_name, onto_name,
+						       contained,
+						       argc, argv, prefix);
+	}
 	return clean ? 0 : 1;
 }
