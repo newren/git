@@ -546,8 +546,9 @@ static int interactive_restartable_replay(const char *advance_name,
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
 
-	if (make_replay_script(&revs, onto, advance_name, update_refs,
-			       &todo_list.buf))
+	if (make_replay_script(&todo_list.buf, &revs,
+			       onto, advance_name, update_refs,
+			       contained))
 		die(_("could not generate todo list"));
 
 	} else {

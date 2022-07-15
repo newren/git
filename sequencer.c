@@ -5121,11 +5121,12 @@ static void setup_commit_format(struct rev_info *revs,
 	pp->output_encoding = get_log_output_encoding();
 }
 
-int make_replay_script(struct rev_info *revs,
+int make_replay_script(struct strbuf *out,
+		       struct rev_info *revs,
 		       struct commit *onto,
 		       const char *advance_refname,
 		       struct strset *replayed_refs_to_update,
-		       struct strbuf *out)
+		       int contained)
 {
 	struct pretty_print_context pp = {0};
 
@@ -5153,7 +5154,7 @@ int make_replay_script(struct rev_info *revs,
 		*cmd_reset = abbr ? "t" : "reset";
 	char *new_base_name;
 	struct labels_entry *base_label_entry;
-	struct object_id *oid;
+	struct object_id *new_base_oid;
 
 	oidmap_init(&commit2todo, 0);
 	oidmap_init(&state.commit2label, 0);
@@ -5164,10 +5165,10 @@ int make_replay_script(struct rev_info *revs,
 
 	/* Setup label for base/onto commit */
 	new_base_name = advance_refname ? "base" : "onto";
-	oid = &onto->object.oid;
+	new_base_oid = &onto->object.oid;
 
 	FLEX_ALLOC_STR(entry, string, new_base_name);
-	oidcpy(&entry->entry.oid, oid);
+	oidcpy(&entry->entry.oid, new_base_oid);
 	oidmap_put(&state.commit2label, entry);
 
 	FLEX_ALLOC_STR(base_label_entry, label, new_base_name);
@@ -5273,7 +5274,8 @@ int make_replay_script(struct rev_info *revs,
 	/*
 	 * Second phase:
 	 * - label branch points
-	 * - add HEAD to the branch tips
+	 * - add all the positive refs from replay_refs_to_update
+	 *   to the branch tips
 	 */
 	for (iter = commits; iter; iter = iter->next) {
 		struct commit_list *parent = iter->item->parents;
@@ -5285,7 +5287,11 @@ int make_replay_script(struct rev_info *revs,
 				label_oid(oid, "branch-point", &state);
 		}
 
-		/* Add HEAD as implicit "tip of branch" */
+		/* FIXME: Add *all* commits pointed to by
+		 * replay_refs_to_update, or we'll drop commits.  Do
+		 * NOT, just add final commit as an implicit "tip of
+		 * branch".
+		 */
 		if (!iter->next)
 			tips_tail = &commit_list_insert(iter->item,
 							tips_tail)->next;
@@ -5305,6 +5311,7 @@ int make_replay_script(struct rev_info *revs,
 	strbuf_addf(out, "%s %s\n", cmd_label, new_base_name);
 	for (iter = tips; iter; iter = iter->next) {
 		struct commit_list *list = NULL, *iter2;
+		const struct name_decoration *decoration;
 
 		commit = iter->item;
 		if (oidset_contains(&shown, &commit->object.oid))
@@ -5363,10 +5370,39 @@ int make_replay_script(struct rev_info *revs,
 				strbuf_addf(out, "%s %s\n",
 					    cmd_label, entry->string);
 			oidset_insert(&shown, oid);
+
+			/*
+			 * FIXME: Change replayed_refs_to_update from strset to
+			 *   oidmap: hashes -> string_list
+			 * for two reasons:
+			 *   1) if contained is false, we can avoid the
+			 *      get_name_decoration() stuff
+			 *   2) we need to add all commits in that oidmap
+			 *      to "branch tips" in second phase above (which
+			 *      also has a FIXME)
+			 */
+			for (decoration = get_name_decoration(&iter2->item->object);
+			     decoration;
+			     decoration = decoration->next) {
+				if (decoration->type == DECORATION_REF_LOCAL &&
+				    (contained ||
+				     (replayed_refs_to_update &&
+				      strset_contains(replayed_refs_to_update,
+						      decoration->name)))) {
+					strbuf_addf(out,
+						    "update-ref %s from %s\n",
+						    decoration->name,
+						    oid_to_hex(oid));
+				}
+			}
 		}
 
 		free_commit_list(list);
 	}
+
+	if (advance_refname)
+		strbuf_addf(out, "update-ref %s from %s\n", advance_refname,
+			    oid_to_hex(new_base_oid));
 
 	free_commit_list(commits);
 	free_commit_list(tips);
