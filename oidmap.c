@@ -38,6 +38,18 @@ void *oidmap_get(const struct oidmap *map, const struct object_id *key)
 	return hashmap_get_from_hash(&map->map, oidhash(key), key);
 }
 
+void *oidmap_get_field(const struct oidmap *map, const struct object_id *key)
+{
+	struct oidmap_field_entry *entry;
+	if (!map->map.cmpfn)
+		return NULL;
+
+	entry = hashmap_get_entry_from_hash(&map->map, oidhash(key), key,
+					    struct oidmap_field_entry,
+					    internal_entry);
+	return entry ? entry->field : NULL;
+}
+
 void *oidmap_remove(struct oidmap *map, const struct object_id *key)
 {
 	struct hashmap_entry entry;
@@ -58,4 +70,33 @@ void *oidmap_put(struct oidmap *map, void *entry)
 
 	hashmap_entry_init(&to_put->internal_entry, oidhash(&to_put->oid));
 	return hashmap_put(&map->map, &to_put->internal_entry);
+}
+
+void *oidmap_put_field(struct oidmap *map, struct object_id *key, void *field)
+{
+	struct oidmap_field_entry *entry;
+	int hash;
+	if (!map->map.cmpfn)
+		return NULL;
+
+	/* Look for existing entry */
+	hash = oidhash(key);
+	entry = hashmap_get_entry_from_hash(&map->map, hash, key,
+					    struct oidmap_field_entry,
+					    internal_entry);
+
+	/* Update existing entry */
+	if (entry) {
+		void *old = entry->field;
+		entry->field = field;
+		return old;
+	}
+
+	/* Create new entry and stuff it into map */
+	entry = xmalloc(sizeof(*entry));
+	hashmap_entry_init(&entry->internal_entry, hash);
+	entry->oid = *key;
+	entry->field = field;
+	hashmap_add(&map->map, &entry->internal_entry);
+	return NULL;
 }

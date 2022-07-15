@@ -109,4 +109,33 @@ test_expect_success 'iterate' '
 	test_cmp expect actual
 '
 
+test_expect_success 'put_field & get_field' '
+
+	test-tool oidmap >actual <<-\EOF &&
+	put_field one 1
+	put_field two 2
+	put_field one eins
+	put_field invalidOid 4
+	put_field three 3
+	get_field three
+	get_field one
+	get_field invalidOid
+	get_field two
+	EOF
+
+	cat >expect <<-EOF &&
+	NULL
+	NULL
+	1
+	Unknown oid: invalidOid
+	NULL
+	3
+	eins
+	Unknown oid: invalidOid
+	2
+	EOF
+
+	test_cmp expect actual
+'
+
 test_done

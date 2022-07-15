@@ -18,6 +18,15 @@ struct oidmap_entry {
 	struct object_id oid;
 };
 
+struct oidmap_field_entry {
+	/* For internal use only */
+	struct hashmap_entry internal_entry;
+
+	struct object_id oid;
+
+	void *field;
+};
+
 struct oidmap {
 	struct hashmap map;
 };
@@ -50,6 +59,14 @@ void *oidmap_get(const struct oidmap *map,
 		 const struct object_id *key);
 
 /*
+ * Returns the field from map for the specified oid, or NULL if not found.
+ * (Note that one cannot distinguish between a found field of NULL, and
+ * a map not having key with this function.)
+ */
+void *oidmap_get_field(const struct oidmap *map,
+		       const struct object_id *key);
+
+/*
  * Adds or replaces an oidmap entry.
  *
  * ((struct oidmap_entry *) entry)->internal_entry will be populated by this
@@ -58,6 +75,17 @@ void *oidmap_get(const struct oidmap *map,
  * Returns the replaced entry, or NULL if not found (i.e. the entry was added).
  */
 void *oidmap_put(struct oidmap *map, void *entry);
+
+/*
+ * Adds or replaces a field in an oidmap.
+ *
+ * This is similar to oidmap_put, but allows you to add oid,field pairs to map
+ * without manually allocating a oid_field_entry yourself.
+ *
+ * If an existing oid is already found in map, it updates the existing
+ * oid_field_entry to make use of field, and returns the replaced field.
+ */
+void *oidmap_put_field(struct oidmap *map, struct object_id *key, void *field);
 
 /*
  * Removes an oidmap entry matching the specified oid.
@@ -89,5 +117,11 @@ static inline void *oidmap_iter_first(struct oidmap *map,
 	/* TODO: this API could be reworked to do compile-time type checks */
 	return (void *)oidmap_iter_next(iter);
 }
+
+/*
+ * iterate through @map using @iter, @var is a pointer to a type oid_field_entry
+ */
+#define oidmap_for_each_entry(myoidmap, iter, var)	\
+	hashmap_for_each_entry(&(myoidmap)->map, iter, var, internal_entry)
 
 #endif

@@ -36,6 +36,7 @@ int cmd__oidmap(int argc, const char **argv)
 		char *cmd, *p1 = NULL, *p2 = NULL;
 		struct test_entry *entry;
 		struct object_id oid;
+		char *field;
 
 		/* break line into command and up to two parameters */
 		cmd = strtok(line.buf, DELIM);
@@ -65,6 +66,19 @@ int cmd__oidmap(int argc, const char **argv)
 			puts(entry ? entry->name : "NULL");
 			free(entry);
 
+		} else if (!strcmp("put_field", cmd) && p1 && p2) {
+
+			if (get_oid(p1, &oid)) {
+				printf("Unknown oid: %s\n", p1);
+				continue;
+			}
+
+			field = oidmap_put_field(&map, &oid, xstrdup(p2));
+
+			/* print and free replaced field, if any */
+			puts(field ? field : "NULL");
+			free(field);
+
 		} else if (!strcmp("get", cmd) && p1) {
 
 			if (get_oid(p1, &oid)) {
@@ -77,6 +91,19 @@ int cmd__oidmap(int argc, const char **argv)
 
 			/* print result */
 			puts(entry ? entry->name : "NULL");
+
+		} else if (!strcmp("get_field", cmd) && p1) {
+
+			if (get_oid(p1, &oid)) {
+				printf("Unknown oid: %s\n", p1);
+				continue;
+			}
+
+			/* lookup entry in oidmap */
+			field = oidmap_get_field(&map, &oid);
+
+			/* print result */
+			puts(field ? field : "NULL");
 
 		} else if (!strcmp("remove", cmd) && p1) {
 
