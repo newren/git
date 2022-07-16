@@ -154,10 +154,10 @@ If you want to cherry-pick rather than rebase, just change one flag:
     $ git replay --advance target origin/main..mybranch
     update refs/heads/target ${NEW_target_HASH} ${OLD_target_HASH}
 
-With both --onto and --advance, the range of commits represented by
-origin/main..mybranch are being replayed on top of target, the only
-question is whether mybranch or target is moved to point to the top of
-the replayed commits.
+Note that although the exact same commits are being replayed here
+(origin/main..mybranch) and on top of the same base (target), the
+difference between --onto and --advance is which branch is updated
+(target vs. mybranch)
 
 * Scaling up -- rebasing a stack of branches
 
