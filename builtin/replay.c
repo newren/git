@@ -9,6 +9,7 @@
 #include "commit-reach.h"
 #include "lockfile.h"
 #include "merge-ort.h"
+#include "oidmap.h"
 #include "refs.h"
 #include "revision.h"
 #include "sequencer.h"
@@ -81,6 +82,7 @@ struct ref_info {
 	struct commit *onto;
 	struct strset positive_refs;
 	struct strset negative_refs;
+	struct oidmap oids_and_refs_to_update;
 	int positive_refexprs;
 	int negative_refexprs;
 };
@@ -93,6 +95,7 @@ static void get_ref_information(struct rev_cmdline_info *cmd_info,
 	ref_info->onto = NULL;
 	strset_init(&ref_info->positive_refs);
 	strset_init(&ref_info->negative_refs);
+	oidmap_init(&ref_info->oids_and_refs_to_update, 0);
 	ref_info->positive_refexprs = 0;
 	ref_info->negative_refexprs = 0;
 
@@ -131,8 +134,20 @@ static void get_ref_information(struct rev_cmdline_info *cmd_info,
 										&e->item->oid, 1);
 			ref_info->negative_refexprs++;
 		} else {
-			if (can_uniquely_dwim)
+			if (can_uniquely_dwim) {
+				struct string_list *refs;
+
 				strset_add(&ref_info->positive_refs, fullname);
+				refs = oidmap_get_field(&ref_info->oids_and_refs_to_update,
+							&oid);
+				if (!refs) {
+					refs = xmalloc(sizeof(*refs));
+					string_list_init_dup(refs);
+				}
+				string_list_append(refs, fullname);
+				oidmap_put_field(&ref_info->oids_and_refs_to_update,
+						 &oid, refs);
+			}
 			ref_info->positive_refexprs++;
 		}
 
@@ -140,11 +155,28 @@ static void get_ref_information(struct rev_cmdline_info *cmd_info,
 	}
 }
 
+static void free_oidrefmap(struct oidmap *oids_and_refs_to_update)
+{
+	struct hashmap_iter iter;
+	struct oidmap_field_entry *entry;
+	struct string_list *refs;
+
+	if (!oids_and_refs_to_update)
+		return;
+
+	oidmap_for_each_entry(oids_and_refs_to_update, &iter, entry) {
+		refs = entry->field;
+		string_list_clear(refs, 0);
+		free(refs);
+	}
+	oidmap_free(oids_and_refs_to_update, 0);
+}
+
 static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 				  const char *onto_name,
 				  const char **advance_name,
 				  struct commit **onto,
-				  struct strset **update_refs)
+				  struct oidmap **oids_and_refs_to_update)
 {
 	struct ref_info rinfo;
 
@@ -209,12 +241,16 @@ static void determine_replay_mode(struct rev_cmdline_info *cmd_info,
 		}
 	}
 	if (!*advance_name) {
-		*update_refs = xcalloc(1, sizeof(**update_refs));
-		**update_refs = rinfo.positive_refs;
-		memset(&rinfo.positive_refs, 0, sizeof(**update_refs));
+		size_t memsize = sizeof(**oids_and_refs_to_update);
+		*oids_and_refs_to_update = xcalloc(1, memsize);
+		**oids_and_refs_to_update = rinfo.oids_and_refs_to_update;
+		memset(&rinfo.oids_and_refs_to_update, 0, memsize);
 	}
+
+	/* cleanup */
 	strset_clear(&rinfo.negative_refs);
 	strset_clear(&rinfo.positive_refs);
+	free_oidrefmap(&rinfo.oids_and_refs_to_update);
 }
 
 static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
@@ -391,7 +427,7 @@ static int one_shot_replay(const char *advance_name,
 	struct commit *commit;
 	struct merge_options merge_opt;
 	struct merge_result result;
-	struct strset *update_refs = NULL;
+	struct oidmap *oid_ref_map = NULL;
 	kh_oid_map_t *replayed_commits;
 
 	repo_init_revisions(the_repository, &revs, prefix);
@@ -407,7 +443,7 @@ static int one_shot_replay(const char *advance_name,
 	revs.simplify_history = 0;
 
 	determine_replay_mode(&revs.cmdline, onto_name, &advance_name,
-			      &onto, &update_refs);
+			      &onto, &oid_ref_map);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
@@ -419,9 +455,10 @@ static int one_shot_replay(const char *advance_name,
 	pick = onto;
 	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(&revs))) {
-		const struct name_decoration *decoration;
 		khint_t pos;
 		int hr;
+		struct string_list *refs;
+		struct string_list_item *item;
 
 		/* Pick the commit */
 		if (!commit->parents)
@@ -470,22 +507,17 @@ static int one_shot_replay(const char *advance_name,
 		kh_value(replayed_commits, pos) = pick;
 
 		/* Update any necessary branches */
-		if (advance_name)
+		refs = get_refs_to_update(commit, oid_ref_map, contained);
+		if (!refs)
 			continue;
-		decoration = get_name_decoration(&commit->object);
-		if (!decoration)
-			continue;
-		while (decoration) {
-			if (decoration->type == DECORATION_REF_LOCAL &&
-			    (contained || strset_contains(update_refs,
-							  decoration->name))) {
-				printf("update %s %s %s\n",
-				       decoration->name,
-				       oid_to_hex(&pick->object.oid),
-				       oid_to_hex(&commit->object.oid));
-			}
-			decoration = decoration->next;
+		for_each_string_list_item(item, refs) {
+			printf("update %s %s %s\n",
+			       item->string,
+			       oid_to_hex(&pick->object.oid),
+			       oid_to_hex(&commit->object.oid));
 		}
+		string_list_clear(refs, 0);
+		free(refs);
 	}
 
 	/* In --advance mode, advance the target ref */
@@ -498,10 +530,7 @@ static int one_shot_replay(const char *advance_name,
 
 	/* Cleanup */
 	kh_destroy_oid_map(replayed_commits);
-	if (update_refs) {
-		strset_clear(update_refs);
-		free(update_refs);
-	}
+	free_oidrefmap(oid_ref_map);
 	memset(&revs, 0, sizeof(revs)); /* TODO: write&call rev_info_free()? */
 	merge_finalize(&merge_opt, &result);
 
@@ -523,7 +552,7 @@ static int interactive_restartable_replay(const char *advance_name,
 
 	struct rev_info revs;
 	struct commit *onto = NULL;
-	struct strset *update_refs = NULL;
+	struct oidmap *oid_ref_map = NULL;
 
 	int use_oldstyle_rebase_merges = 0;
 	if (!use_oldstyle_rebase_merges) {
@@ -541,13 +570,13 @@ static int interactive_restartable_replay(const char *advance_name,
 	revs.simplify_history = 0;
 
 	determine_replay_mode(&revs.cmdline, onto_name, &advance_name,
-			      &onto, &update_refs);
+			      &onto, &oid_ref_map);
 
 	if (prepare_revision_walk(&revs) < 0)
 		return error(_("error preparing revisions"));
 
 	if (make_replay_script(&todo_list.buf, &revs,
-			       onto, advance_name, update_refs,
+			       onto, advance_name, oid_ref_map,
 			       contained))
 		die(_("could not generate todo list"));
 
