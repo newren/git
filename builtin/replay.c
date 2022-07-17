@@ -511,10 +511,11 @@ static int one_shot_replay(const char *advance_name,
 		if (!refs)
 			continue;
 		for_each_string_list_item(item, refs) {
-			printf("update %s %s %s\n",
-			       item->string,
-			       oid_to_hex(&pick->object.oid),
-			       oid_to_hex(&commit->object.oid));
+			if (starts_with(item->string, "refs/heads/"))
+				printf("update %s %s %s\n",
+				       item->string,
+				       oid_to_hex(&pick->object.oid),
+				       oid_to_hex(&commit->object.oid));
 		}
 		string_list_clear(refs, 0);
 		free(refs);

@@ -5406,10 +5406,11 @@ int make_replay_script(struct strbuf *out,
 			if (!refs)
 				continue;
 			for_each_string_list_item(item, refs) {
-				strbuf_addf(out,
-					    "update-ref %s from %s\n",
-					    item->string,
-					    oid_to_hex(oid));
+				if (starts_with(item->string, "refs/heads/"))
+					strbuf_addf(out,
+						    "update-ref %s from %s\n",
+						    item->string,
+						    oid_to_hex(oid));
 			}
 			string_list_clear(refs, 0);
 			free(refs);
