@@ -1,0 +1,111 @@
+issues with sequencer's current todo script creation
+  * revision handling (multiple branches, --ancestry-path, --first-parent, etc.)
+  * assumes a checkout will happen ("reset onto"), which is broken; I shouldn't
+    need to check out my new base before starting
+  * uses the name "onto" even if it'll be used for a cherry-pick operation
+  * uses "merge" directive for merge commits, which is like using "commit"
+    directive instead of "pick"/"play"
+  * "play"
+    * "play" should be allowed to have multiple recorded $COMMIT arguments,
+      (and the todo_item shouldn't just have a offset_in_buf to allow me to
+       re-parse hex strings into commits which is wasted work)
+    * "play" and "reset" are the only commands that should take a $COMMIT
+  * $COMMIT directives
+    * "edit" should be synonym for "break"
+    * "reword" should come by itself on the line after
+    * "squash" and "fixup" should also come by themselves on line after
+    * _only_ play & reset should take commits
+   * requirement to iterate over all commits before even starting to
+     replay, rather than replaying as we go (only cases we need to
+     iterate all (remaining) commits is when generating the script for
+     interactive display or for saving state)
+  * First instruction should _always_ be "reset", second is "label" (unless
+    replaying onto root?).  When pausing for conflicts or breaking/editing,
+    need to reinsert a new "reset"/"label" instruction.  (We may even consider
+    erroring out if first instruction is not a reset.  Done by setting onto to
+    NULL.)
+
+  * separation of todo_list_rearrange_squash() means re-parsing commits, which
+    is wasted effort.  Should be done as part of making the original script.
+
+ideas:
+  * --interactive should be the default
+  * accept `--todo $FILE` to let users directly pass todo list
+  * --keep-base (don't readjust base of any commits; removes need for --onto)
+  * --replay-base OLDBASE (don't readjust parents of any commits, unless that
+    parent is OLDBASE)
+  * only count things taking a commit (play/squash/fixup/reword) when reporting
+    progress
+  * allow users to "update-ref <refname>" without "from <hash>"
+
+cool command lines (seen contains topics which contain ab/submodule-cleanup):
+  * git replay --contained --keep-base --ancestry-path ab/submodule-cleanup..seen
+      OR
+    git replay --keep-base --first-parent ^next seen topic_branch
+
+
+
+todo list
+  * I should use "newbase" instead of "onto"
+  * need to handle advance & onto as well
+  * do I need both "reset" and "label" commands?
+  * From complete_action(), I need the
+    * todo_list_rearrange_squash(todo_list)
+    * todo_list_add_exec_commands(todo_list, commands)
+    * edit_todo_list(r, todo_list, &new_todo, shortrevisions, ...)
+
+
+  * OID shortening (and expansion) happens in todo_list_to_strbuf(),
+    which only matters from todo_list_write_to_file()
+
+
+
+./testing/dscho-rebase-merge-testcase.sh
+
+git show before-merge:main.c
+git show merged:main.c
+git show after-merge:main.c
+
+git merge-tree before-merge merged after-merge 
+
+
+
+
+
+Changes:
+  * conflicts:
+    * must read in index in order to write working tree/index
+    * use sparse-as-possible worktree
+
+  * todo list
+    * no "merge" directive, at first
+    * use "play" instead of "pick"
+    * play <merge-hash> relative to <label or secondary hash>
+
+    * implementation:
+      * make parse_insn_line() non-static
+      * add "play" directive, which accepts extra arguments for merges
+      * use parse_insn_line() and todo_list_parse_insn_buffer()
+
+
+
+  * git replay ${MERGE}^!: must assume remerging the same 2nd parent
+  
+  * state gets store in .git/replay-${worktree} (or .git/replay for main wrktr)
+  * XDL_MERGE_PREFER_BASE if using diff3 conflict markers?
+  * xdiff modifications:
+    * conflict markers for remerge of old merge should exactly match conflict
+      markers for new merge (by using the newer commit ids).  No extra indent
+      either.
+    * if there are no conflict marker blocks in any of the three sides for
+      the region under consideration, do normal three-way merge stuff
+    * when xdiff attempts to split up regions where the files differ, do not
+      allow getting a subset of conflict marker blocks -- must grab that whole
+      region
+    * if conflict marker blocks of new merge exactly match auto-remerge, then
+      we can take resolution from merge being replayed...
+    * otherwise, take the conflict marker block from new merge, and ignore both
+      the auto-remerge and the text from the merge being replayed.
+      (ensures we don't get deeper nestings of conflicts)
+    * if we take the otherwise above, point users at
+      "git show --remerge-diff $ORIG_MERGE" for tips on resolving conflicts
