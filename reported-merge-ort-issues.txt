@@ -1,0 +1,39 @@
+Before release:
+* Wrong tree sort order (fixed before ef2b369387 ("merge-ort: add
+  implementation of record_conflicted_index_entries()", 2020-12-13)
+  was submitted)
+* Crash on conflicted file that is SKIP_WORKTREE in index but present
+  anyway; note that merge-recursive (still) silently overwrites user
+  modifications, while merge-ort previously crashed (fixed before
+  90a57ade62 ("merge-ort: implement CE_SKIP_WORKTREE handling with
+  conflicted entries", 2021-03-02) was submitted)
+* Stable sort algorithm relied upon for proper handling of rename/rename
+  conflicts (see 3ca16a5e34 ("merge-ort: use STABLE_QSORT instead of
+  QSORT where required", 2021-03-04))
+
+After release:
+* [Non-issue] Claim of some bug with renaming that actually did as user wanted
+  Report: https://lore.kernel.org/git/CANgfOPvBy+v4hMDt7uNjawvEC5F-daSm2TTvk=3oBJPrj2KNYA@mail.gmail.com/
+* [Difference, but not bug] Something, something histogram vs. myers
+  Report: https://lore.kernel.org/git/1638470726.ql5i6zljva.none@localhost/
+* [Difference, but not bug] Multiple valid rename targets, not picking "best"
+  Report: https://lore.kernel.org/git/CAPMMpojsNQuHe9iSUGyu_q2M4VObjDPj4c0QrFPsHdYypQ3aog@mail.gmail.com/
+* Corner case bug with renormalization and rename/delete conflicts
+  Report: https://lore.kernel.org/git/CAN0XMOK8iHZnbtYw7CPAQGJcmuVSDxQoFNFEwiaa41V89F1rzA@mail.gmail.com/
+  Fixed with: en/merge-ort-renorm-with-rename-delete-conflict-fix
+* Assertion from merge.renameLimit=1
+  Report: https://lore.kernel.org/git/YeHTIfEutLYM4TIU@nand.local/
+  Fixed with en/merge-ort-restart-optim-fix
+* Memory leak (thought to be in remerge-diff, but copied from merge-recursive)
+  Report reference: https://lore.kernel.org/git/pull.1200.git.git.1642664835.gitgitgadget@gmail.com/T/#u
+  Fixed with en/plug-leaks-in-merge (also a leak in recursive) and
+  en/merge-ort-plug-leaks
+* Messages from inner merges not distinguished and shown by default
+  [Self reported]
+  Fixed with en/ort-inner-merge-conflict-report and
+  en/merge-ort-align-verbosity-with-recursive
+* Failure to handle dual directory rename where one side renames a leading
+  directory of the target of the other side's directory rename WHEN there
+  is also an add into the source directory of both side's directory renames.
+  Report reference: https://lore.kernel.org/git/CABPp-BEW2WF5AJeKqCiL2zhcPwPH-u6p=myoX_GkU6tbV=+TZA@mail.gmail.com/
+  Fix pending
