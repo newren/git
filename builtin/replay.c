@@ -593,6 +593,10 @@ static int interactive_restartable_replay(const char *advance_name,
 	}
 
 	puts(todo_list.buf.buf);
+	if (todo_list_parse_insn_buffer(the_repository, todo_list.buf.buf,
+					&todo_list))
+		BUG("unusable todo list");
+
 	die("I quit.");
 }
 

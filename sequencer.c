@@ -1687,6 +1687,7 @@ static struct {
 	const char *str;
 } todo_command_info[] = {
 	{ 'p', "pick" },
+	{ 'p', "play" },
 	{ 0,   "revert" },
 	{ 'e', "edit" },
 	{ 'r', "reword" },

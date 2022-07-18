@@ -86,6 +86,7 @@ struct replay_opts {
 enum todo_command {
 	/* commands that handle commits */
 	TODO_PICK = 0,
+	TODO_PLAY,
 	TODO_REVERT,
 	TODO_EDIT,
 	TODO_REWORD,
