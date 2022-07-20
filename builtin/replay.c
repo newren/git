@@ -541,6 +541,31 @@ static int one_shot_replay(const char *advance_name,
 	return result.clean;
 }
 
+static void run_todo_buffer(struct repository *repo, char *todo)
+{
+	while (todo) {
+		/* left-trim */
+		todo += strspn(todo, " \t");
+
+		if (skip_prefix(todo, "play ", &todo)) {
+			parse_committish(&todo, /* FIXME
+	end_of_object_name = (char *) bol + strcspn(bol, " \t\n");
+	saved = *end_of_object_name;
+	*end_of_object_name = '\0';
+	status = get_oid(bol, &commit_oid); */
+		}
+
+		/* handle comments */
+		if (*todo == '#') {
+			todo += strspn(todo, "\n");
+			continue;
+		}
+
+	}
+
+}
+
+
 static int interactive_restartable_replay(const char *advance_name,
 					  const char *onto_name,
 					  int contained,
@@ -593,6 +618,7 @@ static int interactive_restartable_replay(const char *advance_name,
 	}
 
 	puts(todo_list.buf.buf);
+	run_todo_buffer(the_repository, todo_list.buf.buf);
 	if (todo_list_parse_insn_buffer(the_repository, todo_list.buf.buf,
 					&todo_list))
 		BUG("unusable todo list");
