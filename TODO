@@ -11,9 +11,11 @@ issues with sequencer's current todo script creation
        re-parse hex strings into commits which is wasted work)
     * "play" and "reset" are the only commands that should take a $COMMIT
   * $COMMIT directives
-    * "edit" should be synonym for "break"
+    * "edit" should be synonym for "break", i.e. it should be preceded by a "pick" directive.
     * "reword" should come by itself on the line after
-    * "squash" and "fixup" should also come by themselves on line after
+    * "fixup" should also come by itself on line after
+    * "squash" also should avoid a commit directive, but then it just becomes an abbreviation
+      for a combination of a "fixup" directive on one line followed by a "reword" directive.
     * _only_ play & reset should take commits
    * requirement to iterate over all commits before even starting to
      replay, rather than replaying as we go (only cases we need to
