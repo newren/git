@@ -107,6 +107,7 @@ static struct spanhash_top *add_spanhash(struct spanhash_top *top,
 	}
 }
 
+#ifdef NO_RUST_REPLACEMENT
 static int spanhash_cmp(const void *a_, const void *b_)
 {
 	const struct spanhash *a = a_;
@@ -120,6 +121,9 @@ static int spanhash_cmp(const void *a_, const void *b_)
 	return a->hashval < b->hashval ? -1 :
 		a->hashval > b->hashval ? 1 : 0;
 }
+#else
+extern int spanhash_cmp(const void *a_, const void *b_);
+#endif
 
 static struct spanhash_top *hash_chars(struct repository *r,
 				       struct diff_filespec *one)

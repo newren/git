@@ -922,6 +922,7 @@ TEST_SHELL_PATH = $(SHELL_PATH)
 
 LIB_FILE = libgit.a
 XDIFF_LIB = xdiff/lib.a
+RUST_LIB = target/release/librgit.a
 REFTABLE_LIB = reftable/libreftable.a
 REFTABLE_TEST_LIB = reftable/libreftable_test.a
 
@@ -1339,6 +1340,10 @@ THIRD_PARTY_SOURCES += sha1dc/%
 # xdiff and reftable libs may in turn depend on what is in libgit.a
 GITLIBS = common-main.o $(LIB_FILE) $(XDIFF_LIB) $(REFTABLE_LIB) $(LIB_FILE)
 EXTLIBS =
+
+ifndef NO_RUST
+	GITLIBS += $(RUST_LIB)
+endif
 
 GIT_USER_AGENT = git/$(GIT_VERSION)
 
@@ -1911,6 +1916,10 @@ endif
 
 ifdef NO_POSIX_GOODIES
 	BASIC_CFLAGS += -DNO_POSIX_GOODIES
+endif
+
+ifdef NO_RUST
+	BASIC_CFLAGS += -DNO_RUST_REPLACEMENT
 endif
 
 ifdef APPLE_COMMON_CRYPTO_SHA1
@@ -2816,6 +2825,12 @@ $(LIB_FILE): $(LIB_OBJS)
 
 $(XDIFF_LIB): $(XDIFF_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
+
+ifndef NO_RUST
+.PHONY: $(RUST_LIB)
+$(RUST_LIB):
+	cargo build --verbose --release
+endif
 
 $(REFTABLE_LIB): $(REFTABLE_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
