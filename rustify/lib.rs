@@ -14,13 +14,8 @@ pub extern fn spanhash_cmp(a_ : *const c_void, b_ : *const c_void) -> c_int
 	let b : &spanhash = unsafe { & *(b_ as *const spanhash) };
 
 	/* A count of zero compares at the end.. */
-	if a.cnt == 0 {
-		return if b.cnt == 0 { 0 } else { 1 };
+	if a.cnt == 0 || b.cnt == 0 {
+		return b.cnt.cmp(&a.cnt) as c_int;
 	}
-	if b.cnt == 0 {
-		return -1;
-	}
-	return if a.hashval < b.hashval { -1 } else {
-	    if a.hashval > b.hashval { 1 } else { 0 }
-	};
+	a.hashval.cmp(&b.hashval) as c_int
 }
