@@ -923,6 +923,7 @@ TEST_SHELL_PATH = $(SHELL_PATH)
 LIB_FILE = libgit.a
 XDIFF_LIB = xdiff/lib.a
 RUST_LIB = target/release/librgit.a
+RUSTLIKE_LIB = liberate.a
 REFTABLE_LIB = reftable/libreftable.a
 REFTABLE_TEST_LIB = reftable/libreftable_test.a
 
@@ -1341,8 +1342,13 @@ THIRD_PARTY_SOURCES += sha1dc/%
 GITLIBS = common-main.o $(LIB_FILE) $(XDIFF_LIB) $(REFTABLE_LIB) $(LIB_FILE)
 EXTLIBS =
 
-ifndef NO_RUST
+ifdef NO_RUST
+else
+ifdef KINDA_LIKE_RUST
+	GITLIBS += $(RUSTLIKE_LIB)
+else
 	GITLIBS += $(RUST_LIB)
+endif
 endif
 
 GIT_USER_AGENT = git/$(GIT_VERSION)
@@ -2691,6 +2697,24 @@ ifndef NO_CURL
 	OBJECTS += http.o http-walker.o remote-curl.o
 endif
 
+ifdef NO_RUST
+else
+ifdef KINDA_LIKE_RUST
+	RUST_OBJS += rustify/freeme.o
+	OBJECTS += $(RUST_OBJS)
+
+.PHONY: rust-objs
+rust-objs: $(RUST_OBJS)
+
+$(RUSTLIKE_LIB): $(RUST_OBJS)
+	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
+else
+.PHONY: $(RUST_LIB)
+$(RUST_LIB):
+	cargo build --verbose --release
+endif
+endif
+
 .PHONY: objects
 objects: $(OBJECTS)
 
@@ -2825,12 +2849,6 @@ $(LIB_FILE): $(LIB_OBJS)
 
 $(XDIFF_LIB): $(XDIFF_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
-
-ifndef NO_RUST
-.PHONY: $(RUST_LIB)
-$(RUST_LIB):
-	cargo build --verbose --release
-endif
 
 $(REFTABLE_LIB): $(REFTABLE_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
