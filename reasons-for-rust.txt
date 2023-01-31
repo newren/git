@@ -1,0 +1,75 @@
+We are getting killed in performance:
+  * gitoxide can clone git repositories 3-4 times faster than git
+    (https://github.com/Byron/gitoxide/discussions/579)
+  * jj can run circles around git in rebasing time
+    (https://github.com/martinvonz/jj/discussions/49)
+  * I spent a few years of my life rewriting and optimizing the merge
+    machinery and getting that all upstreamed.  I tried to leave no
+    potential optimization opportunity uncovered -- with the exception
+    of a glaring one: parallelization.  I didn't feel remotely
+    confident about being able to parallelize that optimized C code in
+    a reasonable amount of time; a language like Rust provides the
+    necessary checks to give me confidence to fix that glaring
+    omission.
+
+* unittests
+
+* avoid annoying platform-dependent issues (such as 72b3091040
+  ("merge-ort: use STABLE_QSORT instead of QSORT where required",
+  2021-03-20)
+
+* reduction in types of security vulnerabilities
+  (https://litchipi.github.io/infosec/2023/01/24/git-code-audit-viewed-as-rust-programmer.html#rusts-protection)
+
+
+Methodology:
+  * "surgically replace [some] parts [of Git] but keep most of the
+    project intact."
+    (https://unhandledexpression.com/rust/2017/07/10/why-you-should-actually-rewrite-it-in-rust.html)
+
+
+
+Some stats (only replacing spanhash_cmp):
+  <Building:>
+      Plain C:     NO_RUST=1         make DEVELOPER=1 CFLAGS='-Wall -O2' -j4
+      Separated C: KINDA_LIKE_RUST=1 make DEVELOPER=1 CFLAGS='-Wall -O2' -j4
+      Rust:                          make DEVELOPER=1 CFLAGS='-Wall -O2' -j4
+      Go:          USE_GO=1          make DEVELOPER=1 CFLAGS='-Wall -O2' -j4
+
+  <Versions>
+      Rustc:   1.65.0 (Fedora 1.65.0-1.fc37)
+      Go:      1.19.5 (linux/amd64)
+
+  $ ls -l git | awk {print\$5}
+      Plain C:     3738400
+      Separated C: 3738432
+      Rust:        3738440   (0.0002% penalty compared to separated C)
+      Go:          5862584   (57% penalty!!)
+
+  $ hyperfine -w 250 -N './git version'
+      Plain C:     1.2 ms ±   0.1 ms  (1.0 ms …   1.8 ms)
+      Separated C: 1.2 ms ±   0.1 ms  (1.0 ms …   1.8 ms)
+      Rust:        1.2 ms ±   0.1 ms  (1.0 ms …   1.8 ms)  (NO penalty)
+      Go:          1.6 ms ±   0.1 ms  (1.4 ms …   3.1 ms)  (33% penalty)
+
+      Plain C + -lcurl:
+                   5.0 ms ±   0.3 ms  (4.6 ms …   6.6 ms)
+
+  The above two were measured because:
+    https://lore.kernel.org/git/alpine.LFD.2.01.0907251046140.3960@localhost.localdomain/
+
+  <In linux.git>
+  $ hyperfine -w 1 '../git/git diff -l0 --dirstat -C v2.6.22..v2.6.23'
+      Plain C:     7.621 s ±  0.044 s (7.580 s …  7.736 s)
+      Separated C: 7.791 s ±  0.020 s (7.742 s …  7.816 s)
+      Rust:        7.771 s ±  0.027 s (7.734 s …  7.811 s)       (No penalty)
+      Go:       1308.382 s ± 10.019 s (1293.079 s … 1319.222 s)  (16694% penalty!)
+
+    NOTE: While Go is 1308.382/7.791 = 167.9 times slower, only a small
+      percentage of the time was spent in a code path that called Go.  Overall
+      qsort is 11.5% of execution time in Plain C for this problem, so
+      spanhash_cmp should take less than that.  Pretending spanhash_cmp took
+      100% of the qsort time, the slowdown in the C switching is:
+          (1308.382 - 7.791*.885)/(7.791 - 7.791*.885)
+      It's 1452.6 times slower (and worse than that, since spanhash_cmp can't
+      take a full 100% of the qsort time).
