@@ -922,14 +922,10 @@ TEST_SHELL_PATH = $(SHELL_PATH)
 
 LIB_FILE = libgit.a
 XDIFF_LIB = xdiff/lib.a
-GO_LIB = rustify/yikes.a
 RUST_LIB = target/release/librgit.a
 RUSTLIKE_LIB = liberate.a
 REFTABLE_LIB = reftable/libreftable.a
 REFTABLE_TEST_LIB = reftable/libreftable_test.a
-
-rustify/yikes.a: rustify/yikes.go
-	cd rustify && go build -buildmode=c-archive yikes.go
 
 GENERATED_H += command-list.h
 GENERATED_H += config-list.h
@@ -1348,14 +1344,10 @@ EXTLIBS =
 
 ifdef NO_RUST
 else
-ifdef USE_GO
-	GITLIBS += $(GO_LIB)
-else
 ifdef KINDA_LIKE_RUST
 	GITLIBS += $(RUSTLIKE_LIB)
 else
 	GITLIBS += $(RUST_LIB)
-endif
 endif
 endif
 
@@ -2707,8 +2699,6 @@ endif
 
 ifdef NO_RUST
 else
-ifdef USE_GO
-else
 ifdef KINDA_LIKE_RUST
 	RUST_OBJS += rustify/freeme.o
 	OBJECTS += $(RUST_OBJS)
@@ -2722,7 +2712,6 @@ else
 .PHONY: $(RUST_LIB)
 $(RUST_LIB):
 	cargo build --verbose --release
-endif
 endif
 endif
 
