@@ -80,8 +80,15 @@ static struct spanhash_top *spanhash_rehash(struct spanhash_top *orig)
 	return new_spanhash;
 }
 
+#ifdef NO_RUST_REPLACEMENT
 static struct spanhash_top *add_spanhash(struct spanhash_top *top,
 					 unsigned int hashval, int cnt)
+#else
+struct spanhash_top *add_spanhash(struct spanhash_top *top,
+				  unsigned int hashval, int cnt);
+struct spanhash_top *add_spanhash(struct spanhash_top *top,
+				  unsigned int hashval, int cnt)
+#endif
 {
 	int bucket, lim;
 	struct spanhash *h;
@@ -121,9 +128,6 @@ static int spanhash_cmp(const void *a_, const void *b_)
 	return a->hashval < b->hashval ? -1 :
 		a->hashval > b->hashval ? 1 : 0;
 }
-#else
-extern int spanhash_cmp(const void *a_, const void *b_);
-#endif
 
 static struct spanhash_top *hash_chars(struct repository *r,
 				       struct diff_filespec *one)
@@ -170,6 +174,11 @@ static struct spanhash_top *hash_chars(struct repository *r,
 	QSORT(hash->data, (size_t)1ul << hash->alloc_log2, spanhash_cmp);
 	return hash;
 }
+#else
+extern int spanhash_cmp(const void *a_, const void *b_);
+extern struct spanhash_top *hash_chars(struct repository *r,
+				       struct diff_filespec *one);
+#endif
 
 int diffcore_count_changes(struct repository *r,
 			   struct diff_filespec *src,
