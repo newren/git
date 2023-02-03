@@ -3,17 +3,13 @@
 use libc::{c_char, c_int, c_uchar, c_uint, c_ulong, c_ushort, c_void};
 use c2rust_bitfields::BitfieldStruct;
 use std::{{slice,mem::size_of}};
+use rustc_hash::FxHashSet;
 
+#[derive(Eq, Hash, PartialEq)]
 #[repr(C)]
 pub struct spanhash {
     hashval : u32,
     cnt : u32,
-}
-#[repr(C)]
-pub struct spanhash_top {
-    pub alloc_log2: c_int,
-    pub free: c_int,
-    pub data: [spanhash; 0],
 }
 
 extern "C" {
@@ -22,17 +18,12 @@ extern "C" {
     pub type repository;
     */
 
-    fn add_spanhash(top : &mut spanhash_top,
-                    hashval: c_uint,
-                    cnt: c_int) -> &mut spanhash_top;
-
     fn diff_filespec_is_binary(_: &repository,
                                _: &diff_filespec) -> c_int;
     fn xcalloc(nmemb: size_t, size: size_t) -> *mut libc::c_void;
 }
 
 pub type size_t = usize;
-const INITIAL_HASH_SIZE: c_int = 9;
 const HASHBASE: c_uint = 107927;
 
 #[derive(Copy, Clone)]
@@ -90,19 +81,16 @@ pub extern fn spanhash_cmp(a_ : *const c_void, b_ : *const c_void) -> c_int
 pub extern "C" fn hash_chars(
     r: &repository,
     one: &diff_filespec,
-) -> *mut spanhash_top {
-    let i = INITIAL_HASH_SIZE;
-    let mut hash = unsafe { &mut *(xcalloc(1,
-                                           size_of::<spanhash_top>() +
-                                           size_of::<spanhash>() * (1 << i),
-                                          ) as *mut spanhash_top)
-                          };
-    hash.alloc_log2 = i;
-    hash.free = (1 << i) * (i - 3) / i;
+) -> *mut spanhash {
+    /*
     if one.size == 0 {
         return hash;
     }
+    */
 
+    let mut spanset: FxHashSet<spanhash> =
+        FxHashSet::with_capacity_and_hasher(one.size as usize/64,
+                                            Default::default());
     let is_text = unsafe { !diff_filespec_is_binary(r, one) };
 
     let buf_slice: &[u8] =
@@ -127,7 +115,7 @@ pub extern "C" fn hash_chars(
         }
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
                             .wrapping_rem(HASHBASE);
-        hash = unsafe { add_spanhash(hash, hashval, n) };
+        spanset.insert( spanhash { hashval, cnt: n } );
         n = 0;
         accum2 = 0;
         accum1 = accum2;
@@ -141,24 +129,88 @@ pub extern "C" fn hash_chars(
         n += 1;
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
                             .wrapping_rem(HASHBASE);
-        hash = unsafe { add_spanhash(hash, hashval, n) };
+        spanset.insert( spanhash { hashval, cnt: n } );
     }
-    let hdata = unsafe { slice::from_raw_parts_mut(hash.data.as_mut_ptr(),
-                                                   1 << hash.alloc_log2)
-                       };
-    hdata.sort_unstable_by(|a,b| {
-                  if a.cnt == 0 || b.cnt == 0 {
-                      return b.cnt.cmp(&a.cnt);
-                  }
-                  a.hashval.cmp(&b.hashval)
-                  });
+
     /*
-    libc::qsort(
-        hash.data.as_mut_ptr() as *mut c_void,
-        1 << hash.alloc_log2,
-        size_of::<spanhash>(),
-        Some(spanhash_cmp)
-    );
+     * I would much rather just take the elements from spanset, turn them into
+     * a vec, sort it, and return a pointer to the vec.  But, to avoid having
+     * C deallocate memory allocated by C, allocate an array, have the first
+     * spanhash store the length, and then sort from 1 to the end.
+     */
+    let num = 1 + spanset.len();
+    let mut newmem = unsafe { xcalloc(1, size_of::<spanhash>() * num)
+                              as *mut spanhash
+                            };
+    let spans = unsafe { slice::from_raw_parts_mut(newmem, num) };
+    spans[0].cnt = num as u32;
+    let mut j = 1;
+    for h in spanset.drain() {
+        spans[j] = h;
+        j += 1;
+    }
+    &spans[1..].sort_unstable_by(|a,b| a.hashval.cmp(&b.hashval));
+    return spans.as_mut_ptr();
+}
+
+#[no_mangle]
+fn diffcore_count_changes(r : &repository,
+                          src : &mut diff_filespec,
+                          dst : &mut diff_filespec,
+                          src_count_p : *mut * mut spanhash,
+                          dst_count_p : *mut * mut spanhash,
+                          src_copied : &mut c_ulong,
+                          literal_added : &mut c_ulong)
+{
+    let src_count : *mut spanhash =
+        src_count_p.as_ref().unwrap_or(hash_chars(r, src));
+    let dst_count : &[spanhash] =
+        dst_count_p.as_ref().unwrap_or(hash_chars(r, src));
+
+    let sc : c_ulong = 0;
+    let la : c_ulong = 0;
+
+    let s = 0;
+    let d = 0;
+    let sn = src_count.len();
+    let dn = dst_count.len();
+    for s in 0..sn {
+        for d in d..dn {
+
+        }
+        while d < dn {
+            if dst_count[d].hashval >= src_count[s].hashval {
+                break;
+            }
+            la += dst_count[d].cnt;
+            d += 1;
+        }
+        let src_cnt = src_count[s].cnt;
+        let dst_cnt = 0;
+        if d < dn && dst_count[d].hashval == src_count[s].hashval {
+            dst_cnt = dst_count[d].cnt;
+            d += 1;
+        }
+        if src_cnt < dst_cnt {
+            la += dst_cnt - src_cnt;
+            sc += src_cnt;
+        } else {
+            sc += dst_cnt;
+        }
+        s += 1;
+    }
+    while d < dn {
+        la += dst_count[d].cnt;
+        d += 1;
+    }
+
+    /*
+    if (!src_count_p)
+        free(src_count);
+    if (!dst_count_p)
+        free(dst_count);
     */
-    return hash;
+    *src_copied = sc;
+    *literal_added = la;
+    return 0;
 }
