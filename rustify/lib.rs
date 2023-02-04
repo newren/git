@@ -1,5 +1,6 @@
 use libc::{c_int, c_uint, c_void};
 use c2rust_bitfields::BitfieldStruct;
+use std::slice;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -147,6 +148,14 @@ pub unsafe extern "C" fn hash_chars(
                             .wrapping_rem(HASHBASE as libc::c_uint);
         hash = add_spanhash(hash, hashval, n);
     }
+    let hdata = slice::from_raw_parts_mut((*hash).data.as_mut_ptr(),
+                                          1 << (*hash).alloc_log2);
+    hdata.sort_unstable_by(|a,b| { if a.cnt == 0 || b.cnt == 0 {
+                                       return b.cnt.cmp(&a.cnt);
+                                   }
+                                   a.hashval.cmp(&b.hashval)
+                          });
+    /*
     libc::qsort(
         ((*hash).data).as_mut_ptr() as *mut libc::c_void,
         1 << (*hash).alloc_log2,
@@ -159,5 +168,6 @@ pub unsafe extern "C" fn hash_chars(
                 ) -> libc::c_int,
         ),
     );
+    */
     return hash;
 }
