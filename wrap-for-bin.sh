@@ -26,11 +26,19 @@ case "$GIT_DEBUGGER" in
 	;;
 1)
 	unset GIT_DEBUGGER
+	for dotfile in "$USER_HOME/.gdbinit" "$USER_HOME/.lldbinit"
+	do
+		test -f "$dotfile" && cp "$dotfile" "$HOME" || :
+	done
 	exec gdb --args "${GIT_EXEC_PATH}/@@PROG@@" "$@"
 	;;
 *)
 	GIT_DEBUGGER_ARGS="$GIT_DEBUGGER"
 	unset GIT_DEBUGGER
+	for dotfile in "$USER_HOME/.gdbinit" "$USER_HOME/.lldbinit"
+	do
+		test -f "$dotfile" && cp "$dotfile" "$HOME" || :
+	done
 	exec ${GIT_DEBUGGER_ARGS} "${GIT_EXEC_PATH}/@@PROG@@" "$@"
 	;;
 esac
