@@ -920,9 +920,15 @@ export PYTHON_PATH
 
 TEST_SHELL_PATH = $(SHELL_PATH)
 
+ifneq (,$(findstring -O2,$(CFLAGS)))
+    RUST_TARGET_DIR=target/release
+else
+    RUST_TARGET_DIR=target/debug
+endif
+
 LIB_FILE = libgit.a
 XDIFF_LIB = xdiff/lib.a
-RUST_LIB = target/release/librgit.a
+RUST_LIB = $(RUST_TARGET_DIR)/librgit.a
 RUSTLIKE_LIB = liberate.a
 REFTABLE_LIB = reftable/libreftable.a
 REFTABLE_TEST_LIB = reftable/libreftable_test.a
@@ -2709,9 +2715,16 @@ rust-objs: $(RUST_OBJS)
 $(RUSTLIKE_LIB): $(RUST_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
 else
+ifneq (,$(findstring -O2,$(CFLAGS)))
+    RUST_MODE=--release
+endif
+ifneq (,$(findstring -g,$(CFLAGS)))
+    RUST_MODE=--config debug=true
+endif
+
 .PHONY: $(RUST_LIB)
 $(RUST_LIB):
-	cargo build --verbose --release
+	cargo build --verbose $(RUST_MODE)
 endif
 endif
 
