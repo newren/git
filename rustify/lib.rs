@@ -91,9 +91,6 @@ pub extern "C" fn hash_chars(
     r: &repository,
     one: &diff_filespec,
 ) -> *mut spanhash_top {
-    let mut buf = one.data as *const c_uchar;
-    let mut sz = one.size;
-    let is_text = unsafe { !diff_filespec_is_binary(r, one) };
     let i = INITIAL_HASH_SIZE;
     let mut hash = unsafe { &mut *(xcalloc(1,
                                            size_of::<spanhash_top>() +
@@ -102,15 +99,22 @@ pub extern "C" fn hash_chars(
                           };
     hash.alloc_log2 = i;
     hash.free = (1 << i) * (i - 3) / i;
+    if one.size == 0 {
+        return hash;
+    }
+
+    let is_text = unsafe { !diff_filespec_is_binary(r, one) };
+
+    let buf_slice: &[u8] =
+        unsafe { slice::from_raw_parts(&*(one.data as *const u8),
+                                       one.size as usize) };
     let mut n = 0;
     let mut accum2: c_uint = 0;
     let mut accum1 = accum2;
-    while sz != 0 {
-        let c = unsafe { *buf as u8 };
-        buf = unsafe { buf.offset(1) };
-        sz -= 1;
-        if is_text != 0 && c == '\r' as u8 && sz != 0 &&
-           unsafe { *buf == '\n' as u8 } {
+    let mut c = buf_slice[0]; // Manually store first item from buffer
+    for next in buf_slice.into_iter().skip(1) {
+        if is_text != 0 && c == '\r' as u8 && *next == '\n' as u8 {
+            c = *next;
             continue;
         }
         (accum1, accum2) = (accum1 << 7 ^ accum2 >> 25,
@@ -118,6 +122,7 @@ pub extern "C" fn hash_chars(
         accum1 = accum1.wrapping_add(c as c_uint);
         n += 1;
         if n < 64 && c != '\n' as u8 {
+            c = *next;
             continue;
         }
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
@@ -126,8 +131,14 @@ pub extern "C" fn hash_chars(
         n = 0;
         accum2 = 0;
         accum1 = accum2;
+        c = *next;
     }
-    if n > 0 {
+    // Handle last item in buf_slice too.
+    {
+        (accum1, accum2) = (accum1 << 7 ^ accum2 >> 25,
+                            accum2 << 7 ^ accum1 >> 25);
+        accum1 = accum1.wrapping_add(c as c_uint);
+        n += 1;
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
                             .wrapping_rem(HASHBASE);
         hash = unsafe { add_spanhash(hash, hashval, n) };
