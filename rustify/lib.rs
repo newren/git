@@ -28,11 +28,7 @@ extern "C" {
 
     fn diff_filespec_is_binary(_: &repository,
                                _: &diff_filespec) -> c_int;
-    fn memset(_: *mut c_void,
-              _: c_int,
-              _: size_t,
-             ) -> *mut c_void;
-    fn xmalloc(size: size_t) -> *mut c_void;
+    fn xcalloc(nmemb: size_t, size: size_t) -> *mut libc::c_void;
 }
 
 pub type size_t = usize;
@@ -99,16 +95,12 @@ pub unsafe extern "C" fn hash_chars(
     let mut sz = one.size;
     let is_text = !diff_filespec_is_binary(r, one);
     let i = INITIAL_HASH_SIZE;
-    let mut hash = &mut *(xmalloc(size_of::<spanhash_top>() +
+    let mut hash = &mut *(xcalloc(1,
+                                  size_of::<spanhash_top>() +
                                   size_of::<spanhash>() * (1 << i),
                                  ) as *mut spanhash_top);
     hash.alloc_log2 = i;
     hash.free = (1 << i) * (i - 3) / i;
-    memset(
-        hash.data.as_mut_ptr() as *mut c_void,
-        0,
-        size_of::<spanhash>() * (1 << i),
-    );
     let mut n = 0;
     let mut accum2: c_uint = 0;
     let mut accum1 = accum2;
