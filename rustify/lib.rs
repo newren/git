@@ -87,28 +87,30 @@ pub extern fn spanhash_cmp(a_ : *const c_void, b_ : *const c_void) -> c_int
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hash_chars(
+pub extern "C" fn hash_chars(
     r: &repository,
     one: &diff_filespec,
 ) -> *mut spanhash_top {
     let mut buf = one.data as *const c_uchar;
     let mut sz = one.size;
-    let is_text = !diff_filespec_is_binary(r, one);
+    let is_text = unsafe { !diff_filespec_is_binary(r, one) };
     let i = INITIAL_HASH_SIZE;
-    let mut hash = &mut *(xcalloc(1,
-                                  size_of::<spanhash_top>() +
-                                  size_of::<spanhash>() * (1 << i),
-                                 ) as *mut spanhash_top);
+    let mut hash = unsafe { &mut *(xcalloc(1,
+                                           size_of::<spanhash_top>() +
+                                           size_of::<spanhash>() * (1 << i),
+                                          ) as *mut spanhash_top)
+                          };
     hash.alloc_log2 = i;
     hash.free = (1 << i) * (i - 3) / i;
     let mut n = 0;
     let mut accum2: c_uint = 0;
     let mut accum1 = accum2;
     while sz != 0 {
-        let c = *buf as u8;
-        buf = buf.offset(1);
+        let c = unsafe { *buf as u8 };
+        buf = unsafe { buf.offset(1) };
         sz -= 1;
-        if is_text != 0 && c == '\r' as u8 && sz != 0 && *buf == '\n' as u8 {
+        if is_text != 0 && c == '\r' as u8 && sz != 0 &&
+           unsafe { *buf == '\n' as u8 } {
             continue;
         }
         (accum1, accum2) = (accum1 << 7 ^ accum2 >> 25,
@@ -120,7 +122,7 @@ pub unsafe extern "C" fn hash_chars(
         }
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
                             .wrapping_rem(HASHBASE);
-        hash = add_spanhash(hash, hashval, n);
+        hash = unsafe { add_spanhash(hash, hashval, n) };
         n = 0;
         accum2 = 0;
         accum1 = accum2;
@@ -128,10 +130,11 @@ pub unsafe extern "C" fn hash_chars(
     if n > 0 {
         let hashval = accum1.wrapping_add(accum2.wrapping_mul(0x61 as c_uint))
                             .wrapping_rem(HASHBASE);
-        hash = add_spanhash(hash, hashval, n);
+        hash = unsafe { add_spanhash(hash, hashval, n) };
     }
-    let hdata = slice::from_raw_parts_mut(hash.data.as_mut_ptr(),
-                                          1 << hash.alloc_log2);
+    let hdata = unsafe { slice::from_raw_parts_mut(hash.data.as_mut_ptr(),
+                                                   1 << hash.alloc_log2)
+                       };
     hdata.sort_unstable_by(|a,b| {
                   if a.cnt == 0 || b.cnt == 0 {
                       return b.cnt.cmp(&a.cnt);
