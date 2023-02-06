@@ -286,4 +286,23 @@ test_expect_success 'basename similarity vs best similarity' '
 	test_cmp expected actual
 '
 
+test_expect_success 'last line matters too' '
+	test_write_lines a 0 1 2 3 4 5 6 7 8 9 >nonewline &&
+	printf "git ignores final up to 63 characters if not newline terminated" >>nonewline &&
+	git add nonewline &&
+	git commit -m "original version of file with no final newline" &&
+
+	# Change ONLY the first character of the whole file
+	test_write_lines b 0 1 2 3 4 5 6 7 8 9 >nonewline &&
+	printf "git ignores final up to 63 characters if not newline terminated" >>nonewline &&
+	git add nonewline &&
+	git mv nonewline still-no-newline &&
+	git commit -a -m "rename nonewline -> still-no-newline" &&
+	git diff-tree -r -M01 --name-status HEAD^ HEAD >actual &&
+	cat >expected <<-\EOF &&
+	R097	nonewline	still-no-newline
+	EOF
+	test_cmp expected actual
+'
+
 test_done
