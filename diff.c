@@ -55,7 +55,7 @@ static int diff_relative;
 static int diff_stat_graph_width;
 static int diff_dirstat_permille_default = 30;
 static struct diff_options default_diff_options;
-static long diff_algorithm;
+static long diff_algorithm = XDF_HISTOGRAM_DIFF;
 static unsigned ws_error_highlight_default = WSEH_NEW;
 
 static char diff_colors[][COLOR_MAXLEN] = {
@@ -201,13 +201,13 @@ long parse_algorithm_value(const char *value)
 {
 	if (!value)
 		return -1;
-	else if (!strcasecmp(value, "myers") || !strcasecmp(value, "default"))
+	else if (!strcasecmp(value, "myers"))
 		return 0;
 	else if (!strcasecmp(value, "minimal"))
 		return XDF_NEED_MINIMAL;
 	else if (!strcasecmp(value, "patience"))
 		return XDF_PATIENCE_DIFF;
-	else if (!strcasecmp(value, "histogram"))
+	else if (!strcasecmp(value, "histogram") || !strcasecmp(value, "default"))
 		return XDF_HISTOGRAM_DIFF;
 	/*
 	 * Please update $__git_diff_algorithms in git-completion.bash
@@ -2112,6 +2112,11 @@ static void diff_words_show(struct diff_words_data *diff_words)
 	memset(&xecfg, 0, sizeof(xecfg));
 	diff_words_fill(&diff_words->minus, &minus, diff_words->word_regex);
 	diff_words_fill(&diff_words->plus, &plus, diff_words->word_regex);
+	/*
+	 * TODO: Investigate whether to switch to
+	 *   xpp.flags = XDF_HISTOGRAM_DIFF
+	 * Would need to update t4034-diff-words.sh if we do.
+	 */
 	xpp.flags = 0;
 	/* as only the hunk header will be parsed, we need a 0-context */
 	xecfg.ctxlen = 0;
@@ -3860,7 +3865,7 @@ static void builtin_checkdiff(const char *name_a, const char *name_b,
 		memset(&xpp, 0, sizeof(xpp));
 		memset(&xecfg, 0, sizeof(xecfg));
 		xecfg.ctxlen = 1; /* at least one context line */
-		xpp.flags = 0;
+		xpp.flags = XDF_HISTOGRAM_DIFF;
 		if (xdi_diff_outf(&mf1, &mf2, checkdiff_consume_hunk,
 				  checkdiff_consume, &data,
 				  &xpp, &xecfg))
@@ -6329,7 +6334,7 @@ static int diff_get_patch_id(struct diff_options *options, struct object_id *oid
 			if (fill_mmfile(options->repo, &mf1, p->one) < 0 ||
 			    fill_mmfile(options->repo, &mf2, p->two) < 0)
 				return error("unable to read files to diff");
-			xpp.flags = 0;
+			xpp.flags = XDF_HISTOGRAM_DIFF;
 			xecfg.ctxlen = 3;
 			xecfg.flags = XDL_EMIT_NO_HUNK_HDR;
 			if (xdi_diff_outf(&mf1, &mf2, NULL,

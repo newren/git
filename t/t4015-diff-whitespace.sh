@@ -1549,7 +1549,7 @@ test_expect_success 'short lines of opposite sign do not get marked as moved' '
 	this line should be marked as oldMoved newMoved
 	unchanged 4
 	EOF
-	test_expect_code 1 git diff --no-index --color --color-moved=zebra \
+	test_expect_code 1 git diff --diff-algorithm=myers --no-index --color --color-moved=zebra \
 		old.txt new.txt >output && cat output &&
 	grep -v index output | test_decode_color >actual &&
 	cat >expect <<-\EOF &&

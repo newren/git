@@ -116,7 +116,7 @@ static void show_diff(struct merge_list *entry)
 	xdemitcb_t ecb = { .out_line = show_outf };
 
 	memset(&xpp, 0, sizeof(xpp));
-	xpp.flags = 0;
+	xpp.flags = XDF_HISTOGRAM_DIFF;
 	memset(&xecfg, 0, sizeof(xecfg));
 	xecfg.ctxlen = 3;
 

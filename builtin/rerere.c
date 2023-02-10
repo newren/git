@@ -38,7 +38,7 @@ static int diff_two(const char *file1, const char *label1,
 	printf("--- a/%s\n+++ b/%s\n", label1, label2);
 	fflush(stdout);
 	memset(&xpp, 0, sizeof(xpp));
-	xpp.flags = 0;
+	xpp.flags = XDF_HISTOGRAM_DIFF;
 	memset(&xecfg, 0, sizeof(xecfg));
 	xecfg.ctxlen = 3;
 	ret = xdi_diff(&minus, &plus, &xpp, &xecfg, &ecb);
