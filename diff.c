@@ -2999,6 +2999,7 @@ static void show_dirstat(struct diff_options *options)
 	unsigned long changed;
 	struct dirstat_dir dir;
 	struct diff_queue_struct *q = &diff_queued_diff;
+	void *to_free = NULL;
 
 	dir.files = NULL;
 	dir.alloc = 0;
@@ -3082,13 +3083,20 @@ found_damage:
 		dir.nr++;
 	}
 
+	/* gather_dirstat munges dir.files */
+	to_free = dir.files;
+
 	/* This can happen even with many files, if everything was renames */
 	if (!changed)
-		return;
+		goto cleanup;
 
 	/* Show all directories with more than x% of the changes */
 	QSORT(dir.files, dir.nr, dirstat_compare);
 	gather_dirstat(options, &dir, changed, "", 0);
+
+cleanup:
+	/* Free resources allocated for dir */
+	free(to_free);
 }
 
 static void show_dirstat_by_line(struct diffstat_t *data, struct diff_options *options)
@@ -3096,6 +3104,7 @@ static void show_dirstat_by_line(struct diffstat_t *data, struct diff_options *o
 	int i;
 	unsigned long changed;
 	struct dirstat_dir dir;
+	void *to_free = NULL;
 
 	if (data->nr == 0)
 		return;
@@ -3126,13 +3135,20 @@ static void show_dirstat_by_line(struct diffstat_t *data, struct diff_options *o
 		dir.nr++;
 	}
 
+	/* gather_dirstat munges dir.files */
+	to_free = dir.files;
+
 	/* This can happen even with many files, if everything was renames */
 	if (!changed)
-		return;
+		goto cleanup;
 
 	/* Show all directories with more than x% of the changes */
 	QSORT(dir.files, dir.nr, dirstat_compare);
 	gather_dirstat(options, &dir, changed, "", 0);
+
+cleanup:
+	/* Free resources allocated for dir */
+	free(to_free);
 }
 
 static void free_diffstat_file(struct diffstat_file *f)
