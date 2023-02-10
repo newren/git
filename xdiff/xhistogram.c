@@ -77,6 +77,9 @@ struct histindex {
 struct region {
 	unsigned int begin1, end1;
 	unsigned int begin2, end2;
+	unsigned int group_weight;
+	unsigned int individual_weight;
+	unsigned int rc;
 };
 
 #define LINE_MAP(i, a) (i->line_map[(a) - i->ptr_shift])
@@ -182,8 +185,10 @@ static int scanB(struct histindex *index, int line2, int count2)
 	return 0;
 }
 
-static int try_lcs(struct histindex *index, struct region *lcs, int b_ptr,
-	int line1, int count1, int line2, int count2)
+static int try_lcs(struct histindex *index, struct region *lcs,
+		   struct region *best, int b_ptr,
+		   unsigned int *last_ae, unsigned int *last_be,
+		   int line1, int count1, int line2, int count2)
 {
 	unsigned int b_next = b_ptr + 1;
 	struct record *rec = index->records[TABLE_HASH(index, 2, b_ptr)];
@@ -229,16 +234,29 @@ static int try_lcs(struct histindex *index, struct region *lcs, int b_ptr,
 
 			if (b_next <= be)
 				b_next = be + 1;
-			if (lcs->end1 - lcs->begin1 < ae - as ||
-			    (lcs->end1 - lcs->begin1 == ae - as &&
-			     lcs->begin1 + lcs->begin2 > as + bs) ||
-			    rc < index->cnt) {
-				lcs->begin1 = as;
-				lcs->begin2 = bs;
-				lcs->end1 = ae;
-				lcs->end2 = be;
-				index->cnt = rc;
+			if (*last_ae < as && *last_be < bs && rc == best->rc) {
+				int new_weight = ae - as + 1;
+				best->group_weight += new_weight;
+				if (best->individual_weight < new_weight ||
+				    rc < best->rc)
+					goto copy_region;
+			} else {
+				if (lcs->group_weight < best->group_weight ||
+				    best->rc < index->cnt) {
+					memcpy(lcs, best, sizeof(*best));
+					index->cnt = best->rc;
+				}
+				best->group_weight = ae - as + 1;
+copy_region:
+				best->individual_weight = ae - as + 1;
+				best->rc = rc;
+				best->begin1 = as;
+				best->end1 = ae;
+				best->begin2 = bs;
+				best->end2 = be;
 			}
+			*last_ae = ae;
+			*last_be = be;
 
 			if (np == 0)
 				break;
@@ -256,6 +274,10 @@ static int try_lcs(struct histindex *index, struct region *lcs, int b_ptr,
 
 			as = np;
 		}
+	}
+	if (lcs->group_weight < best->group_weight) {
+		memcpy(lcs, best, sizeof(*best));
+		index->cnt = best->rc;
 	}
 	return b_next;
 }
@@ -287,6 +309,9 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	int b_ptr;
 	int ret = -1;
 	struct histindex index;
+	struct region best = { 0 };
+	unsigned int last_ae = UINT_MAX;
+	unsigned int last_be = UINT_MAX;
 
 	memset(&index, 0, sizeof(index));
 
@@ -326,7 +351,9 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	index.cnt = index.max_chain_length + 1;
 
 	for (b_ptr = line2; b_ptr <= LINE_END(2); )
-		b_ptr = try_lcs(&index, lcs, b_ptr, line1, count1, line2, count2);
+		b_ptr = try_lcs(&index, lcs, &best, b_ptr,
+				&last_ae, &last_be,
+				line1, count1, line2, count2);
 
 	if (index.has_common && index.max_chain_length < index.cnt)
 		ret = 1;
