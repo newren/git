@@ -268,7 +268,7 @@ test_expect_success 'basic insert a function, tweak a function, remove a functio
 	test_cmp expect-tweak.c-good actual &&
 
 	show_diff histogram tweak.c >actual &&
-	test_cmp expect-tweak.c-lame actual
+	test_cmp expect-tweak.c-good actual
 '
 
 test_expect_success 'remove a function, add a function, tweak a function' '

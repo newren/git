@@ -155,6 +155,33 @@ continue_scan:
 	return 0;
 }
 
+static int scanB(struct histindex *index, int line2, int count2)
+{
+	unsigned int ptr, tbl_idx;
+	struct record **rec_chain, *rec;
+
+	/* Order doesn't matter, but scanA went backwards so might as well... */
+	for (ptr = LINE_END(2); line2 <= ptr; ptr--) {
+		tbl_idx = TABLE_HASH(index, 2, ptr);
+		rec_chain = index->records + tbl_idx;
+		rec = *rec_chain;
+
+		while (rec) {
+			if (CMP(index, 1, rec->ptr, 2, ptr)) {
+				/* cap rec->cnt at MAX_CNT */
+				rec->cnt = XDL_MIN(MAX_CNT, rec->cnt + 1);
+				break;
+			}
+
+			rec = rec->next;
+		}
+
+		/* not found; ignore and move on to next line */
+	}
+
+	return 0;
+}
+
 static int try_lcs(struct histindex *index, struct region *lcs, int b_ptr,
 	int line1, int count1, int line2, int count2)
 {
@@ -288,6 +315,9 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	index.max_chain_length = 64;
 
 	if (scanA(&index, line1, count1))
+		goto cleanup;
+
+	if (scanB(&index, line2, count2))
 		goto cleanup;
 
 	index.cnt = index.max_chain_length + 1;
