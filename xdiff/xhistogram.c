@@ -77,9 +77,9 @@ struct histindex {
 struct region {
 	unsigned int begin1, end1;
 	unsigned int begin2, end2;
-	unsigned int group_weight;
-	unsigned int individual_weight;
+	unsigned int weight, num;
 	unsigned int rc;
+	unsigned int last_ae, last_be;
 };
 
 #define LINE_MAP(i, a) (i->line_map[(a) - i->ptr_shift])
@@ -187,7 +187,6 @@ static int scanB(struct histindex *index, int line2, int count2)
 
 static int try_lcs(struct histindex *index, struct region *lcs,
 		   struct region *best, int b_ptr,
-		   unsigned int *last_ae, unsigned int *last_be,
 		   int line1, int count1, int line2, int count2)
 {
 	unsigned int b_next = b_ptr + 1;
@@ -234,29 +233,37 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 
 			if (b_next <= be)
 				b_next = be + 1;
-			if (*last_ae < as && *last_be < bs && rc == best->rc) {
+			if (rc > best->rc) {
+				/* Ignore this region */
+			} else if (best->last_ae < as &&
+				   best->last_be < bs &&
+				   rc == best->rc) {
+				/* Add this region to current weight */
 				int new_weight = ae - as + 1;
-				best->group_weight += new_weight;
-				if (best->individual_weight < new_weight ||
-				    rc < best->rc)
-					goto copy_region;
+				best->weight += new_weight;
+				best->num += 1;
+				best->last_ae = ae;
+				best->last_be = be;
 			} else {
-				if (lcs->group_weight < best->group_weight ||
+				/*
+				 * Start a new region, but maybe first save
+				 * old one if it's the best so far.
+				 */
+				if (lcs->weight < best->weight ||
 				    best->rc < index->cnt) {
 					memcpy(lcs, best, sizeof(*best));
 					index->cnt = best->rc;
 				}
-				best->group_weight = ae - as + 1;
-copy_region:
-				best->individual_weight = ae - as + 1;
+				best->weight = ae - as + 1;
+				best->num = 1;
 				best->rc = rc;
 				best->begin1 = as;
 				best->end1 = ae;
 				best->begin2 = bs;
 				best->end2 = be;
+				best->last_ae = ae;
+				best->last_be = be;
 			}
-			*last_ae = ae;
-			*last_be = be;
 
 			if (np == 0)
 				break;
@@ -275,7 +282,7 @@ copy_region:
 			as = np;
 		}
 	}
-	if (lcs->group_weight < best->group_weight) {
+	if (lcs->weight < best->weight) {
 		memcpy(lcs, best, sizeof(*best));
 		index->cnt = best->rc;
 	}
@@ -303,76 +310,73 @@ static inline void free_index(struct histindex *index)
 }
 
 static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
-		    struct region *lcs,
+		    struct histindex *index, struct region *lcs,
 		    int line1, int count1, int line2, int count2)
 {
 	int b_ptr;
 	int ret = -1;
-	struct histindex index;
-	struct region best = { 0 };
-	unsigned int last_ae = UINT_MAX;
-	unsigned int last_be = UINT_MAX;
+	struct region best = { .weight = UINT_MAX,
+			       .rc = UINT_MAX,
+			       .last_ae = UINT_MAX,
+			       .last_be = UINT_MAX };
 
-	memset(&index, 0, sizeof(index));
+	memset(index, 0, sizeof(*index));
 
-	index.env = env;
-	index.xpp = xpp;
+	index->env = env;
+	index->xpp = xpp;
 
-	index.records = NULL;
-	index.line_map = NULL;
+	index->records = NULL;
+	index->line_map = NULL;
 	/* in case of early xdl_cha_free() */
-	index.rcha.head = NULL;
+	index->rcha.head = NULL;
 
-	index.table_bits = xdl_hashbits(count1);
-	index.records_size = 1 << index.table_bits;
-	if (!XDL_CALLOC_ARRAY(index.records, index.records_size))
+	index->table_bits = xdl_hashbits(count1);
+	index->records_size = 1 << index->table_bits;
+	if (!XDL_CALLOC_ARRAY(index->records, index->records_size))
 		goto cleanup;
 
-	index.line_map_size = count1;
-	if (!XDL_CALLOC_ARRAY(index.line_map, index.line_map_size))
+	index->line_map_size = count1;
+	if (!XDL_CALLOC_ARRAY(index->line_map, index->line_map_size))
 		goto cleanup;
 
-	if (!XDL_CALLOC_ARRAY(index.next_ptrs, index.line_map_size))
+	if (!XDL_CALLOC_ARRAY(index->next_ptrs, index->line_map_size))
 		goto cleanup;
 
 	/* lines / 4 + 1 comes from xprepare.c:xdl_prepare_ctx() */
-	if (xdl_cha_init(&index.rcha, sizeof(struct record), count1 / 4 + 1) < 0)
+	if (xdl_cha_init(&index->rcha, sizeof(struct record), count1 / 4 + 1) < 0)
 		goto cleanup;
 
-	index.ptr_shift = line1;
-	index.max_chain_length = 64;
+	index->ptr_shift = line1;
+	index->max_chain_length = 64;
 
-	if (scanA(&index, line1, count1))
+	if (scanA(index, line1, count1))
 		goto cleanup;
 
-	if (scanB(&index, line2, count2))
+	if (scanB(index, line2, count2))
 		goto cleanup;
 
-	index.cnt = index.max_chain_length + 1;
+	index->cnt = index->max_chain_length + 1;
 
 	for (b_ptr = line2; b_ptr <= LINE_END(2); )
-		b_ptr = try_lcs(&index, lcs, &best, b_ptr,
-				&last_ae, &last_be,
+		b_ptr = try_lcs(index, lcs, &best, b_ptr,
 				line1, count1, line2, count2);
 
-	if (index.has_common && index.max_chain_length < index.cnt)
+	if (index->has_common && index->max_chain_length < index->cnt)
 		ret = 1;
 	else
 		ret = 0;
 
 cleanup:
-	free_index(&index);
 	return ret;
 }
 
 static int histogram_diff(xpparam_t const *xpp, xdfenv_t *env,
 	int line1, int count1, int line2, int count2)
 {
+	struct histindex index;
 	struct region lcs;
 	int lcs_found;
-	int result;
-redo:
-	result = -1;
+	int result = -1;
 
 	if (count1 <= 0 && count2 <= 0)
 		return 0;
@@ -391,38 +395,53 @@ redo:
 	}
 
 	memset(&lcs, 0, sizeof(lcs));
-	lcs_found = find_lcs(xpp, env, &lcs, line1, count1, line2, count2);
+	lcs_found = find_lcs(xpp, env, &index, &lcs, line1, count1, line2, count2);
 	if (lcs_found < 0)
 		goto out;
 	else if (lcs_found)
 		result = fall_back_to_classic_diff(xpp, env, line1, count1, line2, count2);
 	else {
-		if (lcs.begin1 == 0 && lcs.begin2 == 0) {
+		if (lcs.num == 0) {
 			while (count1--)
 				env->xdf1.rchg[line1++ - 1] = 1;
 			while (count2--)
 				env->xdf2.rchg[line2++ - 1] = 1;
 			result = 0;
 		} else {
+			int num = lcs.num;
+			for (int i = 0; ; i++) {
+				int b_ptr;
+				struct region best = { .rc = UINT_MAX,
+						       .last_ae = UINT_MAX,
+						       .last_be = UINT_MAX };
+				result = histogram_diff(xpp, env,
+							line1, lcs.begin1 - line1,
+							line2, lcs.begin2 - line2);
+				if (result)
+					goto out;
+
+				/* Advance line1 & line2 after lcs */
+				count1 = LINE_END(1) - lcs.end1;
+				line1 = lcs.end1 + 1;
+				count2 = LINE_END(2) - lcs.end2;
+				line2 = lcs.end2 + 1;
+				if (i == num - 1)
+					break;
+
+				/* Find the next lcs */
+				b_ptr = lcs.end2 + 1;
+				memset(&lcs, 0, sizeof(lcs));
+				while (!lcs.begin1) {
+					b_ptr = try_lcs(&index, &lcs, &best, b_ptr,
+							line1, count1, line2, count2);
+				}
+			}
 			result = histogram_diff(xpp, env,
-						line1, lcs.begin1 - line1,
-						line2, lcs.begin2 - line2);
-			if (result)
-				goto out;
-			/*
-			 * result = histogram_diff(xpp, env,
-			 *            lcs.end1 + 1, LINE_END(1) - lcs.end1,
-			 *            lcs.end2 + 1, LINE_END(2) - lcs.end2);
-			 * but let's optimize tail recursion ourself:
-			*/
-			count1 = LINE_END(1) - lcs.end1;
-			line1 = lcs.end1 + 1;
-			count2 = LINE_END(2) - lcs.end2;
-			line2 = lcs.end2 + 1;
-			goto redo;
+						line1, count1, line2, count2);
 		}
 	}
 out:
+	free_index(&index);
 	return result;
 }
 
