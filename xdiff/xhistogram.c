@@ -51,11 +51,13 @@
 
 struct histindex {
 	struct record {
+		/* ptr means line number, not pointer; crazy xdiff */
+		/* cnt does mean "count" as in "frequency count" */
 		unsigned int ptr, cnt;
 		struct record *next;
 	} **records, /* an occurrence */
 	  **line_map; /* map of line to record chain */
-	chastore_t rcha;
+	chastore_t rcha; /* repeat count histogram arena, i.e. memory pool */
 	unsigned int *next_ptrs;
 	unsigned int table_bits,
 		     records_size,
@@ -158,6 +160,8 @@ static int try_lcs(struct histindex *index, struct region *lcs, int b_ptr,
 {
 	unsigned int b_next = b_ptr + 1;
 	struct record *rec = index->records[TABLE_HASH(index, 2, b_ptr)];
+	/* as, ae, bs, be: file a start, file a end, file b start, file b end */
+	/* rc -- repeat count, as in frequency count */
 	unsigned int as, ae, bs, be, np, rc;
 	int should_break;
 
