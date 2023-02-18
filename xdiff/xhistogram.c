@@ -363,9 +363,6 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 			       .last_ae = UINT_MAX,
 			       .last_be = UINT_MAX };
 
-	if (initialize_index(index, xpp, env, line1, count1, line2, count2))
-		return ret;
-
 	for (b_ptr = line2; b_ptr <= LINE_END(2); )
 		b_ptr = try_lcs(index, lcs, &best, b_ptr,
 				line1, count1, line2, count2);
@@ -378,10 +375,11 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	return ret;
 }
 
-static int histogram_diff(xpparam_t const *xpp, xdfenv_t *env,
-	int line1, int count1, int line2, int count2)
+static int histogram_diff(struct histindex *index,
+			  xpparam_t const *xpp, xdfenv_t *env,
+			  int line1, int count1, int line2, int count2)
 {
-	struct histindex index;
+	struct histindex backup;
 	struct region lcs;
 	int lcs_found;
 	int result = -1;
@@ -402,8 +400,14 @@ static int histogram_diff(xpparam_t const *xpp, xdfenv_t *env,
 		return 0;
 	}
 
+	if (!index) {
+		index = &backup;
+		if (initialize_index(index, xpp, env, line1, count1, line2, count2))
+			goto out;
+	}
+
 	memset(&lcs, 0, sizeof(lcs));
-	lcs_found = find_lcs(xpp, env, &index, &lcs, line1, count1, line2, count2);
+	lcs_found = find_lcs(xpp, env, index, &lcs, line1, count1, line2, count2);
 	if (lcs_found < 0)
 		goto out;
 	else if (lcs_found)
@@ -422,7 +426,7 @@ static int histogram_diff(xpparam_t const *xpp, xdfenv_t *env,
 				struct region best = { .rc = UINT_MAX,
 						       .last_ae = UINT_MAX,
 						       .last_be = UINT_MAX };
-				result = histogram_diff(xpp, env,
+				result = histogram_diff(NULL, xpp, env,
 							line1, lcs.begin1 - line1,
 							line2, lcs.begin2 - line2);
 				if (result)
@@ -440,22 +444,23 @@ static int histogram_diff(xpparam_t const *xpp, xdfenv_t *env,
 				b_ptr = lcs.end2 + 1;
 				memset(&lcs, 0, sizeof(lcs));
 				while (!lcs.begin1) {
-					b_ptr = try_lcs(&index, &lcs, &best, b_ptr,
+					b_ptr = try_lcs(index, &lcs, &best, b_ptr,
 							line1, count1, line2, count2);
 				}
 			}
-			result = histogram_diff(xpp, env,
+			result = histogram_diff(NULL, xpp, env,
 						line1, count1, line2, count2);
 		}
 	}
 out:
-	free_index(&index);
+	if (index == &backup)
+		free_index(&backup);
 	return result;
 }
 
 int xdl_do_histogram_diff(xpparam_t const *xpp, xdfenv_t *env)
 {
-	return histogram_diff(xpp, env,
+	return histogram_diff(NULL, xpp, env,
 		env->xdf1.dstart + 1, env->xdf1.dend - env->xdf1.dstart + 1,
 		env->xdf2.dstart + 1, env->xdf2.dend - env->xdf2.dstart + 1);
 }
