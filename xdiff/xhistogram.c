@@ -309,17 +309,10 @@ static inline void free_index(struct histindex *index)
 	xdl_cha_free(&index->rcha);
 }
 
-static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
-		    struct histindex *index, struct region *lcs,
-		    int line1, int count1, int line2, int count2)
+static int initialize_index(struct histindex *index,
+			    xpparam_t const *xpp, xdfenv_t *env,
+			    int line1, int count1, int line2, int count2)
 {
-	int b_ptr;
-	int ret = -1;
-	struct region best = { .weight = UINT_MAX,
-			       .rc = UINT_MAX,
-			       .last_ae = UINT_MAX,
-			       .last_be = UINT_MAX };
-
 	memset(index, 0, sizeof(*index));
 
 	index->env = env;
@@ -333,29 +326,45 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	index->table_bits = xdl_hashbits(count1);
 	index->records_size = 1 << index->table_bits;
 	if (!XDL_CALLOC_ARRAY(index->records, index->records_size))
-		goto cleanup;
+		return -1;
 
 	index->line_map_size = count1;
 	if (!XDL_CALLOC_ARRAY(index->line_map, index->line_map_size))
-		goto cleanup;
+		return -1;
 
 	if (!XDL_CALLOC_ARRAY(index->next_ptrs, index->line_map_size))
-		goto cleanup;
+		return -1;
 
 	/* lines / 4 + 1 comes from xprepare.c:xdl_prepare_ctx() */
 	if (xdl_cha_init(&index->rcha, sizeof(struct record), count1 / 4 + 1) < 0)
-		goto cleanup;
+		return -1;
 
 	index->ptr_shift = line1;
 	index->max_chain_length = 64;
 
 	if (scanA(index, line1, count1))
-		goto cleanup;
+		return -1;
 
 	if (scanB(index, line2, count2))
-		goto cleanup;
+		return -1;
 
 	index->cnt = index->max_chain_length + 1;
+	return 0;
+}
+
+static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
+		    struct histindex *index, struct region *lcs,
+		    int line1, int count1, int line2, int count2)
+{
+	int b_ptr;
+	int ret = -1;
+	struct region best = { .weight = UINT_MAX,
+			       .rc = UINT_MAX,
+			       .last_ae = UINT_MAX,
+			       .last_be = UINT_MAX };
+
+	if (initialize_index(index, xpp, env, line1, count1, line2, count2))
+		return ret;
 
 	for (b_ptr = line2; b_ptr <= LINE_END(2); )
 		b_ptr = try_lcs(index, lcs, &best, b_ptr,
@@ -366,7 +375,6 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 	else
 		ret = 0;
 
-cleanup:
 	return ret;
 }
 
