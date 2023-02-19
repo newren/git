@@ -78,8 +78,9 @@ struct region {
 	unsigned int begin1, end1;
 	unsigned int begin2, end2;
 	unsigned int weight, num;
-	unsigned int rc;
-	unsigned int last_ae, last_be;
+	unsigned int last_ae, last_be; /* last region's end lines for files a & b */
+	unsigned int rc; /* repeat count */
+	unsigned char before_unique, after_unique; /* boolean values */
 };
 
 #define LINE_MAP(i, a) (i->line_map[(a) - i->ptr_shift])
@@ -206,6 +207,8 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 		as = rec->ptr;
 		if (!CMP(index, 1, as, 2, b_ptr))
 			continue;
+		if (as < line1 || as > LINE_END(1))
+			continue;
 
 		index->has_common = 1;
 		for (;;) {
@@ -251,8 +254,13 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 				 */
 				if (lcs->weight < best->weight ||
 				    best->rc < index->cnt) {
+					if (lcs->rc == 2)
+						best->before_unique = 1;
 					memcpy(lcs, best, sizeof(*best));
+					lcs->after_unique = 0;
 					index->cnt = best->rc;
+				} else if (best->rc == 2) {
+					lcs->after_unique = 1;
 				}
 				best->weight = ae - as + 1;
 				best->num = 1;
@@ -280,10 +288,15 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 				break;
 
 			as = np;
+			if (as > LINE_END(1))
+				break;
 		}
 	}
 	if (lcs->weight < best->weight) {
+		if (lcs->rc == 2)
+			best->before_unique = 1;
 		memcpy(lcs, best, sizeof(*best));
+		lcs->after_unique = 0;
 		index->cnt = best->rc;
 	}
 	return b_next;
@@ -421,14 +434,18 @@ static int histogram_diff(struct histindex *index,
 			result = 0;
 		} else {
 			int num = lcs.num;
+			struct histindex *early_index, *late_index;
+			early_index = lcs.before_unique ? index : NULL;
+			late_index = lcs.after_unique ? index : NULL;
 			for (int i = 0; ; i++) {
 				int b_ptr;
 				struct region best = { .rc = UINT_MAX,
 						       .last_ae = UINT_MAX,
 						       .last_be = UINT_MAX };
-				result = histogram_diff(NULL, xpp, env,
+				result = histogram_diff(early_index, xpp, env,
 							line1, lcs.begin1 - line1,
 							line2, lcs.begin2 - line2);
+				early_index = NULL;
 				if (result)
 					goto out;
 
@@ -448,7 +465,7 @@ static int histogram_diff(struct histindex *index,
 							line1, count1, line2, count2);
 				}
 			}
-			result = histogram_diff(NULL, xpp, env,
+			result = histogram_diff(late_index, xpp, env,
 						line1, count1, line2, count2);
 		}
 	}
