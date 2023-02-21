@@ -439,7 +439,7 @@ static int histogram_diff(struct histindex *index,
 			late_index = lcs.after_unique ? index : NULL;
 			for (int i = 0; ; i++) {
 				int b_ptr;
-				struct region best = { .rc = UINT_MAX,
+				struct region best = { .rc = lcs.rc,
 						       .last_ae = UINT_MAX,
 						       .last_be = UINT_MAX };
 				result = histogram_diff(early_index, xpp, env,
