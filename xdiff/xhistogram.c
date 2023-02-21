@@ -186,6 +186,22 @@ static int scanB(struct histindex *index, int line2, int count2)
 	return 0;
 }
 
+static int follow_next_ptrs(struct histindex *index, int cur, int line1)
+{
+	/*
+	 * initialize_index sets index->ptr_shift to line1, and then the value
+	 * is never touched again.  However, histogram_diff() definitely tweaks
+	 * line1 and count1.  We need the _original_ value of line1 when the
+	 * index was setup in order to safely access NEXT_PTR, thus the reason
+	 * we compare to index->ptr_shift.
+	 */
+	if (cur < index->ptr_shift)
+		return 0;
+	while (cur < line1 && cur)
+		cur = NEXT_PTR(index, cur);
+	return cur;
+}
+
 static int try_lcs(struct histindex *index, struct region *lcs,
 		   struct region *best, int b_ptr,
 		   int line1, int count1, int line2, int count2)
@@ -205,7 +221,9 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 		}
 
 		as = rec->ptr;
-		if (as < line1 || as > LINE_END(1))
+		if (as < line1)
+			as = follow_next_ptrs(index, as, line1);
+		if (!as || as > LINE_END(1))
 			continue;
 		if (!CMP(index, 1, as, 2, b_ptr))
 			continue;
