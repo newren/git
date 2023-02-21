@@ -205,9 +205,9 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 		}
 
 		as = rec->ptr;
-		if (!CMP(index, 1, as, 2, b_ptr))
-			continue;
 		if (as < line1 || as > LINE_END(1))
+			continue;
+		if (!CMP(index, 1, as, 2, b_ptr))
 			continue;
 
 		index->has_common = 1;
