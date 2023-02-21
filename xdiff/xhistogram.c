@@ -449,11 +449,22 @@ static int histogram_diff(struct histindex *index,
 				if (result)
 					goto out;
 
+				/* Sanity checks */
+				assert(lcs.end1 + 1 <= LINE_END(1) ||
+				       lcs.end1 == LINE_END(1));
+				assert(lcs.end2 + 1 <= LINE_END(2) ||
+				       lcs.end2 == LINE_END(2));
+
 				/* Advance line1 & line2 after lcs */
 				count1 = LINE_END(1) - lcs.end1;
 				line1 = lcs.end1 + 1;
 				count2 = LINE_END(2) - lcs.end2;
 				line2 = lcs.end2 + 1;
+
+				/* Sanity checks */
+				assert(count1 >= 0);
+				assert(count2 >= 0);
+
 				if (i == num - 1)
 					break;
 
@@ -461,6 +472,7 @@ static int histogram_diff(struct histindex *index,
 				b_ptr = lcs.end2 + 1;
 				memset(&lcs, 0, sizeof(lcs));
 				while (!lcs.begin1) {
+					assert(b_ptr <= LINE_END(2));
 					b_ptr = try_lcs(index, &lcs, &best, b_ptr,
 							line1, count1, line2, count2);
 				}
