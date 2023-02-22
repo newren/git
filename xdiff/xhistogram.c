@@ -81,7 +81,6 @@ struct region {
 	unsigned int last_ae, last_be; /* last region's end lines for files a & b */
 	unsigned int rc; /* repeat count */
 	unsigned char before_unique, after_unique; /* boolean values */
-	unsigned char prev_cnt; /* former value of index->cnt */
 };
 
 #define LINE_MAP(i, a) (i->line_map[(a) - i->ptr_shift])
@@ -145,8 +144,7 @@ static int scanA(struct histindex *index, int line1, int count1)
 		 * This is the first time we have ever seen this particular
 		 * element in the sequence. Construct a new chain for it.
 		 */
-		if (!(rec = xcalloc(1, sizeof(*rec))))
-		//if (!(rec = xdl_cha_alloc(&index->rcha)))
+		if (!(rec = xdl_cha_alloc(&index->rcha)))
 			return -1;
 		rec->ptr = ptr;
 		rec->cnt = 1;
@@ -206,8 +204,7 @@ static int follow_next_ptrs(struct histindex *index, int cur, int line1)
 
 static int try_lcs(struct histindex *index, struct region *lcs,
 		   struct region *best, int b_ptr,
-		   int line1, int count1, int line2, int count2,
-		   int depth)
+		   int line1, int count1, int line2, int count2)
 {
 	unsigned int b_next = b_ptr + 1;
 	struct record *rec = index->records[TABLE_HASH(index, 2, b_ptr)];
@@ -216,15 +213,7 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 	unsigned int as, ae, bs, be, np, rc;
 	int should_break;
 
-	if (b_ptr==1631) {
-		printf("  **** IN func, b_ptr=%d, rec=%p\n",
-		       b_ptr, (void*)rec);
-	}
 	for (; rec; rec = rec->next) {
-		if (b_ptr==1631) {
-			printf("  **** IN func, b_ptr=%d, rec->cnt=%d, index->cnt=%d\n",
-			       b_ptr, rec->cnt, index->cnt);
-		}
 		if (rec->cnt > index->cnt) {
 			if (!index->has_common)
 				index->has_common = CMP(index, 1, rec->ptr, 2, b_ptr);
@@ -232,10 +221,6 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 		}
 
 		as = rec->ptr;
-		if (b_ptr==1631) {
-			printf("  ==> D:%d, b_ptr=%d, as=%d, (%3d,%3d)x(%3d,%3d)\n",
-			       depth, b_ptr, as, line1, LINE_END(1), line2, LINE_END(2));
-			}
 		if (as < line1)
 			as = follow_next_ptrs(index, as, line1);
 		if (!as || as > LINE_END(1))
@@ -267,10 +252,6 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 					rc = XDL_MIN(rc, CNT(index, ae));
 			}
 
-			if (b_ptr==1631) {
-				printf("  --> D:%d, (%3d,%3d)x(%3d,%3d), rc:%u, best->rc:%u\n",
-				       depth, as, ae, bs, be, rc, best->rc);
-			}
 			if (b_next <= be)
 				b_next = be + 1;
 			if (rc > best->rc) {
@@ -284,17 +265,11 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 				best->num += 1;
 				best->last_ae = ae;
 				best->last_be = be;
-				printf("  D:%d, Incrementing num to %2d; found (%3d,%3d) x (%3d,%3d) with rc=%d\n",
-				       depth, best->num,
-				       as, ae, bs, be, rc);
 			} else {
 				/*
 				 * Start a new region, but maybe first save
 				 * old one if it's the best so far.
 				 */
-				printf("  D:%d, Resetting num to     1; found (%3d,%3d) x (%3d,%3d) with rc=%d\n",
-				       depth, as, ae, bs, be, rc);
-				best->prev_cnt = XDL_MIN(255,index->cnt);
 				if (lcs->weight < best->weight ||
 				    best->rc < index->cnt) {
 					if (lcs->rc == 2)
@@ -340,11 +315,7 @@ static int try_lcs(struct histindex *index, struct region *lcs,
 			best->before_unique = 1;
 		memcpy(lcs, best, sizeof(*best));
 		lcs->after_unique = 0;
-		best->prev_cnt = XDL_MIN(255,index->cnt);
 		index->cnt = best->rc;
-	}
-	if (b_ptr == 1631) {
-		printf("  *** RETURNING FROM %d\n", b_ptr);
 	}
 	return b_next;
 }
@@ -414,7 +385,7 @@ static int initialize_index(struct histindex *index,
 
 static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 		    struct histindex *index, struct region *lcs,
-		    int line1, int count1, int line2, int count2, int depth)
+		    int line1, int count1, int line2, int count2)
 {
 	int b_ptr;
 	int ret = -1;
@@ -425,7 +396,7 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 
 	for (b_ptr = line2; b_ptr <= LINE_END(2); )
 		b_ptr = try_lcs(index, lcs, &best, b_ptr,
-				line1, count1, line2, count2, depth);
+				line1, count1, line2, count2);
 
 	if (index->has_common && index->max_chain_length < index->cnt)
 		ret = 1;
@@ -437,7 +408,7 @@ static int find_lcs(xpparam_t const *xpp, xdfenv_t *env,
 
 static int histogram_diff(struct histindex *index,
 			  xpparam_t const *xpp, xdfenv_t *env,
-			  int line1, int count1, int line2, int count2, int depth)
+			  int line1, int count1, int line2, int count2)
 {
 	struct histindex backup;
 	struct region lcs;
@@ -467,7 +438,7 @@ static int histogram_diff(struct histindex *index,
 	}
 
 	memset(&lcs, 0, sizeof(lcs));
-	lcs_found = find_lcs(xpp, env, index, &lcs, line1, count1, line2, count2, depth);
+	lcs_found = find_lcs(xpp, env, index, &lcs, line1, count1, line2, count2);
 	if (lcs_found < 0)
 		goto out;
 	else if (lcs_found)
@@ -484,23 +455,14 @@ static int histogram_diff(struct histindex *index,
 			struct histindex *early_index, *late_index;
 			early_index = lcs.before_unique ? index : NULL;
 			late_index = lcs.after_unique ? index : NULL;
-			printf("D:%d num = %d\n", depth, num);
 			for (int i = 0; ; i++) {
 				int b_ptr;
-				unsigned int old_rc = lcs.rc;
-				//unsigned int old_cnt = lcs.prev_cnt;
 				struct region best = { .rc = lcs.rc,
 						       .last_ae = UINT_MAX,
 						       .last_be = UINT_MAX };
-				printf("  D:%d; Processing before: (%3d,%3d) x (%3d,%3d)\n",
-				       depth,
-				       line1, lcs.begin1 - line1,
-				       line2, lcs.begin2 - line2);
-
 				result = histogram_diff(early_index, xpp, env,
 							line1, lcs.begin1 - line1,
-							line2, lcs.begin2 - line2,
-							depth + 1);
+							line2, lcs.begin2 - line2);
 				early_index = NULL;
 				if (result)
 					goto out;
@@ -512,9 +474,6 @@ static int histogram_diff(struct histindex *index,
 				       lcs.end2 == LINE_END(2));
 
 				/* Advance line1 & line2 after lcs */
-				printf("D:%d; for i=%d, lcs=(%3d,%3d) x (%3d,%3d)\n",
-				       depth, i,
-				       lcs.begin1, lcs.end1, lcs.begin2, lcs.end2);
 				count1 = LINE_END(1) - lcs.end1;
 				line1 = lcs.end1 + 1;
 				count2 = LINE_END(2) - lcs.end2;
@@ -529,25 +488,15 @@ static int histogram_diff(struct histindex *index,
 
 				/* Find the next lcs */
 				b_ptr = lcs.end2 + 1;
-				//index->cnt = old_cnt;
 				memset(&lcs, 0, sizeof(lcs));
-				while (!lcs.begin1 && lcs.rc != old_rc) {
-					/*
-					if (b_ptr > LINE_END(2))  // DEBUG
-						goto out;         // DEBUG
-					*/
-					printf("  D:%d, checking b_ptr=%d with best.rc=%u\n",
-					       depth, b_ptr, best.rc);
+				while (!lcs.begin1) {
 					assert(b_ptr <= LINE_END(2));
 					b_ptr = try_lcs(index, &lcs, &best, b_ptr,
-							line1, count1, line2, count2, depth);
+							line1, count1, line2, count2);
 				}
 			}
-			printf("  D:%d; Processing after: (%3d,%3d) x (%3d,%3d)\n",
-			       depth, line1, count1, line2, count2);
 			result = histogram_diff(late_index, xpp, env,
-						line1, count1, line2, count2,
-						depth+1);
+						line1, count1, line2, count2);
 		}
 	}
 out:
@@ -560,5 +509,5 @@ int xdl_do_histogram_diff(xpparam_t const *xpp, xdfenv_t *env)
 {
 	return histogram_diff(NULL, xpp, env,
 		env->xdf1.dstart + 1, env->xdf1.dend - env->xdf1.dstart + 1,
-		env->xdf2.dstart + 1, env->xdf2.dend - env->xdf2.dstart + 1, 1);
+		env->xdf2.dstart + 1, env->xdf2.dend - env->xdf2.dstart + 1);
 }
