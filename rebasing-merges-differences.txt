@@ -1,0 +1,686 @@
+= Document purpose =
+
+I decided to look at how the various "rebasing merges" proposals worked in
+6 *simple* cases.  From these, you can interpolate how they'd behave in
+more complicated cases (and I do a little foreshadowing).  A summary is at
+the end.
+
+*However*, this is only scratching the surface:
+
+  * I only look at textual merges; I'm ignoring directory/file conflicts,
+    binary files, renames, modify/delete conflicts, other mode conflicts,
+    etc.
+
+  * I ignore diff3, non-unique merge bases, and other possibilities for
+    nested conflict markers from a single merge, let alone the
+    possibilities that come from having a sequence of merges as the methods
+    presented here do.  Thus I also ignore methods I've created for better
+    handling such cases when rebasing merges.
+
+  * Even among textual merges, I ignore more interesting testcases such as
+    the one Johannes provided[0] (though the links cover that one in more
+    detail).
+
+I figure it's still useful, because we've had a lot of discussion on the
+list, but most of the time those discussion only consider the two simplest
+cases, which gives a warped picture.
+
+[0] See https://lore.kernel.org/git/nycvar.QRO.7.76.6.1804130002090.65@ZVAVAG-6OXH6DA.rhebcr.pbec.zvpebfbsg.pbz/
+    and the end of
+    https://lore.kernel.org/git/CABPp-BHWVO5VRhr1-Ou60F1wjKzJZ1e_dC01Mmzs+qB9kGayww@mail.gmail.com/
+
+
+== Problem statement ==
+
+Helpful picture:
+
+      Before:
+          ---X1--X2-...-Xk (master)
+             |\
+             | A1---A2-...-Am
+             |              \
+             |               M (topic)
+             |              /
+             \-B1---B2-...-Bn
+
+      After:
+          ---X1--X2-...-Xk (master)
+                        |\
+                        | A1'---A2'-...-Am'
+                        |                \
+                        |                 M' (topic)
+                        |                /
+                        \-B1'---B2'-...-Bn'
+
+We want to rebase not only regular commits, but also merges.  This means
+that not only do we want to keep relative topology looking similar, but
+also that we want to port any syntactic or semantic conflict fixes recorded
+in the old merges to the new merges.
+
+=== Alternative framing ===
+
+When the user created M in the picture above, via something like:
+  (1) git checkout A3
+  (2) git merge B3
+  (3) [edit to resolve conflicts -- both syntactic and semantic]
+  (4) git merge --continue
+
+The manual edits made by the user in step 3 are of particular interest.
+Let's give those a name, E, so we can refer to them.  We want those changes
+reapplied when we rebase merges.
+
+
+== Proposed strategies for creating M' after rebasing everything else ==
+
+(Note, I am using the fact that
+  $ git checkout D
+  $ git merge-recursive C -- D E
+is essentially equivalent, for textual changes (modulo issues mentioned in
+git-rebase(1) under "Behavioral differences->context"), to
+  $ git checkout D
+  $ git diff C E | git apply
+It is also essentially equivalent to
+  $ git checkout E
+  $ git diff C D | git apply
+diff|apply is understood by more people and sometimes easier to reason about,
+thus the reason for my explaining methods below in terms of it.)
+
+
+=== Method #1 (Current rebase-merges) ===
+  Step 1: $ git checkout Am'
+  Step 2: $ git merge Bn'
+
+=== Method #2 (Sergey[1]) ===
+  Step 1: $ git checkout Am'
+  Step 2: $ git diff Am M | git apply
+  Step 3: <Record as U1'>
+  Step 4: $ git checkout Bn'
+  Step 5: $ git diff Bn M | git apply
+  Step 6: Record tree as U2'
+  Step 7: $ git diff M U1' | git apply
+  Step 8: <Record M' with resulting tree but parents of both Am' and Bn'>
+
+=== Method #3 (Buga[2]) ===
+  Step 1. Create new commit U1 with M's tree but Am as a parent
+  Step 2. Create new commit U2 with M's tree but Bn as a parent
+  Step 3. When rebasing A1..Am and B1..Bn also rebase U1 and U2 (to U1' and U2')
+  Step 4. git checkout U1; git diff M U2' | git apply
+  Step 5. Record resulting tree but with Am' and Bn' as parents
+
+=== Method #4 (Phillip's modification of Sergey/Buga methods[3]) ===
+  Step 1: If Am != Am' && Bm != Bm', switch to method 1
+  Step 2: If Am != Am':
+             Step 2a: git checkout Am'
+             Step 2b: git diff Am M | git apply
+  Step 3: Same as 2, but replace Am with Bm and Am' with Bm'.
+  Step 4: If the merges in Steps 2 or 3 have _any_ conflicts, discard them
+          and use method 1 instead
+  Step 5: Record the resulting tree in commit M' with parents of Am' and Bm'
+
+=== Method #5 (Oversimplified version of my proposal) ===
+  Step 1: $ git checkout Am'
+  Step 2: $ git merge Bn'
+  (Ignore conflicts, just go to step 3)
+  Step 3: $ git show --remerge-diff M | git apply
+  Step 4: <Use results from step 3 to amend merge in Step 2>
+
+[1] https://public-inbox.org/git/87bmfagk2u.fsf@javad.com/
+[2] https://public-inbox.org/git/a0cc88d2-bfed-ce7b-1b3f-3c447d2b32da@gmail.com/
+    Buga actually got the arguments to merge-recursive wrong in what I
+    translated to step 4, but he mentioned he was unsure about getting those
+    arguments correct, and his wording of the problem clearly matches what
+    I put down for step 4.  The mistake he made would have broken many more
+    (perhaps even all) cases, so I corrected the step to match his worded
+    description.
+[3] https://github.com/phillipwood/git/commit/3ce15419d2fc2ef5258a5d76d1e65f9015d76bf2
+
+
+== High level analysis ==
+
+Key sentence:
+    We want to keep relative topology looking similar, and also try to port
+    any manual user edits recorded in old merges to the new merges.
+
+All four methods keep relative topology looking similar.
+
+Method 1 only attempts to preserve relative topology.  It makes no attempt
+to preserve manual user edits stored in merge commits when rebasing them.
+
+Methods 2 and 3 make no attempt to compute the manual user edits in order
+to port them.  It instead computes things which include the manual user
+edits as a very small subset.  As such, applying/merging these much bigger
+things feels like it is likely to risk unnecessary conflicts, and with
+every unnecessary conflict we increase the risk for ugly nested conflicts
+and perhaps other problems as well.
+
+Method 4 is like Methods 2 and 3, but is more likely to just drop back to
+Method 1; it is only used when only one of Am or Bm are being rebased, and
+also only is used if the provisional extra merge has no conflicts.
+
+Method 5 is the only method that attempts to compute the manual user edits
+directly.  It computes exactly that set of changes, then applies it on top
+of the new merge.  It exactly matches the problem statement, and thus
+should have the fewest problems.
+
+
+== Behavior in various concrete cases ==
+
+
+=== Case #1 ===
+
+(Utterly trivial) All changes in A1..Am, B1..Bn, and X1..Xk are
+orthogonal (they all modify disparate areas of text files), and E is
+empty.
+
+Behavior:
+Method 1: All rebasing and the final merge proceed without conflicts.  M'
+          is a merge commit with all changes reflected.
+Method 2: <same as Method 1>
+Method 3: <same as Method 1>
+Method 4: <same as Method 1>
+Method 5: <same as Method 1>
+
+=== Case #2 ===
+
+All changes in A1..Am, B1..Bn, X1..Xk, and E are orthogonal (similar to
+case #1 so far).  E is not empty.
+
+Behavior:
+Method 1: Merge without conflict, but silently drops changes in E.
+Method 2: Merge all changes without conflict.
+Method 3: <same as Method 2>
+Method 4: <same as Method 2>
+Method 5: <same as Method 2>
+
+(This case showcases a severe drawback of using Method 1)
+
+
+=== Case #3 ===
+
+All changes in A1..Am, B1..Bn, and E are orthogonal, but something in X1..Xk
+conflicts with a commit in A1..Am.  Let's say the conflicting commit is Aj.
+
+In this case, let's say the contents of some line in the various commits
+was:
+   X1: a line
+   Aj: a fancy line
+   Xk: this is a line
+and we want the result to be:
+       this is a fancy line
+
+Behavior:
+
+Method 1: When rebasing Aj, the following conflict has to be resolved by
+the user:
+   <<<< Xk
+   this is a line
+   ====
+   a fancy line
+   >>>> Aj
+
+   Then we'll just merge Am' and Bn' (which will drop E).
+
+Method 2: Same as Method 1 for rebasing Aj.  However, when it comes time to
+perform Step 7 of creating M', the user will AGAIN have to resolve the
+following conflict:
+   <<<< U2' (???)
+   a fancy line
+   ====
+   this is a fancy line
+   >>>> U1' (???)
+
+Method 3: Same as Method 1 for rebasing Aj.  Much like Method 2, the user will
+be given a second conflict to resolve as part of step 3 when rebasing U2:
+   <<<< Am'
+   this is a fancy line
+   ====
+   a fancy line
+   >>>> U2
+
+Method 4: It depends...
+
+          If A1..Am & B1..Bn are being rebased, then this method just falls
+          back to Method 1.  (Dropping E.)
+
+          If A1..Am are being rebased, then we have to resolve the same
+          conflict as all other methods when rebasing Aj.  However, when it
+          comes time for the merge, the
+              git diff Am M | git apply
+          is all about the changes in B1..Bn + E, which won't conflict with
+          what we have, so they'll apply cleanly...and E won't be dropped.
+
+          If B1..Bn are being rebased, and A1..Am are not, then
+              git diff Bn M | git apply
+          is all about the changes in A1..Am + E, and Aj in particular is
+          going to conflict with the X1..Xk changes in Bn', so we'll have a
+          conflict.  When we detect the conflict, this method will bail and
+          use Method 1 instead...thus dropping E.
+
+Method 5: Same as Method 1 if E is empty; if E is not empty, this method
+          correctly ports those changes too.
+
+Notes:
+
+If there had been two such conflicts for methods 1 & 5, then methods 2 & 3
+would have forced the user to do four conflict resolutions.  In general,
+Methods 2 & 3 force the user to resolve _every_ conflict twice, without the
+benefit of the conflicts being identical (notice how the second conflict
+presents a slightly different set of things to compare, one of which
+happens to be the right final answer).  That means rerere cannot help with
+these doubled conflicts.  And it gets worse, because while the user usually
+resolves several conflicts, they tend to only resolve a few at a time with
+each commit being rebased.  When it comes time to rebase the merges, the
+union of conflicts from the previous steps (with some modifications to
+each) are presented to the user all at once.
+
+Method 4 here will often drop E, the same as Method 1, since it falls back
+to it.
+
+Method 5 gets the correct answer without spurious conflicts, for all
+problems falling under this case.
+
+(This showcases a drawback of using Method 2 or 3 that might force users to
+give up in frustration.)
+
+
+=== Case #4 ===
+
+The changes in X1..Xk (and E) are orthogonal to any other changes.
+There is a single conflict between A1..Am and B1..Bn.  Side A had a
+file containing
+   A is superior
+while side B has the same file containing
+   B is superior
+Because of this, when the user was creating M in the past, they had to resolve
+this conflict:
+   <<<< Am
+   A is superior
+   ====
+   B is superior
+   >>>> Bn
+The user resolved the conflict by creating the line
+   A and B are both great
+which is what appears in M.
+
+Since X1..Xk are orthogonal to any other changes, A1..Am and B1..Bn will
+rebase cleanly.  What happens for M'?
+
+Behavior:
+Method 1: User will have to re-resolve almost exactly the same conflict for
+          M' again:
+              <<<< Am'
+              A is superior
+              ====
+              B is superior
+              >>>> Bn'
+          The only difference is the conflict markers.  If this user is the
+          same one that resolved the conflicts for M before and has rerere
+          turned on, it will kick in and resolve the conflict for the user.
+          If rerere is not turned on, or some other user created M, then
+          this conflict will have to be resolved again.
+
+Method 2: At step 2, the user will have to resolve the following conflict:
+              <<<< Am'
+              A is superior
+              ====
+              A and B are both great
+              >>>> M
+          At step 5, the user will have to resolve the following conflict:
+              <<<< Bn'
+              B is superior
+              ====
+              A and B are both great
+              >>>> M
+
+          If the steps are separated with the user resolving conflicts at
+          each step before continuing (thus giving them up to three sets of
+          conflicts to resolve in order to pick a single merge commit), and
+          they happen to resolve both of the above steps identically
+          without mistake, then they will not have a third set of conflicts
+          to resolve.
+
+          However, if there is a decision to only give users a single set
+          of conflict resolution steps, meaning steps 2 and 5 auto-accept
+          conflict markers and just continues, then by step 5 the two
+          conflicts combine into two nested set of conflict markers, and
+          step 7 just gives us a third set of nested conflict markers.
+
+Method 3: At step 3, the user will have to resolve the following conflicts:
+              <<<< Am'
+              A is superior
+              ====
+              A and B are both great
+              >>>> U1
+          and
+              <<<< Bn'
+              B is superior
+              ====
+              A and B are both great
+              >>>> U2
+
+          Much like with Method 2, if the user resolves both of these conflicts
+          identically, they will not have a third set of conflicts to resolve.
+
+          (Unlike Method 2, there is no notion of just squashing the steps
+          together to get more heavily nested conflict markers.)
+
+Method 4: This method would also have a second conflict to deal with like
+          methods 2 & 3, but as soon as it sees the conflict, this method
+          bails and just falls back to Method 1.  So it'd end up dropping the
+          changes in E.
+
+Method 5: This method will try to apply the following diff
+              -<<<< A
+              -A is superior
+              -====
+              -B is superior
+              ->>>> B
+              +A and B are both great
+          to the following text
+              <<<< Am'
+              A is superior
+              ====
+              B is superior
+              >>>> Bm'
+          which _almost_ gives us the wanted text, but the conflict markers
+          have "A" vs "Am'" and "B" vs "Bm'" (technically, the conflict
+          markers would have the hashes of those commits, but this gives the
+          idea).  This is part of why I call Method 5 an oversimplified
+          version of my proposal.
+
+          If the differing conflict markers could be corrected for, then this
+          method would auto-resolve the conflict for the user, regardless of
+          whether they have rerere turned on and regardless of whether it was
+          a different user who had resolved the original conflict in M.
+
+If E is empty, then Method 1 is probably best here, though partially
+because Method 5 was oversimplified.  Method 4 acts just like Method 1
+because the case is too complex for its handling.  Methods 2 & 3 requires
+double the number of conflict resolution steps, maybe even triple if the
+user makes any mistake in either of the two separate conflict resolutions,
+and there's no clear way to tweak this method to improve it.  The only
+tweak really available to reduce the number of conflict resolution steps is
+in Method 2, and that tweak just results in giving us triply nested
+conflict markers.  Method 5 only gives one set of conflicts to resolve, but
+it's a conflict in conflict marker lines which is weird.
+
+
+=== Case #5 ===
+
+* A1..Am, B1..Bn, X1..Xk, and E are orthogonal.  Commit Aj is dropped
+  (or a commit is inserted before Am that reverts Aj).
+
+Behavior: (For all five, rebasing & final merge proceed without conflicts)
+
+Method 1: M' correctly omits the changes from Aj (but incorrectly omits the
+          changes from E, if any).
+
+Method 2: M' correctly omits the changes from Aj (and correctly retains
+          the changes from E, if any).
+
+  This is highly non-obvious, though; so walking through the steps:
+
+      Step 1: $ git checkout Am'
+      Step 2: $ git diff Am M | git apply
+
+        git diff Am M = All changes from B1..Bn squashed together + E.
+
+      Step 3: <Record as U1'>
+
+        (Using a notation where Z = X + Y means Z contains changes from both
+         X and Y:)
+         
+        U1' = (Am') + B1..Bn + E
+            = (X1..Xk + A1..A(j-1) + A(j+1)..Am) + B1..Bn + E
+
+      Step 4: $ git checkout Bn'
+      Step 5: $ git diff Bn M | git apply
+
+        git diff Bn M = All changes from A1..Am squashed together + E
+
+      Step 6: Record tree as U2'
+
+        U2' = (Bn') + A1..Am + E
+            = (X1..Xk + B1..Bn) + A1..Am + E
+
+      Step 7: $ git diff M U1' | git apply
+
+        M   = X1     + A1..Am                  + B1..Bn + E
+        U1' = X1..Xk + A1..A(j-1) + A(j+1)..Am + B1..Bn + E
+        git diff M U1 = X2..Xk + -Aj
+
+      Step 8: <Record M' with resulting tree but parents of both Am' and Bn'>
+
+        End result = (U2') + (git diff M U1')
+                   = (X1..Xk + B1..Bn + A1..Am + E) +
+                     (X2..Xk + -Aj)
+                   = X1..Xk + B1..Bn + A1..Am + -Aj + E
+
+        (We used the fact that A1..Am, B1..Bn, X1..Xk, E are all orthogonal,
+         so that e.g. X1..Xk + X2..Xk is just X1..Xk; the changes appear)
+
+Method 3: M' quite likely incorrectly _partially_ retains the changes from Aj
+          (and correctly retains the changes from E, if any).
+
+  Like Method 2, this is really hard to see, so let's walk through the steps:
+
+  Step 1. Create new commit U1 with M's tree but Am as a parent
+
+      U1 = B1..Bn + E, all squashed into a single commit
+
+  Step 2. Create new commit U2 with M's tree but Bn as a parent
+
+      U2 = A1..Am + E, squashed into a single commit
+
+  Step 3. When rebasing A1..Am and B1..Bn also rebase U1 and U2 (to U1' and U2')
+
+      Given a big squashed commit in U2, that contains all changes in
+      A1..Am, this method expects the user to notice all changes
+      corresponding to Aj and reverse them.  How exactly is the user
+      supposed to do that, especially in more complex rebases where you do
+      more than just drop a single commit?  This is *very* error prone and
+      is quite likely to result in part or all of Aj being restored.
+
+  Step 4. git checkout U1; git diff M U2' | git apply
+  Step 5. Record resulting tree but with Am' and Bn' as parents
+
+      These steps will cement the partial restoration of Aj made when
+      rebasing U2, and silently squash that into M'.
+
+Method 4: correctly drops Aj, and if only one of A1..Am or B1..Bn are rebased,
+          then correctly retains E.
+
+  Step 1: If Am != Am' && Bm != Bm', switch to method 1
+
+    If this step fires, we use method 1 instead.
+
+    So, the interesting case is when one of the parents doesn't change.
+    Since we're dropping Aj, we can only have a parent be unmodified if
+    Bm == Bm'.
+
+  Step 2: If Am != Am':
+             Step 2a: git checkout Am'
+             Step 2b: git diff Am M | git apply
+
+        git diff Am M = All changes from B1..Bn squashed together + E
+
+  Step 3: Same as 2, but replace Am with Bm and Am' with Bm'.
+
+        <Not applicable>
+
+  Step 4: If the merges in Steps 2 or 3 have _any_ conflicts, discard them
+          and use method 1 instead
+
+        No conflicts, so continue...
+
+  Step 5: Record the resulting tree in commit M' with parents of Am' and Bm'
+
+        Result = (Am') + (B1..Bn + E)
+            = (X1..Xk + A1..A(j-1) + A(j+1)..Am) + B1..Bn + E
+
+        This is what we want.
+
+Method 5: correctly drops Aj and correctly retains E.  Trivially understood
+          why it does the right thing too.
+
+Notes: Methods 2, 4 & 5 perform correctly for this case.  Method 1 does the
+       standard scary thing of losing the changes from E, if any.  Method 3
+       does a brand new very scary thing.  This is a severe drawback of
+       this method.
+
+
+=== Case #6 ===
+
+The changes in X1..Xk, A1..Am, and B1..Bn are mostly orthogonal, but
+one of the X's, one of the A's, and one of the B's make conflicting
+changes (let's say Xj, Aj, and Bj).  However, we drop Bj when rebasing.
+The changes in E are orthogonal to all these changes.
+
+Behavior:
+Method 1: User must resolve conflict between Xj and Aj when rebasing Aj.
+          (E is dropped, as always).
+
+Method 2: First part is same as method 1: User must resolve conflict
+          between Xj and Aj when rebasing Aj.
+
+          Then when making M': At step 2, the user will get a merge
+          conflict between Aj' and Bj (a useless one given that Bj is
+          dropped, but the user will be forced to resolve it and may be
+          unaware that one half of the conflicting changes are coming from
+          a dropped commit), with the resolution to be recorded as U1j.  At
+          step 5, the user will get a merge conflict between Bn' (which
+          contains Xj) and Aj, which will need to be resolved (this one is
+          a repeat of the conflict in rebasing Aj to Aj').  At step 7, we
+          will likely get a conflict between U1j and U2j, which the user
+          must resolve.
+
+          Or, if we don't pause the steps when creating M' until we've
+          gotten to the end, then we get nasty triply-nested conflict
+          markers for the user to resolve.
+
+Method 3: First part is same as method 1: User must resolve conflict
+          between Xj and Aj when rebasing Aj.
+
+          At step 3, when rebasing U1, the user will get a merge conflict
+          between Aj' and Bj (a useless one given that Bj is dropped, but
+          the user will be forced to resolve it and may be unaware that one
+          half of the conflicting changes are coming from a dropped
+          commit), with the resolution to be recorded as U1'.  Also, for
+          the rebasing of U2, the user will get a merge conflict between
+          Bn' (which contains Xj) and Aj, which will need to be resolved
+          (this one is a repeat of the conflict in rebasing Aj to Aj').  At
+          step 4, we likely have differences between U1' and U2'; if we do,
+          they are going to be in the same area and will conflict with M.
+
+Method 4: Either both branches A & B are being rebased and we fall back to
+          Method 1, or only branch B is being rebased (B has to be rebased
+          since we are dropping Bj).  In the latter case, the subsequent
+               git diff Bn M | git apply
+          is going to involve A1..Am, which will conflict with X1..Xk, and
+          thus this method will just fall back to Method 1 and drop E.
+
+Method 5: User must resolve conflict between Xj and Aj when rebasing Aj.
+          Bj is just dropped without incident.  E is retained, as always.
+
+Notes:
+
+Method 5 is perfect for this case.  Method 1 does sadly lose E, but behaves
+admirably otherwise.  Methods 2 & 3 show severe downsides here.  Method 4
+just falls back to Method 1.
+
+----------------------------------------------------------------------
+
+== Summary ==
+
+Method 1 (Current --rebase-merges behavior):
+  Pros: straightforward
+  Cons: drops manual user edits (E) that were added to previous merge commits
+
+  This is a BIG drawback.
+
+  However, it is fairly straightforward to workaround this shortcoming with
+  a quick hack: Do an interactive --rebase-merges and add a `break`
+  directive after every recreated merge.  At the break, run "git show
+  --remerge-diff $OLD_COMMIT_ID | git apply" to get E included.
+
+Method 2 (Sergey proposal):
+  Pros: handles trivial cases with non-conflicting manual user edits (E) nicely.
+  Cons: (a) It needlessly doubles the number of conflict resolutions you have
+            to do.  But it's worse than that even sounds because it takes
+            all the commits from a single side of history and squashes it
+            into a big commit, and then rebases that, so that all the
+            conflict resolutions you did for that whole side of history
+            need to be repeated (but it ends up causing the conflicts to be
+            tweaked a bit, so even rerere won't help you).  Further,
+            because of the big commit, you get to handle *all* the
+            conflicts *all* at once in one combined mess.  Oh, and once you
+            finish with that, it does the same thing for the other side of
+            history too (i.e. all the conflicts from the other side of
+            history all at once).
+        (b) When cases combine, extra confusion is possible.  E.g. if upstream
+            conflicts with an existing commit, but you are dropping that commit
+            as part of your rebase, this method may _force_ you to deal with
+            a conflict anyway between the to-be-dropped commit and the upstream
+            changes anyway in a provisional commit.
+        (c) There's an implementation choice between two unpalatable options:
+            Force the user to do 3 independent merges with conflict resolution
+            at each step, or allow the 3 merges to just run all at once and
+            give potentially highly nested conflicts.
+        (d) If we choose the 3 independently resolved merge steps choice is
+            taken for (c), then users will get conflict markers that refer to
+            "phantom" commits that they never created and wonder why the
+            method is trying to merge those.
+
+  These are HUGE drawbacks.  Further, there is no clear workaround for (a)
+  or (b); they seem fundamental to the method.  There is a potential
+  workaround for (c) if you choose the do-all-the-merges-at-once method --
+  Sergey (and Phillip?) have proposed detecting ugly nested conflicts and
+  just bailing and using Method 1 instead to address (d).  I suspect that
+  such a choice would _frequently_ lead to ugly nested conflicts even in
+  cases having nothing to do with the manual user edits (E) that we are
+  trying to port, leaving us with the same major con that method 1 has.
+
+Method 3 (Buga proposal):
+  Pros: handles trivial cases with non-conflicting manual user edits (E) nicely.
+  Cons: see (a) & (b) & (d) for Method 2
+        (c) *very* error prone handling with dropped commits, partial
+            reinstatement of changes quite likely; if it happens, the
+            changes will be silently squashed into the merge commit making
+            it a very evil merge.
+
+  These are HUGE drawbacks; (c) being exceptionally bad.  There is no clear
+  workaround for any of (a)-(c).  The issue with (d) could be avoided by
+  modifying the method to just run all the merges at once, at the risk of
+  frequent nested conflicts.
+
+Method 4 (Phillip simplification of Sergey/Buga proposals):
+  Pros: (a) handles trivial cases with non-conflicting manual user edits (E)
+            nicely.
+        (b) handles a few more cases than Methods 2 & 3
+        (c) never runs into nasty difficult-to-understand conflicts more than
+            Method 1, because it explicitly bails to Method 1 quite often.
+  Cons: (d) Essentially becomes Method 1 very frequently
+
+  The nice thing here is that the drawback can be remedied the same way method
+  1 can be remedied.  But that remedy already solves every case that this
+  method was meant to solve, so why not use it directly?
+
+Method 5 (Oversimplified version of my proposal):
+  Pros: (a) Correctly handles *every* case that Methods 2 & 3 get right
+        (b) Correctly handles several cases that Methods 2 & 3 do not get right
+        (c) Correctly handles every case that Methods 1 & 4 solve optimally
+        (d) Avoids all the problems of Methods 1 & 4.
+        (e) Far less conflict prone than Methods 2 & 3
+        (f) straightforward
+        (g) extendible to more complicated cases than those considered here
+  Cons: (h) this oversimplified version of my proposal made a bit of a mess
+            with conflicts of conflict markers on case #4.  That was a case
+            that no method got right, but Method 1 (& 4) was pretty reasonable
+            for that case.
+
+  To me, this method is much better than methods 2 and 3, is better than
+  method 4, and shows promise for being better than method 1.  However, the
+  possibility for excessively confusing nasty nested merge conflicts is
+  just too high, particularly if there are several conflicts.  It needs
+  some improvements, such as those found in my more detailed proposals,
+  before it is ready.
