@@ -9,7 +9,7 @@ git-replay - EXPERIMENTAL: Replay commits on a new base, works with bare repos t
 SYNOPSIS
 --------
 [verse]
-(EXPERIMENTAL!) 'git replay' ([--contained] --onto <newbase> | --advance <branch>) [--ref-action[=<mode>]] <revision-range>
+(EXPERIMENTAL!) 'git replay' ([--contained] --onto <newbase> | --advance <branch>) [--linearize] [--ref-action[=<mode>]] <revision-range>
 
 DESCRIPTION
 -----------
@@ -45,6 +45,9 @@ which uses the target only as a starting point without updating it.
 --contained::
 	Update all branches that point at commits in
 	<revision-range>. Requires `--onto`.
+
+--linearize::
+	Drop merge commits instead of replaying them.
 
 --ref-action[=<mode>]::
 	Control how references are updated. The mode can be:

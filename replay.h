@@ -29,6 +29,9 @@ struct replay_revisions_options {
 	 * Requires `onto` to be set.
 	 */
 	int contained;
+
+	/* Drop merge commits instead of replaying them. */
+	int linearize;
 };
 
 /* This struct is used as an out-parameter by `replay_revisions()`. */

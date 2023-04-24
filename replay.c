@@ -211,16 +211,18 @@ static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
 
 static struct commit *pick_regular_commit(struct repository *repo,
 					  struct commit *pickme,
+					  struct commit *replayed_base,
 					  kh_oid_map_t *replayed_commits,
 					  struct commit *onto,
 					  struct merge_options *merge_opt,
 					  struct merge_result *result)
 {
-	struct commit *base, *replayed_base;
+	struct commit *base;
 	struct tree *pickme_tree, *base_tree, *replayed_base_tree;
 
 	base = pickme->parents->item;
-	replayed_base = mapped_commit(replayed_commits, base, onto);
+	if (!replayed_base)
+		replayed_base = mapped_commit(replayed_commits, base, onto);
 
 	replayed_base_tree = repo_get_commit_tree(repo, replayed_base);
 	pickme_tree = repo_get_commit_tree(repo, pickme);
@@ -303,13 +305,23 @@ int replay_revisions(struct rev_info *revs,
 		khint_t pos;
 		int hr;
 
-		if (!commit->parents)
+		if (opts->linearize && commit->parents && commit->parents->next)
+			/*
+			 * drop the commit, then map current commit to
+			 * the same as the previous commit
+			 */
+			;
+		else if (!commit->parents)
 			die(_("replaying down from root commit is not supported yet!"));
-		if (commit->parents->next)
+		else if (commit->parents->next)
 			die(_("replaying merge commits is not supported yet!"));
+		else
+			last_commit =
+				pick_regular_commit(revs->repo, commit,
+						    opts->linearize ? last_commit : NULL,
+						    replayed_commits, onto,
+						    &merge_opt, &result);
 
-		last_commit = pick_regular_commit(revs->repo, commit, replayed_commits,
-						  onto, &merge_opt, &result);
 		if (!last_commit)
 			break;
 

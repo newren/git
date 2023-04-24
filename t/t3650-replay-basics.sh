@@ -400,4 +400,19 @@ test_expect_success 'invalid replay.refAction value' '
 	test_grep "invalid.*replay.refAction.*value" error
 '
 
+test_expect_success '--linearize' '
+	test_tick &&
+	git checkout -b merge_I_L I &&
+	git merge --no-edit L &&
+
+	git replay --linearize --onto A B..merge_I_L &&
+
+	git range-diff B..merge_I_L@{1} B..merge_I_L >out &&
+
+	! test_grep -v = out &&
+
+	git log --oneline A..merge_I_L >out &&
+	test_line_count = 2 out
+'
+
 test_done
