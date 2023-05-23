@@ -221,6 +221,7 @@ test_expect_success 'Remove nonexistent file returns nonzero exit status' '
 '
 
 test_expect_success 'Call "rm" from outside the work tree' '
+	test_when_finished "git reset --hard" &&
 	mkdir repo &&
 	(
 		cd repo &&
@@ -237,14 +238,13 @@ test_expect_success 'Call "rm" from outside the work tree' '
 '
 
 test_expect_success 'refresh index before checking if it is up-to-date' '
-	git reset --hard &&
+	test_when_finished "git reset -q --hard" &&
 	test-tool chmtime -86400 frotz/nitfol &&
 	git rm frotz/nitfol &&
 	test_path_is_missing frotz/nitfol
 '
 
 choke_git_rm_setup() {
-	git reset -q --hard &&
 	test_when_finished "rm -f .git/index.lock && git reset -q --hard" &&
 	i=0 &&
 	hash=$(test_oid deadbeef) &&
@@ -271,7 +271,6 @@ test_expect_success !MINGW 'choking "git rm" should not let it die with cruft (i
 '
 
 test_expect_success 'Resolving by removal is not a warning-worthy event' '
-	git reset -q --hard &&
 	test_when_finished "rm -f .git/index.lock msg && git reset -q --hard" &&
 	blob=$(echo blob | git hash-object -w --stdin) &&
 	printf "100644 $blob %d\tblob\n" 1 2 3 | git update-index --index-info &&
@@ -281,6 +280,7 @@ test_expect_success 'Resolving by removal is not a warning-worthy event' '
 '
 
 test_expect_success 'rm removes subdirectories recursively' '
+	test_when_finished "git reset --hard" &&
 	mkdir -p dir/subdir/subsubdir &&
 	echo content >dir/subdir/subsubdir/file &&
 	git add dir/subdir/subsubdir/file &&
@@ -315,6 +315,7 @@ D  submod
 EOF
 
 test_expect_success 'rm removes empty submodules from work tree' '
+	test_when_finished "git reset --hard" &&
 	mkdir submod &&
 	hash=$(git rev-parse HEAD) &&
 	git update-index --add --cacheinfo 160000 "$hash" submod &&
@@ -332,7 +333,7 @@ test_expect_success 'rm removes empty submodules from work tree' '
 '
 
 test_expect_success 'rm removes removed submodule from index and .gitmodules' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git -c protocol.file.allow=always submodule update &&
 	rm -rf submod &&
 	git rm submod &&
@@ -343,7 +344,7 @@ test_expect_success 'rm removes removed submodule from index and .gitmodules' '
 '
 
 test_expect_success 'rm removes work tree of unmodified submodules' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git rm submod &&
 	test_path_is_missing submod &&
@@ -354,7 +355,7 @@ test_expect_success 'rm removes work tree of unmodified submodules' '
 '
 
 test_expect_success 'rm removes a submodule with a trailing /' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git rm submod/ &&
 	test_path_is_missing submod &&
@@ -363,15 +364,17 @@ test_expect_success 'rm removes a submodule with a trailing /' '
 '
 
 test_expect_success 'rm fails when given a file with a trailing /' '
+	test_when_finished "git reset --hard" &&
 	test_must_fail git rm empty/
 '
 
 test_expect_success 'rm succeeds when given a directory with a trailing /' '
+	test_when_finished "git reset --hard" &&
 	git rm -r frotz/
 '
 
 test_expect_success 'rm of a populated submodule with different HEAD fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git -C submod checkout HEAD^ &&
 	test_must_fail git rm submod &&
@@ -388,7 +391,7 @@ test_expect_success 'rm of a populated submodule with different HEAD fails unles
 '
 
 test_expect_success 'rm --cached leaves work tree of populated submodules and .gitmodules alone' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git rm --cached submod &&
 	test_path_is_dir submod &&
@@ -400,7 +403,6 @@ test_expect_success 'rm --cached leaves work tree of populated submodules and .g
 '
 
 test_expect_success 'rm --dry-run does not touch the submodule or .gitmodules' '
-	git reset --hard &&
 	git submodule update &&
 	git rm -n submod &&
 	test_path_is_file submod/.git &&
@@ -408,7 +410,7 @@ test_expect_success 'rm --dry-run does not touch the submodule or .gitmodules' '
 '
 
 test_expect_success 'rm does not complain when no .gitmodules file is found' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git rm .gitmodules &&
 	git rm submod >actual 2>actual.err &&
@@ -420,7 +422,7 @@ test_expect_success 'rm does not complain when no .gitmodules file is found' '
 '
 
 test_expect_success 'rm will error out on a modified .gitmodules file unless staged' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git config -f .gitmodules foo.bar true &&
 	test_must_fail git rm submod >actual 2>actual.err &&
@@ -437,7 +439,7 @@ test_expect_success 'rm will error out on a modified .gitmodules file unless sta
 	test_cmp expect actual
 '
 test_expect_success 'rm will not error out on .gitmodules file with zero stat data' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git read-tree HEAD &&
 	git rm submod &&
@@ -445,7 +447,7 @@ test_expect_success 'rm will not error out on .gitmodules file with zero stat da
 '
 
 test_expect_success 'rm issues a warning when section is not found in .gitmodules' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	git config -f .gitmodules --remove-section submodule.sub &&
 	git add .gitmodules &&
@@ -459,7 +461,7 @@ test_expect_success 'rm issues a warning when section is not found in .gitmodule
 '
 
 test_expect_success 'rm of a populated submodule with modifications fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	echo X >submod/empty &&
 	test_must_fail git rm submod &&
@@ -474,7 +476,7 @@ test_expect_success 'rm of a populated submodule with modifications fails unless
 '
 
 test_expect_success 'rm of a populated submodule with untracked files fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update &&
 	echo X >submod/untracked &&
 	test_must_fail git rm submod &&
@@ -489,7 +491,6 @@ test_expect_success 'rm of a populated submodule with untracked files fails unle
 '
 
 test_expect_success 'setup submodule conflict' '
-	git reset --hard &&
 	git submodule update &&
 	git checkout -b branch1 &&
 	echo 1 >nitfol &&
@@ -515,8 +516,8 @@ UU submod
 EOF
 
 test_expect_success 'rm removes work tree of unmodified conflicted submodule' '
+	test_when_finished "git merge --abort" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	git submodule update &&
 	test_must_fail git merge conflict2 &&
 	git rm submod &&
@@ -526,8 +527,8 @@ test_expect_success 'rm removes work tree of unmodified conflicted submodule' '
 '
 
 test_expect_success 'rm of a conflicted populated submodule with different HEAD fails unless forced' '
+	test_when_finished "git merge --abort" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	git submodule update &&
 	git -C submod checkout HEAD^ &&
 	test_must_fail git merge conflict2 &&
@@ -545,8 +546,8 @@ test_expect_success 'rm of a conflicted populated submodule with different HEAD 
 '
 
 test_expect_success 'rm of a conflicted populated submodule with modifications fails unless forced' '
+	test_when_finished "git merge --abort" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	git submodule update &&
 	echo X >submod/empty &&
 	test_must_fail git merge conflict2 &&
@@ -564,8 +565,8 @@ test_expect_success 'rm of a conflicted populated submodule with modifications f
 '
 
 test_expect_success 'rm of a conflicted populated submodule with untracked files fails unless forced' '
+	test_when_finished "git merge --abort" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	git submodule update &&
 	echo X >submod/untracked &&
 	test_must_fail git merge conflict2 &&
@@ -581,8 +582,8 @@ test_expect_success 'rm of a conflicted populated submodule with untracked files
 '
 
 test_expect_success 'rm of a conflicted populated submodule with a .git directory fails even when forced' '
+	test_when_finished "git merge --abort && rm -rf submod" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	git submodule update &&
 	(
 		cd submod &&
@@ -600,14 +601,12 @@ test_expect_success 'rm of a conflicted populated submodule with a .git director
 	test_path_is_dir submod &&
 	test_path_is_dir submod/.git &&
 	git status -s -uno --ignore-submodules=none >actual &&
-	test_cmp expect.conflict actual &&
-	git merge --abort &&
-	rm -rf submod
+	test_cmp expect.conflict actual
 '
 
 test_expect_success 'rm of a conflicted unpopulated submodule succeeds' '
+	test_when_finished "git merge --abort" &&
 	git checkout conflict1 &&
-	git reset --hard &&
 	test_must_fail git merge conflict2 &&
 	git rm submod &&
 	test_path_is_missing submod &&
@@ -616,8 +615,8 @@ test_expect_success 'rm of a conflicted unpopulated submodule succeeds' '
 '
 
 test_expect_success 'rm of a populated submodule with a .git directory migrates git dir' '
+	test_when_finished "git reset --hard" &&
 	git checkout -f main &&
-	git reset --hard &&
 	git submodule update &&
 	(
 		cd submod &&
@@ -640,7 +639,6 @@ EOF
 
 test_expect_success 'setup subsubmodule' '
 	test_config_global protocol.file.allow always &&
-	git reset --hard &&
 	git submodule update &&
 	(
 		cd submod &&
@@ -657,6 +655,7 @@ test_expect_success 'setup subsubmodule' '
 '
 
 test_expect_success 'rm recursively removes work tree of unmodified submodules' '
+	test_when_finished "git reset --hard" &&
 	git rm submod &&
 	test_path_is_missing submod &&
 	git status -s -uno --ignore-submodules=none >actual &&
@@ -664,7 +663,7 @@ test_expect_success 'rm recursively removes work tree of unmodified submodules' 
 '
 
 test_expect_success 'rm of a populated nested submodule with different nested HEAD fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update --recursive &&
 	git -C submod/subsubmod checkout HEAD^ &&
 	test_must_fail git rm submod &&
@@ -679,7 +678,7 @@ test_expect_success 'rm of a populated nested submodule with different nested HE
 '
 
 test_expect_success 'rm of a populated nested submodule with nested modifications fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update --recursive &&
 	echo X >submod/subsubmod/empty &&
 	test_must_fail git rm submod &&
@@ -694,7 +693,7 @@ test_expect_success 'rm of a populated nested submodule with nested modification
 '
 
 test_expect_success 'rm of a populated nested submodule with nested untracked files fails unless forced' '
-	git reset --hard &&
+	test_when_finished "git reset --hard" &&
 	git submodule update --recursive &&
 	echo X >submod/subsubmod/untracked &&
 	test_must_fail git rm submod &&
@@ -709,7 +708,6 @@ test_expect_success 'rm of a populated nested submodule with nested untracked fi
 '
 
 test_expect_success "rm absorbs submodule's nested .git directory" '
-	git reset --hard &&
 	git submodule update --recursive &&
 	(
 		cd submod/subsubmod &&
@@ -723,6 +721,8 @@ test_expect_success "rm absorbs submodule's nested .git directory" '
 	git status -s -uno --ignore-submodules=none >actual &&
 	test_file_not_empty actual &&
 	test_i18ngrep Migrating output.err
+
+	# Note: leaves dirty state for next test
 '
 
 test_expect_success 'checking out a commit after submodule removal needs manual updates' '
