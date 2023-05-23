@@ -117,7 +117,8 @@ list.
 --quit::
 	Forget about the current merge in progress. Leave the index
 	and the working tree as-is. If `MERGE_AUTOSTASH` is present, the
-	stash entry will be saved to the stash list.
+	stash entry will be saved to the stash list.  Using this should
+	be rare; you probably want --abort instead.
 
 --continue::
 	After a 'git merge' stops due to conflicts you can conclude the

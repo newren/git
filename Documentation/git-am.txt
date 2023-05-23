@@ -197,7 +197,8 @@ include::rerere-options.txt[]
 
 --quit::
 	Abort the patching operation but keep HEAD and the index
-	untouched.
+	untouched.  Using this should be rare; you probably want
+	--abort instead.
 
 --show-current-patch[=(diff|raw)]::
 	Show the message at which `git am` has stopped due to

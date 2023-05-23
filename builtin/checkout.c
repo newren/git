@@ -1481,23 +1481,23 @@ static void die_if_some_operation_in_progress(void)
 
 	if (state.merge_in_progress)
 		die(_("cannot switch branch while merging\n"
-		      "Consider \"git merge --quit\" "
+		      "Consider \"git merge --abort\" "
 		      "or \"git worktree add\"."));
 	if (state.am_in_progress)
 		die(_("cannot switch branch in the middle of an am session\n"
-		      "Consider \"git am --quit\" "
+		      "Consider \"git am --abort\" "
 		      "or \"git worktree add\"."));
 	if (state.rebase_interactive_in_progress || state.rebase_in_progress)
 		die(_("cannot switch branch while rebasing\n"
-		      "Consider \"git rebase --quit\" "
+		      "Consider \"git rebase --abort\" "
 		      "or \"git worktree add\"."));
 	if (state.cherry_pick_in_progress)
 		die(_("cannot switch branch while cherry-picking\n"
-		      "Consider \"git cherry-pick --quit\" "
+		      "Consider \"git cherry-pick --abort\" "
 		      "or \"git worktree add\"."));
 	if (state.revert_in_progress)
 		die(_("cannot switch branch while reverting\n"
-		      "Consider \"git revert --quit\" "
+		      "Consider \"git revert --abort\" "
 		      "or \"git worktree add\"."));
 	if (state.bisect_in_progress)
 		warning(_("you are switching branch while bisecting"));
