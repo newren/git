@@ -36,6 +36,10 @@ test_expect_success 'index lockfile was removed' '
 	test ! -f .git/index.lock
 '
 
+test_expect_success 'cleanup from above test' '
+	git cherry-pick --skip
+'
+
 test_expect_success 'cherry-pick a commit with an empty message' '
 	test_when_finished "git reset --hard empty-message-branch~1" &&
 	git checkout main &&
@@ -52,6 +56,7 @@ test_expect_success 'cherry-pick a commit with an empty message with --allow-emp
 '
 
 test_expect_success 'cherry pick an empty non-ff commit without --allow-empty' '
+	test_when_finished "git cherry-pick --abort" &&
 	git checkout main &&
 	echo fourth >>file2 &&
 	git add file2 &&

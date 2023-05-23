@@ -1696,6 +1696,7 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 		opts->discard_changes = 1;
 		opts->ignore_unmerged_opt = "--force";
 		opts->ignore_unmerged = 1;
+		opts->can_switch_when_in_progress = 1;
 	}
 
 	if ((!!opts->new_branch + !!opts->new_branch_force + !!opts->new_orphan_branch) > 1)
@@ -1879,7 +1880,7 @@ int cmd_checkout(int argc, const char **argv, const char *prefix)
 	opts.accept_ref = 1;
 	opts.accept_pathspec = 1;
 	opts.implicit_detach = 1;
-	opts.can_switch_when_in_progress = 1;
+	opts.can_switch_when_in_progress = 0;
 	opts.orphan_from_empty_tree = 0;
 	opts.empty_pathspec_ok = 1;
 	opts.overlay_mode = -1;

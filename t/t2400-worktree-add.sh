@@ -384,11 +384,11 @@ test_expect_success 'rename a branch under rebase not allowed' '
 	test_must_fail git branch -M under-rebase rebase-with-new-name
 '
 
-test_expect_success 'check out from current worktree branch ok' '
+test_expect_success 'check out not allowed during rebase' '
 	(
 		cd under-rebase &&
-		git checkout under-rebase &&
-		git checkout - &&
+		test_must_fail git checkout under-rebase 2>error &&
+		grep "cannot switch branch while rebasing" error &&
 		git rebase --abort
 	)
 '

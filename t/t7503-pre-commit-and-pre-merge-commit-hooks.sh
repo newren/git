@@ -154,6 +154,7 @@ test_expect_success 'with failing hook (merge)' '
 	echo "pre-merge-commit-failing-hook" >expected_hooks &&
 	git checkout side &&
 	test_must_fail git merge -m "merge main" main &&
+	git merge --abort &&
 	git checkout main &&
 	test_cmp expected_hooks actual_hooks
 '
