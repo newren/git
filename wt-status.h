@@ -46,12 +46,13 @@ enum commit_whence {
 static inline int is_from_cherry_pick(enum commit_whence whence)
 {
 	return whence == FROM_CHERRY_PICK_SINGLE ||
-		whence == FROM_CHERRY_PICK_MULTI;
+		whence == FROM_CHERRY_PICK_MULTI ||
+		whence == FROM_CHERRY_PICK_DURING_REBASE;
 }
 
 static inline int is_from_rebase(enum commit_whence whence)
 {
-	return whence == FROM_CHERRY_PICK_DURING_REBASE;
+	return false;
 }
 
 struct wt_status_change_data {
