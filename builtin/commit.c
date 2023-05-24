@@ -864,6 +864,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 	else if (whence == FROM_MERGE)
 		hook_arg1 = "merge";
 	else if (is_from_cherry_pick(whence)) {
+		FIXME
 		hook_arg1 = "commit";
 		hook_arg2 = "CHERRY_PICK_HEAD";
 	}
@@ -1063,7 +1064,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 		run_status(stdout, index_file, prefix, 0, s);
 		if (amend)
 			fputs(_(empty_amend_advice), stderr);
-		else if (is_from_cherry_pick(whence)) {
+		else if (is_from_cherry_pick(whence)) {  FIXME
 			fputs(_(empty_cherry_pick_advice), stderr);
 			if (whence == FROM_CHERRY_PICK_SINGLE)
 				fputs(_(empty_cherry_pick_advice_single), stderr);

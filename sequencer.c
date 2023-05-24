@@ -6389,6 +6389,12 @@ int sequencer_determine_whence(struct repository *r, enum commit_whence *whence)
 		return 1;
 	}
 
+	if (refs_ref_exists(get_main_ref_store(r), "REBASE_HEAD") &&
+	    !file_exists(rebase_path_amend())) {
+		*whence = FROM_CHERRY_PICK_DURING_REBASE;
+		return 1;
+	}
+
 	return 0;
 }
 
