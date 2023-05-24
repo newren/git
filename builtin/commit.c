@@ -863,7 +863,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 	 */
 	else if (whence == FROM_MERGE)
 		hook_arg1 = "merge";
-	else if (is_from_cherry_pick(whence) || whence == FROM_REBASE_PICK) {
+	else if (is_from_cherry_pick(whence) || whence == FROM_CHERRY_PICK_DURING_REBASE) {
 		hook_arg1 = "commit";
 		hook_arg2 = "CHERRY_PICK_HEAD";
 	}
@@ -1064,7 +1064,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 		if (amend)
 			fputs(_(empty_amend_advice), stderr);
 		else if (is_from_cherry_pick(whence) ||
-			 whence == FROM_REBASE_PICK) {
+			 whence == FROM_CHERRY_PICK_DURING_REBASE) {
 			fputs(_(empty_cherry_pick_advice), stderr);
 			if (whence == FROM_CHERRY_PICK_SINGLE)
 				fputs(_(empty_cherry_pick_advice_single), stderr);
@@ -1288,7 +1288,7 @@ static int parse_and_validate_options(int argc, const char *argv[],
 			die(_("You are in the middle of a merge -- cannot amend."));
 		else if (is_from_cherry_pick(whence))
 			die(_("You are in the middle of a cherry-pick -- cannot amend."));
-		else if (whence == FROM_REBASE_PICK)
+		else if (whence == FROM_CHERRY_PICK_DURING_REBASE)
 			die(_("You are in the middle of a rebase -- cannot amend."));
 	}
 	if (fixup_message && squash_message)
@@ -1317,7 +1317,7 @@ static int parse_and_validate_options(int argc, const char *argv[],
 			author_message_buffer = use_message_buffer;
 		}
 	}
-	if ((is_from_cherry_pick(whence) || whence == FROM_REBASE_PICK) &&
+	if ((is_from_cherry_pick(whence) || whence == FROM_CHERRY_PICK_DURING_REBASE) &&
 	    !renew_authorship) {
 		author_message = "CHERRY_PICK_HEAD";
 		author_message_buffer = read_commit_message(author_message);
