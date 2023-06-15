@@ -220,13 +220,17 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	struct commit *base;
 	struct tree *pickme_tree, *base_tree, *replayed_base_tree;
 
-	base = pickme->parents->item;
+	base = pickme->parents ? pickme->parents->item : NULL;
 	if (!replayed_base)
-		replayed_base = mapped_commit(replayed_commits, base, onto);
+		replayed_base = base ?
+			mapped_commit(replayed_commits, base, onto) :
+			onto;
 
 	replayed_base_tree = repo_get_commit_tree(repo, replayed_base);
 	pickme_tree = repo_get_commit_tree(repo, pickme);
-	base_tree = repo_get_commit_tree(repo, base);
+	base_tree = base ?
+		repo_get_commit_tree(repo, base) :
+		lookup_tree(merge_opt->repo, merge_opt->repo->hash_algo->empty_tree);
 
 	merge_opt->branch1 = short_commit_name(repo, replayed_base);
 	merge_opt->branch2 = short_commit_name(repo, pickme);
@@ -289,8 +293,6 @@ int replay_revisions(struct rev_info *revs,
 	set_up_replay_mode(revs->repo, &revs->cmdline, opts->onto,
 			   &detached_head, &advance, &onto, &update_refs);
 
-	/* FIXME: Should allow replaying commits with the first as a root commit */
-
 	if (prepare_revision_walk(revs) < 0) {
 		ret = error(_("error preparing revisions"));
 		goto out;
@@ -304,16 +306,15 @@ int replay_revisions(struct rev_info *revs,
 		const struct name_decoration *decoration;
 		khint_t pos;
 		int hr;
+		bool is_merge = commit->parents && commit->parents->next;
 
-		if (opts->linearize && commit->parents && commit->parents->next)
+		if (opts->linearize && is_merge)
 			/*
 			 * drop the commit, then map current commit to
 			 * the same as the previous commit
 			 */
 			;
-		else if (!commit->parents)
-			die(_("replaying down from root commit is not supported yet!"));
-		else if (commit->parents->next)
+		else if (is_merge)
 			die(_("replaying merge commits is not supported yet!"));
 		else
 			last_commit =

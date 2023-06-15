@@ -81,12 +81,6 @@ test_expect_success 'option --onto or --advance is mandatory' '
 	test_cmp expect actual
 '
 
-test_expect_success 'no base or negative ref gives no-replaying down to root error' '
-	echo "fatal: replaying down from root commit is not supported yet!" >expect &&
-	test_must_fail git replay --onto=topic1 topic2 2>actual &&
-	test_cmp expect actual
-'
-
 test_expect_success 'options --advance and --contained cannot be used together' '
 	printf "fatal: options ${SQ}--advance${SQ} " >expect &&
 	printf "and ${SQ}--contained${SQ} cannot be used together\n" >>expect &&
@@ -413,6 +407,34 @@ test_expect_success '--linearize' '
 
 	git log --oneline A..merge_I_L >out &&
 	test_line_count = 2 out
+'
+
+test_expect_success 'replaying a root commit onto another commit' '
+	git worktree add root &&
+	test_commit -C root root-onto &&
+	git -C root switch --orphan orphan &&
+	test_commit -C root new-root &&
+
+	git replay --ref-action=print --onto root-onto root-onto..orphan >out &&
+	read update ref to from <out &&
+	test_cmp_rev $to^ root-onto &&
+	git show $to:new-root.t >actual &&
+	test_cmp root/new-root.t actual
+'
+
+test_expect_success 'replaying between unrelated histories' '
+	git worktree add unrelated &&
+	test_commit -C unrelated unrelated-onto &&
+	test_commit -C unrelated on-top-1 &&
+	git -C unrelated switch --orphan unrelated-orphan &&
+	test_commit -C unrelated unrelated-root &&
+	test_commit -C unrelated on-top-2 &&
+
+	# unrelated should be left unchanged
+	git replay --ref-action=print --onto unrelated-onto unrelated-orphan on-top-1^! >out &&
+	! grep -w "refs/heads/unrelated " out &&
+	git replay --ref-action=print --onto unrelated-onto unrelated-orphan on-top-2^! >out &&
+	! grep -w "refs/heads/unrelated " out
 '
 
 test_done
