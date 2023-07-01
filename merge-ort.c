@@ -3304,6 +3304,11 @@ static int collect_renames(struct merge_options *opt,
 			pool_diff_free_filepair(&opt->priv->pool, p);
 			continue;
 		}
+		if (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_NONE &&
+		    p->status == 'R') {
+			possibly_cache_new_pair(renames, p, side_index, NULL);
+			continue;
+		}
 
 		new_path = check_for_directory_rename(opt, p->two->path,
 						      side_index,
@@ -4938,7 +4943,7 @@ static void merge_check_renames_reusable(struct merge_options *opt,
 	 * instance, also desirable) to re-enable the rename cache even with
 	 * directory renames turned off.
 	 */
-	if (!opt->detect_directory_renames) {
+	if (!opt->detect_directory_renames && 0) {
 		renames->cached_pairs_valid_side = 0; /* neither side valid */
 		return;
 	}
