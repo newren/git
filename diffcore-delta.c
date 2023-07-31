@@ -183,8 +183,6 @@ extern struct spanhash_top *hash_chars(struct repository *r,
 int diffcore_count_changes(struct repository *r,
 			   struct diff_filespec *src,
 			   struct diff_filespec *dst,
-			   void **src_count_p,
-			   void **dst_count_p,
 			   unsigned long *src_copied,
 			   unsigned long *literal_added)
 {
@@ -193,20 +191,12 @@ int diffcore_count_changes(struct repository *r,
 	unsigned long sc, la;
 
 	src_count = dst_count = NULL;
-	if (src_count_p)
-		src_count = *src_count_p;
-	if (!src_count) {
-		src_count = hash_chars(r, src);
-		if (src_count_p)
-			*src_count_p = src_count;
-	}
-	if (dst_count_p)
-		dst_count = *dst_count_p;
-	if (!dst_count) {
-		dst_count = hash_chars(r, dst);
-		if (dst_count_p)
-			*dst_count_p = dst_count;
-	}
+	if (!src->cnt_data)
+		src->cnt_data = hash_chars(r, src);
+	src_count = src->cnt_data;
+	if (!dst->cnt_data)
+		dst->cnt_data = hash_chars(r, dst);
+	dst_count = dst->cnt_data;
 	sc = la = 0;
 
 	s = src_count->data;
@@ -240,10 +230,6 @@ int diffcore_count_changes(struct repository *r,
 		d++;
 	}
 
-	if (!src_count_p)
-		free(src_count);
-	if (!dst_count_p)
-		free(dst_count);
 	*src_copied = sc;
 	*literal_added = la;
 	return 0;

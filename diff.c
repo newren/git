@@ -3043,8 +3043,7 @@ static void show_dirstat(struct diff_options *options)
 		if (DIFF_FILE_VALID(p->one) && DIFF_FILE_VALID(p->two)) {
 			diff_populate_filespec(options->repo, p->one, NULL);
 			diff_populate_filespec(options->repo, p->two, NULL);
-			diffcore_count_changes(options->repo,
-					       p->one, p->two, NULL, NULL,
+			diffcore_count_changes(options->repo, p->one, p->two,
 					       &copied, &added);
 			diff_free_filespec_data(p->one);
 			diff_free_filespec_data(p->two);

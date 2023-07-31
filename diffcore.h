@@ -220,8 +220,6 @@ void diff_debug_queue(const char *, struct diff_queue_struct *);
 int diffcore_count_changes(struct repository *r,
 			   struct diff_filespec *src,
 			   struct diff_filespec *dst,
-			   void **src_count_p,
-			   void **dst_count_p,
 			   unsigned long *src_copied,
 			   unsigned long *literal_added);
 

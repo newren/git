@@ -191,9 +191,7 @@ static int estimate_similarity(struct repository *r,
 	if (!dst->cnt_data && diff_populate_filespec(r, dst, dpf_opt))
 		return 0;
 
-	if (diffcore_count_changes(r, src, dst,
-				   &src->cnt_data, &dst->cnt_data,
-				   &src_copied, &literal_added))
+	if (diffcore_count_changes(r, src, dst, &src_copied, &literal_added))
 		return 0;
 
 	/* How similar are they?

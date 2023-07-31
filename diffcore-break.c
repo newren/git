@@ -81,9 +81,7 @@ static int should_break(struct repository *r,
 	if (!src->size)
 		return 0; /* we do not let empty files get renamed */
 
-	if (diffcore_count_changes(r, src, dst,
-				   &src->cnt_data, &dst->cnt_data,
-				   &src_copied, &literal_added))
+	if (diffcore_count_changes(r, src, dst, &src_copied, &literal_added))
 		return 0;
 
 	/* sanity */
