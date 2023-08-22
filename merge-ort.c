@@ -665,6 +665,8 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 			assert(renames->cached_pairs_valid_side == 0);
 		if (i != renames->cached_pairs_valid_side &&
 		    -1 != renames->cached_pairs_valid_side) {
+			printf("Clearing all cached_pairs on side %d; renames->cached_pairs_valid_side == %d\n",
+			       i, renames->cached_pairs_valid_side);
 			strset_clear_func(&renames->cached_target_names[i]);
 			strmap_clear_func(&renames->cached_pairs[i], 1);
 			strset_clear_func(&renames->cached_irrelevant[i]);
@@ -2898,6 +2900,8 @@ static int process_renames(struct merge_options *opt,
 			continue;
 		}
 
+		printf("About to forcibly verify: %s -> %s\n",
+		       oldpath, newpath);
 		VERIFY_CI(oldinfo);
 		VERIFY_CI(newinfo);
 		target_index = pair->score; /* from collect_renames() */
@@ -3126,6 +3130,7 @@ static void use_cached_pairs(struct merge_options *opt,
 		struct diff_filespec *one, *two;
 		const char *old_name = entry->key;
 		const char *new_name = entry->value;
+		printf("Operating on %s->%s\n", old_name, new_name);
 		if (!new_name)
 			new_name = old_name;
 
@@ -3158,6 +3163,7 @@ static void cache_new_pair(struct rename_info *renames,
 {
 	char *old_value;
 	new_path = xstrdup(new_path);
+	printf("Caching on side %d: %s->%s\n", side, old_path, new_path);
 	old_value = strmap_put(&renames->cached_pairs[side],
 			       old_path, new_path);
 	strset_add(&renames->cached_target_names[side], new_path);
@@ -3183,6 +3189,7 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 	} else {
 		int val = strintmap_get(&renames->relevant_sources[side],
 					p->one->path);
+		printf("val is %d\n", val);
 		if (val == RELEVANT_NO_MORE) {
 			assert(p->status == 'D');
 			strset_add(&renames->cached_irrelevant[side],
@@ -3198,6 +3205,7 @@ static void possibly_cache_new_pair(struct rename_info *renames,
 		 * to NULL again, so no harm.
 		 */
 		strmap_put(&renames->cached_pairs[side], p->one->path, NULL);
+		printf("Caching %s -> NULL\n", p->one->path);
 	} else if (p->status == 'R') {
 		if (!new_path)
 			new_path = p->two->path;
@@ -3305,7 +3313,9 @@ static int collect_renames(struct merge_options *opt,
 			continue;
 		}
 		if (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_NONE &&
-		    p->status == 'R') {
+		    p->status == 'R' && 0) {
+			printf("HIT HERE; side_index=%d, %s->%s\n",
+			       side_index, p->one->path, p->two->path);
 			possibly_cache_new_pair(renames, p, side_index, NULL);
 			continue;
 		}
@@ -3395,6 +3405,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 		get_provisional_directory_renames(opt, MERGE_SIDE1, &clean);
 		get_provisional_directory_renames(opt, MERGE_SIDE2, &clean);
 		handle_directory_level_conflicts(opt);
+	} else if (opt->detect_directory_renames == MERGE_DIRECTORY_RENAMES_NONE) {/*
+										     clean out cached_pairs corresponding to directory renames */
 	}
 
 	ALLOC_GROW(combined.queue,
