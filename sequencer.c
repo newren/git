@@ -798,7 +798,7 @@ static int do_recursive_merge(struct repository *r,
 		clean = result.clean;
 	} else {
 		ensure_full_index(r->index);
-		clean = merge_trees(&o, head_tree, next_tree, base_tree);
+		clean = merge_ort_nonrecursive(&o, head_tree, next_tree, base_tree);
 		if (is_rebase_i(opts) && clean <= 0)
 			fputs(o.obuf.buf, stdout);
 		strbuf_release(&o.obuf);
