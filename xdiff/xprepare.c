@@ -37,10 +37,13 @@ extern int rust_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags);
 static int c_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags) {
 	struct xlinereader_t reader;
 
-	IVEC_INIT(*xdf->minimal_perfect_hash);
-	IVEC_INIT(*xdf->record);
+	IVEC_INIT(xdf->file.minimal_perfect_hash);
+	IVEC_INIT(xdf->file.record);
 	IVEC_INIT(xdf->rindex);
 	IVEC_INIT(xdf->consider);
+
+	xdf->minimal_perfect_hash = &xdf->file.minimal_perfect_hash;
+	xdf->record = &xdf->file.record;
 
 	rust_ivec_reserve_exact(xdf->record, mf->size >> 4);
 
@@ -74,8 +77,8 @@ static int c_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags) {
 
 
 static void xdl_free_ctx(xdfile_t *xdf) {
-	rust_ivec_free(xdf->minimal_perfect_hash);
-	rust_ivec_free(xdf->record);
+	rust_ivec_free(&xdf->file.minimal_perfect_hash);
+	rust_ivec_free(&xdf->file.record);
 	rust_ivec_free(&xdf->consider);
 	rust_ivec_free(&xdf->rindex);
 }
