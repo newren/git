@@ -303,39 +303,18 @@ static int xdl_optimize_ctxs(xdfenv_t *xe) {
 	return 0;
 }
 
-#ifdef WITH_RUST
-extern void rust_xdl_construct_mph_and_occurrences(xdfenv_t *xe, u64 flags, ivec_xdloccurrence_t *occurrence);
-#else
-#endif
-static void c_xdl_construct_mph_and_occurrences(xdfenv_t *xe, u64 flags) {
-	struct xdl_minimal_perfect_hash_builder_t mphb;
-	xdl_mphb_init(&mphb, xe->xdf1.record->length + xe->xdf2.record->length, flags);
-
-
-	for (usize i = 0; i < xe->xdf1.record->length; i++) {
-		u64 mph = xdl_mphb_hash(&mphb, &xe->xdf1.record->ptr[i]);
-		xe->xdf1.minimal_perfect_hash->ptr[xe->xdf1.minimal_perfect_hash->length++] = mph;
-	}
-
-	for (usize i = 0; i < xe->xdf2.record->length; i++) {
-		u64 mph = xdl_mphb_hash(&mphb, &xe->xdf2.record->ptr[i]);
-		xe->xdf2.minimal_perfect_hash->ptr[xe->xdf2.minimal_perfect_hash->length++] = mph;
-	}
-
-	xe->minimal_perfect_hash_size = xdl_mphb_finish(&mphb);
-
-}
 
 
 static void xdl_prepare_xdfile(struct xdline_t *file, xdfile_t *xdf) {
-	IVEC_INIT(xdf->consider);
-	IVEC_INIT(xdf->rindex);
-
 	xdf->minimal_perfect_hash = &file->minimal_perfect_hash;
+
 	xdf->record = &file->record;
 
+	IVEC_INIT(xdf->consider);
 	xdf->consider.capacity = xdf->consider.length = xdf->record->length;
 	XDL_CALLOC_ARRAY(xdf->consider.ptr, SENTINEL + xdf->consider.capacity + SENTINEL);
+
+	IVEC_INIT(xdf->rindex);
 }
 
 
@@ -358,15 +337,13 @@ int xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, u64 flags, xdfenv_t *xe) {
 	return 0;
 }
 #else
-int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, u64 flags, xdfenv_t *xe) {
+int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, usize mph_size, u64 flags, xdfenv_t *xe) {
 	xe->delta_start = 0;
 	xe->delta_end = 0;
 
 	xdl_prepare_xdfile(file1, &xe->xdf1);
 	xdl_prepare_xdfile(file2, &xe->xdf2);
-
-	c_xdl_construct_mph_and_occurrences(xe, flags);
-
+	xe->minimal_perfect_hash_size = mph_size;
 
 	if ((flags & (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)) == 0) {
 		xdl_optimize_ctxs(xe);
@@ -375,3 +352,50 @@ int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, u64 flags, x
 	return 0;
 }
 #endif
+
+static void mph_ingest(struct xdl_minimal_perfect_hash_builder_t *mphb, ivec_xrecord_t *record, ivec_u64 *mph) {
+	for (usize i = 0; i < record->length; i++) {
+		u64 v = xdl_mphb_hash(mphb, &record->ptr[i]);
+		mph->ptr[mph->length++] = v;
+	}
+}
+
+int xdl_2way_prepare(mmfile_t *mf1, mmfile_t *mf2, u64 flags, struct xd2way *two_way) {
+	struct xdl_minimal_perfect_hash_builder_t mphb;
+	usize max_unique_size = 0;
+
+	xdl_file_prepare(mf1, flags, &two_way->file1);
+	xdl_file_prepare(mf2, flags, &two_way->file2);
+
+	max_unique_size += two_way->file1.record.length;
+	max_unique_size += two_way->file2.record.length;
+	xdl_mphb_init(&mphb, max_unique_size, flags);
+
+	mph_ingest(&mphb, &two_way->file1.record, &two_way->file1.minimal_perfect_hash);
+	mph_ingest(&mphb, &two_way->file2.record, &two_way->file2.minimal_perfect_hash);
+	two_way->minimal_perfect_hash_size = xdl_mphb_finish(&mphb);
+
+	return 0;
+}
+
+int xdl_3way_prepare(mmfile_t *mf_base, mmfile_t *mf_side1, mmfile_t *mf_side2, u64 flags, struct xd3way *three_way) {
+	struct xdl_minimal_perfect_hash_builder_t mphb;
+	usize max_unique_size = 0;
+
+	xdl_file_prepare(mf_base, flags, &three_way->base);
+	xdl_file_prepare(mf_side1, flags, &three_way->side1);
+	xdl_file_prepare(mf_side2, flags, &three_way->side2);
+
+	max_unique_size += three_way->base.record.length;
+	max_unique_size += three_way->side1.record.length;
+	max_unique_size += three_way->side2.record.length;
+	xdl_mphb_init(&mphb, max_unique_size, flags);
+
+	mph_ingest(&mphb, &three_way->base.record, &three_way->base.minimal_perfect_hash);
+	mph_ingest(&mphb, &three_way->side1.record, &three_way->side1.minimal_perfect_hash);
+	mph_ingest(&mphb, &three_way->side2.record, &three_way->side2.minimal_perfect_hash);
+	three_way->minimal_perfect_hash_size = xdl_mphb_finish(&mphb);
+
+	return 0;
+}
+

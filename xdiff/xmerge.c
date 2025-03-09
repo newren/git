@@ -365,7 +365,7 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 {
 	for (; m; m = m->next) {
 		mmfile_t t1, t2;
-		struct xdline_t file1, file2;
+		struct xd2way two_way;
 		xdfenv_t xe;
 		xdchange_t *xscr, *x;
 		int i1 = m->i1, i2 = m->i2;
@@ -389,10 +389,9 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 		t2.size = (char *) xe2->xdf2.record->ptr[m->i2 + m->chg2 - 1].ptr
 			+ xe2->xdf2.record->ptr[m->i2 + m->chg2 - 1].size_with_eol - t2.ptr;
 
-		xdl_file_prepare(&t1, xpp->flags, &file1);
-		xdl_file_prepare(&t2, xpp->flags, &file2);
+		xdl_2way_prepare(&t1, &t2, xpp->flags, &two_way);
 
-		if (xdl_do_diff(&file1, &file2, xpp, &xe) < 0)
+		if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &xe) < 0)
 			return -1;
 		if (xdl_change_compact(&xe.xdf1, &xe.xdf2, xpp->flags) < 0 ||
 		    xdl_change_compact(&xe.xdf2, &xe.xdf1, xpp->flags) < 0 ||
@@ -690,8 +689,7 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 		xmparam_t const *xmp, mmbuffer_t *result)
 {
 	xdchange_t *xscr1 = NULL, *xscr2 = NULL;
-	struct xdline_t base, side1, side2;
-	struct xdline_t base_copy;
+	struct xd3way three_way;
 	xdfenv_t xe1, xe2;
 	int status = -1;
 	xpparam_t const *xpp = &xmp->xpp;
@@ -699,15 +697,12 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 	result->ptr = NULL;
 	result->size = 0;
 
-	xdl_file_prepare(orig, xpp->flags, &base);
-	xdl_file_prepare(mf1,  xpp->flags, &side1);
-	xdl_file_prepare(orig, xpp->flags, &base_copy);
-	xdl_file_prepare(mf2,  xpp->flags, &side2);
+	xdl_3way_prepare(orig, mf1, mf2, xpp->flags, &three_way);
 
-	if (xdl_do_diff(&base, &side1, xpp, &xe1) < 0)
+	if (xdl_do_diff(&three_way.base, &three_way.side1, three_way.minimal_perfect_hash_size, xpp, &xe1) < 0)
 		return -1;
 
-	if (xdl_do_diff(&base_copy, &side2, xpp, &xe2) < 0)
+	if (xdl_do_diff(&three_way.base, &three_way.side2, three_way.minimal_perfect_hash_size, xpp, &xe2) < 0)
 		goto free_xe1; /* avoid double free of xe2 */
 
 	if (xdl_change_compact(&xe1.xdf1, &xe1.xdf2, xpp->flags) < 0 ||
