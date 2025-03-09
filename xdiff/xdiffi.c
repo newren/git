@@ -308,14 +308,14 @@ int xdl_recs_cmp(xdfile_t *xdf1, long off1, long lim1,
 }
 
 
-int xdl_do_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp,
+int xdl_do_diff(struct xdline_t *file1, struct xdline_t *file2, xpparam_t const *xpp,
 		xdfenv_t *xe) {
 	long ndiags;
 	long *kvd, *kvdf, *kvdb;
 	xdalgoenv_t xenv;
 	int res;
 
-	if (xdl_prepare_env(mf1, mf2, xpp->flags, xe) < 0)
+	if (xdl_prepare_env(file1, file2, xpp->flags, xe) < 0)
 		return -1;
 
 	if (XDF_DIFF_ALG(xpp->flags) == XDF_PATIENCE_DIFF) {
@@ -1044,7 +1044,13 @@ int xdl_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp,
 	xdfenv_t xe;
 	emit_func_t ef = xecfg->hunk_func ? xdl_call_hunk_func : xdl_emit_diff;
 
-	if (xdl_do_diff(mf1, mf2, xpp, &xe) < 0) {
+	xdl_file_init(&xe.xdf1.file);
+	xdl_file_init(&xe.xdf2.file);
+
+	xdl_file_prepare(mf1, xpp->flags, &xe.xdf1.file);
+	xdl_file_prepare(mf2, xpp->flags, &xe.xdf2.file);
+
+	if (xdl_do_diff(&xe.xdf1.file, &xe.xdf2.file, xpp, &xe) < 0) {
 
 		return -1;
 	}

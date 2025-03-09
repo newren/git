@@ -31,49 +31,89 @@
 static void xdl_free_ctx(xdfile_t *xdf);
 static int xdl_clean_mmatch(char const *dis, long i, long start, long e);
 
-#ifdef WITH_RUST
-extern int rust_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags);
-#endif
-static int c_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags) {
+void xdl_file_init(struct xdline_t *file) {
+	IVEC_INIT(file->minimal_perfect_hash);
+	IVEC_INIT(file->record);
+}
+
+void xdl_file_prepare(mmfile_t *mf, u64 flags, struct xdline_t *file) {
 	struct xlinereader_t reader;
 
-	IVEC_INIT(xdf->file.minimal_perfect_hash);
-	IVEC_INIT(xdf->file.record);
-	IVEC_INIT(xdf->rindex);
-	IVEC_INIT(xdf->consider);
+	xdl_file_init(file);
 
-	xdf->minimal_perfect_hash = &xdf->file.minimal_perfect_hash;
-	xdf->record = &xdf->file.record;
-
-	rust_ivec_reserve_exact(xdf->record, mf->size >> 4);
+	rust_ivec_reserve_exact(&file->record, mf->size >> 4);
 
 	xdl_linereader_init(&reader, (u8 const *) mf->ptr, mf->size);
 	while (true) {
 		xrecord_t *rec;
-		if (xdf->record->length >= xdf->record->capacity)
-			rust_ivec_reserve(xdf->record, 1);
-		rec = &xdf->record->ptr[xdf->record->length++];
+		if (file->record.length >= file->record.capacity)
+			rust_ivec_reserve(&file->record, 1);
+		rec = &file->record.ptr[file->record.length++];
 		if (!xdl_linereader_next(&reader, &rec->ptr, &rec->size_no_eol, &rec->size_with_eol)) {
-			xdf->record->length--;
+			file->record.length--;
 			break;
 		}
 	}
 
 	if ((flags & XDF_IGNORE_CR_AT_EOL) != 0) {
-		for (usize i = 0; i < xdf->record->length; i++) {
-			xrecord_t *rec = &xdf->record->ptr[i];
+		for (usize i = 0; i < file->record.length; i++) {
+			xrecord_t *rec = &file->record.ptr[i];
 			if (rec->size_no_eol > 0 && rec->ptr[rec->size_no_eol - 1] == '\r')
 				rec->size_no_eol--;
 		}
 	}
 
-	xdf->consider.capacity = xdf->consider.length = SENTINEL + xdf->record->length + SENTINEL;
-	XDL_CALLOC_ARRAY(xdf->consider.ptr, xdf->consider.capacity);
-
-	rust_ivec_reserve_exact(xdf->minimal_perfect_hash, xdf->record->length);
-
-	return 0;
+	rust_ivec_reserve_exact(&file->minimal_perfect_hash, file->record.length);
 }
+
+void xdl_file_free(struct xdline_t *file) {
+	rust_ivec_free(&file->minimal_perfect_hash);
+	rust_ivec_free(&file->record);
+}
+
+// #ifdef WITH_RUST
+// extern int rust_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags);
+// #endif
+// static int c_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags) {
+// 	struct xlinereader_t reader;
+//
+// 	IVEC_INIT(xdf->file.minimal_perfect_hash);
+// 	IVEC_INIT(xdf->file.record);
+// 	IVEC_INIT(xdf->rindex);
+// 	IVEC_INIT(xdf->consider);
+//
+// 	xdf->minimal_perfect_hash = &xdf->file.minimal_perfect_hash;
+// 	xdf->record = &xdf->file.record;
+//
+// 	rust_ivec_reserve_exact(xdf->record, mf->size >> 4);
+//
+// 	xdl_linereader_init(&reader, (u8 const *) mf->ptr, mf->size);
+// 	while (true) {
+// 		xrecord_t *rec;
+// 		if (xdf->record->length >= xdf->record->capacity)
+// 			rust_ivec_reserve(xdf->record, 1);
+// 		rec = &xdf->record->ptr[xdf->record->length++];
+// 		if (!xdl_linereader_next(&reader, &rec->ptr, &rec->size_no_eol, &rec->size_with_eol)) {
+// 			xdf->record->length--;
+// 			break;
+// 		}
+// 	}
+//
+// 	if ((flags & XDF_IGNORE_CR_AT_EOL) != 0) {
+// 		for (usize i = 0; i < xdf->record->length; i++) {
+// 			xrecord_t *rec = &xdf->record->ptr[i];
+// 			if (rec->size_no_eol > 0 && rec->ptr[rec->size_no_eol - 1] == '\r')
+// 				rec->size_no_eol--;
+// 		}
+// 	}
+//
+// 	xdf->consider.capacity = xdf->consider.length = SENTINEL + xdf->record->length + SENTINEL;
+// 	XDL_CALLOC_ARRAY(xdf->consider.ptr, xdf->consider.capacity);
+//
+// 	rust_ivec_reserve_exact(xdf->minimal_perfect_hash, xdf->record->length);
+//
+// 	return 0;
+// }
 
 
 static void xdl_free_ctx(xdfile_t *xdf) {
@@ -300,6 +340,16 @@ static void c_xdl_construct_mph_and_occurrences(xdfenv_t *xe, bool count_occurre
 }
 
 
+static void xdl_prepare_xdfile(struct xdline_t *file, xdfile_t *xdf) {
+	IVEC_INIT(xdf->consider);
+	IVEC_INIT(xdf->rindex);
+
+	xdf->minimal_perfect_hash = &file->minimal_perfect_hash;
+	xdf->record = &file->record;
+
+	xdf->consider.capacity = xdf->consider.length = xdf->record->length;
+	XDL_CALLOC_ARRAY(xdf->consider.ptr, SENTINEL + xdf->consider.capacity + SENTINEL);
+}
 
 
 #ifdef WITH_RUST
@@ -321,14 +371,14 @@ int xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, u64 flags, xdfenv_t *xe) {
 	return 0;
 }
 #else
-int xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, u64 flags, xdfenv_t *xe) {
+int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, u64 flags, xdfenv_t *xe) {
 	bool count_occurrences = (flags & (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)) == 0;
 	IVEC_INIT(xe->occurrence);
 	xe->delta_start = 0;
 	xe->delta_end = 0;
 
-	c_xdl_prepare_ctx(mf1, &xe->xdf1, flags);
-	c_xdl_prepare_ctx(mf2, &xe->xdf2, flags);
+	xdl_prepare_xdfile(file1, &xe->xdf1);
+	xdl_prepare_xdfile(file2, &xe->xdf2);
 
 	c_xdl_construct_mph_and_occurrences(xe, count_occurrences, flags);
 

@@ -23,9 +23,11 @@
 #if !defined(XPREPARE_H)
 #define XPREPARE_H
 
+void xdl_file_init(struct xdline_t *file);
+void xdl_file_prepare(mmfile_t *mf, u64 flags, struct xdline_t *file);
+void xdl_file_free(struct xdline_t *file);
 
-
-int xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, u64 flags, xdfenv_t *xe);
+int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, u64 flags, xdfenv_t *xe);
 void xdl_free_env(xdfenv_t *xe);
 
 

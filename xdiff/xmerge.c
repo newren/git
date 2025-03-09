@@ -369,6 +369,9 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 		xdchange_t *xscr, *x;
 		int i1 = m->i1, i2 = m->i2;
 
+		xdl_file_init(&xe.xdf1.file);
+		xdl_file_init(&xe.xdf2.file);
+
 		/* let's handle just the conflicts */
 		if (m->mode)
 			continue;
@@ -387,7 +390,11 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 		t2.ptr = (char *) xe2->xdf2.record->ptr[m->i2].ptr;
 		t2.size = (char *) xe2->xdf2.record->ptr[m->i2 + m->chg2 - 1].ptr
 			+ xe2->xdf2.record->ptr[m->i2 + m->chg2 - 1].size_with_eol - t2.ptr;
-		if (xdl_do_diff(&t1, &t2, xpp, &xe) < 0)
+
+		xdl_file_prepare(&t1, xpp->flags, &xe.xdf1.file);
+		xdl_file_prepare(&t2, xpp->flags, &xe.xdf2.file);
+
+		if (xdl_do_diff(&xe.xdf1.file, &xe.xdf2.file, xpp, &xe) < 0)
 			return -1;
 		if (xdl_change_compact(&xe.xdf1, &xe.xdf2, xpp->flags) < 0 ||
 		    xdl_change_compact(&xe.xdf2, &xe.xdf1, xpp->flags) < 0 ||
@@ -689,13 +696,23 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 	int status = -1;
 	xpparam_t const *xpp = &xmp->xpp;
 
+	xdl_file_init(&xe1.xdf1.file);
+	xdl_file_init(&xe1.xdf2.file);
+	xdl_file_init(&xe2.xdf1.file);
+	xdl_file_init(&xe2.xdf2.file);
+
 	result->ptr = NULL;
 	result->size = 0;
 
-	if (xdl_do_diff(orig, mf1, xpp, &xe1) < 0)
+	xdl_file_prepare(orig, xpp->flags, &xe1.xdf1.file);
+	xdl_file_prepare(mf1,  xpp->flags, &xe1.xdf2.file);
+	xdl_file_prepare(orig, xpp->flags, &xe2.xdf1.file);
+	xdl_file_prepare(mf2,  xpp->flags, &xe2.xdf2.file);
+
+	if (xdl_do_diff(&xe1.xdf1.file, &xe1.xdf2.file, xpp, &xe1) < 0)
 		return -1;
 
-	if (xdl_do_diff(orig, mf2, xpp, &xe2) < 0)
+	if (xdl_do_diff(&xe2.xdf1.file, &xe2.xdf2.file, xpp, &xe2) < 0)
 		goto free_xe1; /* avoid double free of xe2 */
 
 	if (xdl_change_compact(&xe1.xdf1, &xe1.xdf2, xpp->flags) < 0 ||

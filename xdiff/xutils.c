@@ -395,13 +395,20 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 	mmfile_t subfile1, subfile2;
 	xdfenv_t env;
 
+	xdl_file_init(&env.xdf1.file);
+	xdl_file_init(&env.xdf2.file);
+
 	subfile1.ptr = (char *) diff_env->xdf1.record->ptr[line1 - 1].ptr;
 	subfile1.size = (char *) diff_env->xdf1.record->ptr[line1 + count1 - 2].ptr +
 		diff_env->xdf1.record->ptr[line1 + count1 - 2].size_with_eol - subfile1.ptr;
 	subfile2.ptr = (char *) diff_env->xdf2.record->ptr[line2 - 1].ptr;
 	subfile2.size = (char *) diff_env->xdf2.record->ptr[line2 + count2 - 2].ptr +
 		diff_env->xdf2.record->ptr[line2 + count2 - 2].size_with_eol - subfile2.ptr;
-	if (xdl_do_diff(&subfile1, &subfile2, xpp, &env) < 0)
+
+	xdl_file_prepare(&subfile1, xpp->flags, &env.xdf1.file);
+	xdl_file_prepare(&subfile2, xpp->flags, &env.xdf2.file);
+
+	if (xdl_do_diff(&env.xdf1.file, &env.xdf2.file, xpp, &env) < 0)
 		return -1;
 
 	memcpy(diff_env->xdf1.consider.ptr + SENTINEL + line1 - 1, env.xdf1.consider.ptr + SENTINEL, count1);
