@@ -336,8 +336,6 @@ int xdl_do_diff(struct xdline_t *file1, struct xdline_t *file2, usize mph_size,
 	 */
 	ndiags = xe->xdf1.rindex.length + xe->xdf2.rindex.length + 3;
 	if (!XDL_ALLOC_ARRAY(kvd, 2 * ndiags + 2)) {
-
-		xdl_free_env(xe);
 		return -1;
 	}
 	kvdf = kvd;
@@ -357,8 +355,6 @@ int xdl_do_diff(struct xdline_t *file1, struct xdline_t *file2, usize mph_size,
 			   &xenv);
 	xdl_free(kvd);
  out:
-	if (res < 0)
-		xdl_free_env(xe);
 
 	return res;
 }
@@ -1042,38 +1038,37 @@ int xdl_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp,
 	     xdemitconf_t const *xecfg, xdemitcb_t *ecb) {
 	xdchange_t *xscr;
 	struct xd2way two_way;
-	xdfenv_t xe;
 	emit_func_t ef = xecfg->hunk_func ? xdl_call_hunk_func : xdl_emit_diff;
 
 	xdl_2way_prepare(mf1, mf2, xpp->flags, &two_way);
 
-	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &xe) < 0) {
+	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0) {
 
 		return -1;
 	}
-	if (xdl_change_compact(&xe.xdf1, &xe.xdf2, xpp->flags) < 0 ||
-	    xdl_change_compact(&xe.xdf2, &xe.xdf1, xpp->flags) < 0 ||
-	    xdl_build_script(&xe, &xscr) < 0) {
+	if (xdl_change_compact(&two_way.env.xdf1, &two_way.env.xdf2, xpp->flags) < 0 ||
+	    xdl_change_compact(&two_way.env.xdf2, &two_way.env.xdf1, xpp->flags) < 0 ||
+	    xdl_build_script(&two_way.env, &xscr) < 0) {
 
-		xdl_free_env(&xe);
+		xdl_2way_free(&two_way);
 		return -1;
 	}
 	if (xscr) {
 		if (xpp->flags & XDF_IGNORE_BLANK_LINES)
-			xdl_mark_ignorable_lines(xscr, &xe, xpp->flags);
+			xdl_mark_ignorable_lines(xscr, &two_way.env, xpp->flags);
 
 		if (xpp->ignore_regex)
-			xdl_mark_ignorable_regex(xscr, &xe, xpp);
+			xdl_mark_ignorable_regex(xscr, &two_way.env, xpp);
 
-		if (ef(&xe, xscr, ecb, xecfg) < 0) {
+		if (ef(&two_way.env, xscr, ecb, xecfg) < 0) {
 
 			xdl_free_script(xscr);
-			xdl_free_env(&xe);
+			xdl_2way_free(&two_way);
 			return -1;
 		}
 		xdl_free_script(xscr);
 	}
-	xdl_free_env(&xe);
+	xdl_2way_free(&two_way);
 
 	return 0;
 }

@@ -366,7 +366,6 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 	for (; m; m = m->next) {
 		mmfile_t t1, t2;
 		struct xd2way two_way;
-		xdfenv_t xe;
 		xdchange_t *xscr, *x;
 		int i1 = m->i1, i2 = m->i2;
 
@@ -391,17 +390,17 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 
 		xdl_2way_prepare(&t1, &t2, xpp->flags, &two_way);
 
-		if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &xe) < 0)
+		if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0)
 			return -1;
-		if (xdl_change_compact(&xe.xdf1, &xe.xdf2, xpp->flags) < 0 ||
-		    xdl_change_compact(&xe.xdf2, &xe.xdf1, xpp->flags) < 0 ||
-		    xdl_build_script(&xe, &xscr) < 0) {
-			xdl_free_env(&xe);
+		if (xdl_change_compact(&two_way.env.xdf1, &two_way.env.xdf2, xpp->flags) < 0 ||
+		    xdl_change_compact(&two_way.env.xdf2, &two_way.env.xdf1, xpp->flags) < 0 ||
+		    xdl_build_script(&two_way.env, &xscr) < 0) {
+			xdl_2way_free(&two_way);
 			return -1;
 		}
 		if (!xscr) {
 			/* If this happens, the changes are identical. */
-			xdl_free_env(&xe);
+			xdl_2way_free(&two_way);
 			m->mode = 4;
 			continue;
 		}
@@ -413,7 +412,7 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 		while (xscr->next) {
 			xdmerge_t *m2 = xdl_malloc(sizeof(xdmerge_t));
 			if (!m2) {
-				xdl_free_env(&xe);
+				xdl_2way_free(&two_way);
 				xdl_free_script(x);
 				return -1;
 			}
@@ -427,7 +426,7 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 			m->i2 = xscr->i2 + i2;
 			m->chg2 = xscr->chg2;
 		}
-		xdl_free_env(&xe);
+		xdl_2way_free(&two_way);
 		xdl_free_script(x);
 	}
 	return 0;
@@ -690,7 +689,6 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 {
 	xdchange_t *xscr1 = NULL, *xscr2 = NULL;
 	struct xd3way three_way;
-	xdfenv_t xe1, xe2;
 	int status = -1;
 	xpparam_t const *xpp = &xmp->xpp;
 
@@ -699,20 +697,20 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 
 	xdl_3way_prepare(orig, mf1, mf2, xpp->flags, &three_way);
 
-	if (xdl_do_diff(&three_way.base, &three_way.side1, three_way.minimal_perfect_hash_size, xpp, &xe1) < 0)
+	if (xdl_do_diff(&three_way.base, &three_way.side1, three_way.minimal_perfect_hash_size, xpp, &three_way.xe1) < 0)
 		return -1;
 
-	if (xdl_do_diff(&three_way.base, &three_way.side2, three_way.minimal_perfect_hash_size, xpp, &xe2) < 0)
+	if (xdl_do_diff(&three_way.base, &three_way.side2, three_way.minimal_perfect_hash_size, xpp, &three_way.xe2) < 0)
 		goto free_xe1; /* avoid double free of xe2 */
 
-	if (xdl_change_compact(&xe1.xdf1, &xe1.xdf2, xpp->flags) < 0 ||
-	    xdl_change_compact(&xe1.xdf2, &xe1.xdf1, xpp->flags) < 0 ||
-	    xdl_build_script(&xe1, &xscr1) < 0)
+	if (xdl_change_compact(&three_way.xe1.xdf1, &three_way.xe1.xdf2, xpp->flags) < 0 ||
+	    xdl_change_compact(&three_way.xe1.xdf2, &three_way.xe1.xdf1, xpp->flags) < 0 ||
+	    xdl_build_script(&three_way.xe1, &xscr1) < 0)
 		goto out;
 
-	if (xdl_change_compact(&xe2.xdf1, &xe2.xdf2, xpp->flags) < 0 ||
-	    xdl_change_compact(&xe2.xdf2, &xe2.xdf1, xpp->flags) < 0 ||
-	    xdl_build_script(&xe2, &xscr2) < 0)
+	if (xdl_change_compact(&three_way.xe2.xdf1, &three_way.xe2.xdf2, xpp->flags) < 0 ||
+	    xdl_change_compact(&three_way.xe2.xdf2, &three_way.xe2.xdf1, xpp->flags) < 0 ||
+	    xdl_build_script(&three_way.xe2, &xscr2) < 0)
 		goto out;
 
 	if (!xscr1) {
@@ -730,17 +728,16 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 		memcpy(result->ptr, mf1->ptr, mf1->size);
 		result->size = mf1->size;
 	} else {
-		status = xdl_do_merge(&xe1, xscr1,
-				      &xe2, xscr2,
+		status = xdl_do_merge(&three_way.xe1, xscr1,
+				      &three_way.xe2, xscr2,
 				      xmp, result);
 	}
  out:
 	xdl_free_script(xscr1);
 	xdl_free_script(xscr2);
 
-	xdl_free_env(&xe2);
  free_xe1:
-	xdl_free_env(&xe1);
+	xdl_3way_free(&three_way);
 
 	return status;
 }

@@ -28,9 +28,6 @@
 #define XDL_SIMSCAN_WINDOW 100
 
 
-static void xdl_free_ctx(xdfile_t *xdf);
-static int xdl_clean_mmatch(char const *dis, long i, long start, long e);
-
 void xdl_file_init(struct xdline_t *file) {
 	IVEC_INIT(file->minimal_perfect_hash);
 	IVEC_INIT(file->record);
@@ -69,62 +66,6 @@ void xdl_file_prepare(mmfile_t *mf, u64 flags, struct xdline_t *file) {
 void xdl_file_free(struct xdline_t *file) {
 	rust_ivec_free(&file->minimal_perfect_hash);
 	rust_ivec_free(&file->record);
-}
-
-// #ifdef WITH_RUST
-// extern int rust_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags);
-// #endif
-// static int c_xdl_prepare_ctx(mmfile_t *mf, xdfile_t *xdf, u64 flags) {
-// 	struct xlinereader_t reader;
-//
-// 	IVEC_INIT(xdf->file.minimal_perfect_hash);
-// 	IVEC_INIT(xdf->file.record);
-// 	IVEC_INIT(xdf->rindex);
-// 	IVEC_INIT(xdf->consider);
-//
-// 	xdf->minimal_perfect_hash = &xdf->file.minimal_perfect_hash;
-// 	xdf->record = &xdf->file.record;
-//
-// 	rust_ivec_reserve_exact(xdf->record, mf->size >> 4);
-//
-// 	xdl_linereader_init(&reader, (u8 const *) mf->ptr, mf->size);
-// 	while (true) {
-// 		xrecord_t *rec;
-// 		if (xdf->record->length >= xdf->record->capacity)
-// 			rust_ivec_reserve(xdf->record, 1);
-// 		rec = &xdf->record->ptr[xdf->record->length++];
-// 		if (!xdl_linereader_next(&reader, &rec->ptr, &rec->size_no_eol, &rec->size_with_eol)) {
-// 			xdf->record->length--;
-// 			break;
-// 		}
-// 	}
-//
-// 	if ((flags & XDF_IGNORE_CR_AT_EOL) != 0) {
-// 		for (usize i = 0; i < xdf->record->length; i++) {
-// 			xrecord_t *rec = &xdf->record->ptr[i];
-// 			if (rec->size_no_eol > 0 && rec->ptr[rec->size_no_eol - 1] == '\r')
-// 				rec->size_no_eol--;
-// 		}
-// 	}
-//
-// 	xdf->consider.capacity = xdf->consider.length = SENTINEL + xdf->record->length + SENTINEL;
-// 	XDL_CALLOC_ARRAY(xdf->consider.ptr, xdf->consider.capacity);
-//
-// 	rust_ivec_reserve_exact(xdf->minimal_perfect_hash, xdf->record->length);
-//
-// 	return 0;
-// }
-
-
-static void xdl_free_ctx(xdfile_t *xdf) {
-	rust_ivec_free(&xdf->consider);
-	rust_ivec_free(&xdf->rindex);
-}
-
-
-void xdl_free_env(xdfenv_t *xe) {
-	xdl_free_ctx(&xe->xdf1);
-	xdl_free_ctx(&xe->xdf2);
 }
 
 
@@ -399,3 +340,29 @@ int xdl_3way_prepare(mmfile_t *mf_base, mmfile_t *mf_side1, mmfile_t *mf_side2, 
 	return 0;
 }
 
+static void xdl_free_ctx(xdfile_t *xdf) {
+	xdf->minimal_perfect_hash = NULL;
+	xdf->record = NULL;
+	rust_ivec_free(&xdf->consider);
+	rust_ivec_free(&xdf->rindex);
+}
+
+
+static void xdl_free_env(xdfenv_t *xe) {
+	xdl_free_ctx(&xe->xdf1);
+	xdl_free_ctx(&xe->xdf2);
+}
+
+void xdl_2way_free(struct xd2way *two_way) {
+	xdl_file_free(&two_way->file1);
+	xdl_file_free(&two_way->file2);
+	xdl_free_env(&two_way->env);
+}
+
+void xdl_3way_free(struct xd3way *three_way) {
+	xdl_file_free(&three_way->base);
+	xdl_file_free(&three_way->side1);
+	xdl_file_free(&three_way->side2);
+	xdl_free_env(&three_way->xe1);
+	xdl_free_env(&three_way->xe2);
+}

@@ -394,7 +394,6 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 	 */
 	mmfile_t subfile1, subfile2;
 	struct xd2way two_way;
-	xdfenv_t env;
 
 	subfile1.ptr = (char *) diff_env->xdf1.record->ptr[line1 - 1].ptr;
 	subfile1.size = (char *) diff_env->xdf1.record->ptr[line1 + count1 - 2].ptr +
@@ -405,13 +404,13 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 
 	xdl_2way_prepare(&subfile1, &subfile2, xpp->flags, &two_way);
 
-	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &env) < 0)
+	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0)
 		return -1;
 
-	memcpy(diff_env->xdf1.consider.ptr + SENTINEL + line1 - 1, env.xdf1.consider.ptr + SENTINEL, count1);
-	memcpy(diff_env->xdf2.consider.ptr + SENTINEL + line2 - 1, env.xdf2.consider.ptr + SENTINEL, count2);
+	memcpy(diff_env->xdf1.consider.ptr + SENTINEL + line1 - 1, two_way.env.xdf1.consider.ptr + SENTINEL, count1);
+	memcpy(diff_env->xdf2.consider.ptr + SENTINEL + line2 - 1, two_way.env.xdf2.consider.ptr + SENTINEL, count2);
 
-	xdl_free_env(&env);
+	xdl_2way_free(&two_way);
 
 	return 0;
 }

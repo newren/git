@@ -75,11 +75,13 @@ typedef struct s_xdfenv {
 
 struct xd2way {
 	struct xdline_t file1, file2;
+	xdfenv_t env;
 	usize minimal_perfect_hash_size;
 };
 
 struct xd3way {
 	struct xdline_t base, side1, side2;
+	xdfenv_t xe1, xe2;
 	usize minimal_perfect_hash_size;
 };
 
