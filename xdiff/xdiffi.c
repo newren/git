@@ -1044,13 +1044,12 @@ int xdl_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp,
 	xdfenv_t xe;
 	emit_func_t ef = xecfg->hunk_func ? xdl_call_hunk_func : xdl_emit_diff;
 
-	xdl_file_init(&xe.xdf1.file);
-	xdl_file_init(&xe.xdf2.file);
+	struct xdline_t file1, file2;
 
-	xdl_file_prepare(mf1, xpp->flags, &xe.xdf1.file);
-	xdl_file_prepare(mf2, xpp->flags, &xe.xdf2.file);
+	xdl_file_prepare(mf1, xpp->flags, &file1);
+	xdl_file_prepare(mf2, xpp->flags, &file2);
 
-	if (xdl_do_diff(&xe.xdf1.file, &xe.xdf2.file, xpp, &xe) < 0) {
+	if (xdl_do_diff(&file1, &file2, xpp, &xe) < 0) {
 
 		return -1;
 	}

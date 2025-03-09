@@ -393,10 +393,8 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 	 * ranges of lines instead of the whole files.
 	 */
 	mmfile_t subfile1, subfile2;
+	struct xdline_t file1, file2;
 	xdfenv_t env;
-
-	xdl_file_init(&env.xdf1.file);
-	xdl_file_init(&env.xdf2.file);
 
 	subfile1.ptr = (char *) diff_env->xdf1.record->ptr[line1 - 1].ptr;
 	subfile1.size = (char *) diff_env->xdf1.record->ptr[line1 + count1 - 2].ptr +
@@ -405,10 +403,10 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 	subfile2.size = (char *) diff_env->xdf2.record->ptr[line2 + count2 - 2].ptr +
 		diff_env->xdf2.record->ptr[line2 + count2 - 2].size_with_eol - subfile2.ptr;
 
-	xdl_file_prepare(&subfile1, xpp->flags, &env.xdf1.file);
-	xdl_file_prepare(&subfile2, xpp->flags, &env.xdf2.file);
+	xdl_file_prepare(&subfile1, xpp->flags, &file1);
+	xdl_file_prepare(&subfile2, xpp->flags, &file2);
 
-	if (xdl_do_diff(&env.xdf1.file, &env.xdf2.file, xpp, &env) < 0)
+	if (xdl_do_diff(&file1, &file2, xpp, &env) < 0)
 		return -1;
 
 	memcpy(diff_env->xdf1.consider.ptr + SENTINEL + line1 - 1, env.xdf1.consider.ptr + SENTINEL, count1);

@@ -53,7 +53,6 @@ struct xdline_t {
 };
 
 typedef struct s_xdfile {
-	struct xdline_t file;
 	ivec_u64 *minimal_perfect_hash;
 	ivec_xrecord_t *record;
 	ivec_u8 consider;
