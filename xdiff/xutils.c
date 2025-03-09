@@ -404,7 +404,7 @@ int xdl_fall_back_diff(xdfenv_t *diff_env, xpparam_t const *xpp,
 
 	xdl_2way_prepare(&subfile1, &subfile2, xpp->flags, &two_way);
 
-	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0)
+	if (xdl_do_diff(xpp, &two_way.env) < 0)
 		return -1;
 
 	memcpy(diff_env->xdf1.consider.ptr + SENTINEL + line1 - 1, two_way.env.xdf1.consider.ptr + SENTINEL, count1);

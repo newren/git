@@ -308,15 +308,11 @@ int xdl_recs_cmp(xdfile_t *xdf1, long off1, long lim1,
 }
 
 
-int xdl_do_diff(struct xdline_t *file1, struct xdline_t *file2, usize mph_size,
-	xpparam_t const *xpp, xdfenv_t *xe) {
+int xdl_do_diff(xpparam_t const *xpp, xdfenv_t *xe) {
 	long ndiags;
 	long *kvd, *kvdf, *kvdb;
 	xdalgoenv_t xenv;
 	int res;
-
-	if (xdl_prepare_env(file1, file2, mph_size, xpp->flags, xe) < 0)
-		return -1;
 
 	if (XDF_DIFF_ALG(xpp->flags) == XDF_PATIENCE_DIFF) {
 		res = xdl_do_patience_diff(xpp, xe);
@@ -1042,7 +1038,7 @@ int xdl_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp,
 
 	xdl_2way_prepare(mf1, mf2, xpp->flags, &two_way);
 
-	if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0) {
+	if (xdl_do_diff(xpp, &two_way.env) < 0) {
 
 		return -1;
 	}

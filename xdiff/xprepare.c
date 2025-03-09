@@ -259,26 +259,7 @@ static void xdl_prepare_xdfile(struct xdline_t *file, xdfile_t *xdf) {
 }
 
 
-#ifdef WITH_RUST
-extern int rust_xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, ivec_xdloccurrence_t *occ_ptr, u64 flags, xdfenv_t *xe);
-int xdl_prepare_env(mmfile_t *mf1, mmfile_t *mf2, u64 flags, xdfenv_t *xe) {
-
-	bool count_occurrences = (flags & (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)) == 0;
-	IVEC_INIT(xe->occurrence);
-
-	rust_xdl_prepare_ctx(mf1, &xe->xdf1, flags);
-	rust_xdl_prepare_ctx(mf2, &xe->xdf2, flags);
-
-	rust_xdl_construct_mph_and_occurrences(xe, count_occurrences, flags);
-
-	if ((flags & (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)) == 0) {
-		xdl_optimize_ctxs(xe);
-	}
-
-	return 0;
-}
-#else
-int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, usize mph_size, u64 flags, xdfenv_t *xe) {
+static void xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, usize mph_size, u64 flags, xdfenv_t *xe) {
 	xe->delta_start = 0;
 	xe->delta_end = 0;
 
@@ -289,10 +270,7 @@ int xdl_prepare_env(struct xdline_t *file1, struct xdline_t *file2, usize mph_si
 	if ((flags & (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)) == 0) {
 		xdl_optimize_ctxs(xe);
 	}
-
-	return 0;
 }
-#endif
 
 static void mph_ingest(struct xdl_minimal_perfect_hash_builder_t *mphb, ivec_xrecord_t *record, ivec_u64 *mph) {
 	for (usize i = 0; i < record->length; i++) {
@@ -316,6 +294,8 @@ int xdl_2way_prepare(mmfile_t *mf1, mmfile_t *mf2, u64 flags, struct xd2way *two
 	mph_ingest(&mphb, &two_way->file2.record, &two_way->file2.minimal_perfect_hash);
 	two_way->minimal_perfect_hash_size = xdl_mphb_finish(&mphb);
 
+	xdl_prepare_env(&two_way->file1, &two_way->file2, two_way->minimal_perfect_hash_size, flags, &two_way->env);
+
 	return 0;
 }
 
@@ -336,6 +316,9 @@ int xdl_3way_prepare(mmfile_t *mf_base, mmfile_t *mf_side1, mmfile_t *mf_side2, 
 	mph_ingest(&mphb, &three_way->side1.record, &three_way->side1.minimal_perfect_hash);
 	mph_ingest(&mphb, &three_way->side2.record, &three_way->side2.minimal_perfect_hash);
 	three_way->minimal_perfect_hash_size = xdl_mphb_finish(&mphb);
+
+	xdl_prepare_env(&three_way->base, &three_way->side1, three_way->minimal_perfect_hash_size, flags, &three_way->xe1);
+	xdl_prepare_env(&three_way->base, &three_way->side2, three_way->minimal_perfect_hash_size, flags, &three_way->xe2);
 
 	return 0;
 }

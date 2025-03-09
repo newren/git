@@ -390,7 +390,7 @@ static int xdl_refine_conflicts(xdfenv_t *xe1, xdfenv_t *xe2, xdmerge_t *m,
 
 		xdl_2way_prepare(&t1, &t2, xpp->flags, &two_way);
 
-		if (xdl_do_diff(&two_way.file1, &two_way.file2, two_way.minimal_perfect_hash_size, xpp, &two_way.env) < 0)
+		if (xdl_do_diff(xpp, &two_way.env) < 0)
 			return -1;
 		if (xdl_change_compact(&two_way.env.xdf1, &two_way.env.xdf2, xpp->flags) < 0 ||
 		    xdl_change_compact(&two_way.env.xdf2, &two_way.env.xdf1, xpp->flags) < 0 ||
@@ -697,10 +697,10 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 
 	xdl_3way_prepare(orig, mf1, mf2, xpp->flags, &three_way);
 
-	if (xdl_do_diff(&three_way.base, &three_way.side1, three_way.minimal_perfect_hash_size, xpp, &three_way.xe1) < 0)
+	if (xdl_do_diff(xpp, &three_way.xe1) < 0)
 		return -1;
 
-	if (xdl_do_diff(&three_way.base, &three_way.side2, three_way.minimal_perfect_hash_size, xpp, &three_way.xe2) < 0)
+	if (xdl_do_diff(xpp, &three_way.xe2) < 0)
 		goto free_xe1; /* avoid double free of xe2 */
 
 	if (xdl_change_compact(&three_way.xe1.xdf1, &three_way.xe1.xdf2, xpp->flags) < 0 ||
