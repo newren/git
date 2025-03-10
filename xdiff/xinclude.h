@@ -33,5 +33,6 @@
 #include "xprepare.h"
 #include "xdiffi.h"
 #include "xemit.h"
+#include "xtrace2.h"
 
 #endif /* #if !defined(XINCLUDE_H) */
