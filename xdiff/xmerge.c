@@ -692,6 +692,8 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
 	int status = -1;
 	xpparam_t const *xpp = &xmp->xpp;
 
+	xd_trace2_region_enter("xdiff", "xdl_merge");
+
 	result->ptr = NULL;
 	result->size = 0;
 
@@ -739,5 +741,6 @@ int xdl_merge(mmfile_t *orig, mmfile_t *mf1, mmfile_t *mf2,
  free_xe1:
 	xdl_3way_free(&three_way);
 
+	xd_trace2_region_leave("xdiff", "xdl_merge");
 	return status;
 }

@@ -283,6 +283,7 @@ int xdl_2way_prepare(mmfile_t *mf1, mmfile_t *mf2, u64 flags, struct xd2way *two
 	struct xdl_minimal_perfect_hash_builder_t mphb;
 	usize max_unique_size = 0;
 
+	xd_trace2_region_enter("xdiff", "xdl_2way_prepare");
 	xdl_file_prepare(mf1, flags, &two_way->file1);
 	xdl_file_prepare(mf2, flags, &two_way->file2);
 
@@ -296,6 +297,7 @@ int xdl_2way_prepare(mmfile_t *mf1, mmfile_t *mf2, u64 flags, struct xd2way *two
 
 	xdl_prepare_env(&two_way->file1, &two_way->file2, two_way->minimal_perfect_hash_size, flags, &two_way->env);
 
+	xd_trace2_region_leave("xdiff", "xdl_2way_prepare");
 	return 0;
 }
 
@@ -303,6 +305,7 @@ int xdl_3way_prepare(mmfile_t *mf_base, mmfile_t *mf_side1, mmfile_t *mf_side2, 
 	struct xdl_minimal_perfect_hash_builder_t mphb;
 	usize max_unique_size = 0;
 
+	xd_trace2_region_enter("xdiff", "xdl_3way_prepare");
 	xdl_file_prepare(mf_base, flags, &three_way->base);
 	xdl_file_prepare(mf_side1, flags, &three_way->side1);
 	xdl_file_prepare(mf_side2, flags, &three_way->side2);
@@ -320,6 +323,7 @@ int xdl_3way_prepare(mmfile_t *mf_base, mmfile_t *mf_side1, mmfile_t *mf_side2, 
 	xdl_prepare_env(&three_way->base, &three_way->side1, three_way->minimal_perfect_hash_size, flags, &three_way->xe1);
 	xdl_prepare_env(&three_way->base, &three_way->side2, three_way->minimal_perfect_hash_size, flags, &three_way->xe2);
 
+	xd_trace2_region_leave("xdiff", "xdl_3way_prepare");
 	return 0;
 }
 
