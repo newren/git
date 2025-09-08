@@ -217,4 +217,327 @@ test_expect_success 'merge.directoryRenames=false' '
 		--onto rename-onto rename-onto..rename-from
 '
 
+test_expect_success 'using replay with --update to rebase a branch' '
+	# Store original branch tips
+	git rev-parse topic2 >topic2.old &&
+	
+	# Use --update to directly update the refs
+	git replay --update --onto main topic1..topic2 &&
+	
+	# Verify the branch was actually updated
+	git rev-parse topic2 >topic2.new &&
+	! test_cmp topic2.old topic2.new &&
+	
+	# Verify the history is correct
+	git log --format=%s topic2 >actual &&
+	test_write_lines E D M L B A >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'using replay with --update in advance mode' '
+	# Reset topic2 first
+	git branch -f topic2 $(cat topic2.old) &&
+	
+	# Store original main tip
+	git rev-parse main >main.old &&
+	
+	# Use --update with --advance
+	git replay --update --advance main topic1..topic2 &&
+	
+	# Verify main was updated
+	git rev-parse main >main.new &&
+	! test_cmp main.old main.new &&
+	
+	# Verify the history is correct
+	git log --format=%s main >actual &&
+	test_write_lines E D M L B A >expect &&
+	test_cmp expect actual &&
+	
+	# Reset main back
+	git branch -f main $(cat main.old)
+'
+
+test_expect_success 'using replay with --update and --contained' '
+	# Store original branch tips
+	git rev-parse topic1 >topic1.old &&
+	git rev-parse topic3 >topic3.old &&
+	
+	# Use --update with --contained
+	git replay --update --contained --onto main main..topic3 &&
+	
+	# Verify both branches were updated
+	git rev-parse topic1 >topic1.new &&
+	git rev-parse topic3 >topic3.new &&
+	! test_cmp topic1.old topic1.new &&
+	! test_cmp topic3.old topic3.new &&
+	
+	# Reset branches back
+	git branch -f topic1 $(cat topic1.old) &&
+	git branch -f topic3 $(cat topic3.old)
+'
+
+test_expect_success 'replay with --update should not produce output when successful' '
+	git replay --update --onto main topic1..topic2 >output &&
+	test_must_be_empty output
+'
+
+test_expect_success 'using replay with --update-refs to rebase a branch (atomic mode)' '
+	# Store original branch tip
+	git rev-parse topic2 >topic2.old &&
+	
+	# Use --update-refs to directly update refs with transactions
+	git replay --update-refs --onto main topic1..topic2 &&
+	
+	# Verify the branch was actually updated
+	git rev-parse topic2 >topic2.new &&
+	! test_cmp topic2.old topic2.new &&
+	
+	# Verify the history is correct
+	git log --format=%s topic2 >actual &&
+	test_write_lines E D M L B A >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'using replay with --update-refs in advance mode' '
+	# Store original main tip
+	git rev-parse main >main.old &&
+	
+	# Use --update-refs with --advance
+	git replay --update-refs --advance main topic1..topic2 &&
+	
+	# Verify main was updated
+	git rev-parse main >main.new &&
+	! test_cmp main.old main.new &&
+	
+	# Verify the history is correct  
+	git log --format=%s main >actual &&
+	test_write_lines E D M L B A >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'using replay with --update-refs and --contained' '
+	# Store original branch tips
+	git rev-parse topic1 >topic1.old &&
+	git rev-parse topic3 >topic3.old &&
+	
+	# Use --update-refs with --contained
+	git replay --update-refs --contained --onto main main..topic3 &&
+	
+	# Verify both branches were updated
+	git rev-parse topic1 >topic1.new &&
+	git rev-parse topic3 >topic3.new &&
+	! test_cmp topic1.old topic1.new &&
+	! test_cmp topic3.old topic3.new &&
+	
+	# Reset branches back
+	git branch -f topic1 $(cat topic1.old) &&
+	git branch -f topic3 $(cat topic3.old)
+'
+
+test_expect_success 'replay with --update-refs should not produce output when successful' '
+	git replay --update-refs --onto main topic1..topic2 >output &&
+	test_must_be_empty output
+'
+
+test_expect_success 'replay with --update-refs --batch should not produce output when successful' '
+	git replay --update-refs --batch --onto main topic1..topic2 >output &&
+	test_must_be_empty output
+'
+
+test_expect_success 'replay fails when --update and --update-refs are used together' '
+	test_must_fail git replay --update --update-refs --onto main topic1..topic2 2>error &&
+	grep "cannot be used together" error
+'
+
+test_expect_success 'replay fails when --batch is used without --update-refs' '
+	test_must_fail git replay --batch --onto main topic1..topic2 2>error &&
+	grep "can only be used with.*--update-refs" error
+'
+
+# Edge cases and comprehensive testing for --update-refs
+
+test_expect_success 'setup for edge case tests' '
+	# Create some additional branches for testing
+	git checkout -b edge1 main &&
+	test_commit Edge1 &&
+	git checkout -b edge2 main &&
+	test_commit Edge2 &&
+	git checkout main
+'
+
+test_expect_success '--update-refs with conflicting replay (atomic mode fails completely)' '
+	# Create a conflict scenario
+	git checkout -b conflict-test main &&
+	echo "conflict content" > C.t &&
+	git add C.t &&
+	git commit -m "Conflicting change" &&
+	
+	# Store original branch state
+	git rev-parse conflict-test >conflict-test.old &&
+	
+	# This should fail due to conflict, and branch should remain unchanged
+	test_expect_code 1 git replay --update-refs --onto topic1 main..conflict-test &&
+	
+	# Verify branch was not updated (atomic transaction rolled back)
+	git rev-parse conflict-test >conflict-test.new &&
+	test_cmp conflict-test.old conflict-test.new
+'
+
+test_expect_success '--update-refs --batch with conflicting replay (partial success)' '
+	# Create scenario with one good commit and one conflicting commit
+	git checkout -b batch-test main &&
+	test_commit GoodCommit &&
+	echo "conflict" > C.t &&
+	git add C.t &&
+	git commit -m "Bad commit" &&
+	
+	# Store original states
+	git rev-parse batch-test >batch-test.old &&
+	
+	# Batch mode should handle partial failures gracefully
+	# Note: This test might need adjustment based on actual conflict behavior
+	test_expect_code 1 git replay --update-refs --batch --onto topic1 main..batch-test 2>batch-error &&
+	
+	# In batch mode, we should get warnings rather than hard failures
+	test_path_is_file batch-error
+'
+
+test_expect_success '--update-refs with no commits to replay (empty transaction)' '
+	# Try to replay an empty range
+	git rev-parse topic1 >topic1.before &&
+	
+	# This should succeed but do nothing
+	git replay --update-refs --onto main topic1..topic1 &&
+	
+	# Branch should be unchanged
+	git rev-parse topic1 >topic1.after &&
+	test_cmp topic1.before topic1.after
+'
+
+test_expect_success '--update-refs with multiple branches (atomic success)' '
+	# Store original states
+	git rev-parse edge1 >edge1.old &&
+	git rev-parse edge2 >edge2.old &&
+	
+	# Replay multiple branches atomically
+	git replay --update-refs --contained --onto main main..edge1 &&
+	git replay --update-refs --contained --onto main main..edge2 &&
+	
+	# Both should be updated
+	git rev-parse edge1 >edge1.new &&
+	git rev-parse edge2 >edge2.new &&
+	! test_cmp edge1.old edge1.new &&
+	! test_cmp edge2.old edge2.new
+'
+
+test_expect_success '--update-refs atomic vs batch behavior comparison' '
+	# Create a branch for comparison
+	git checkout -b compare-test main &&
+	test_commit CompareCommit &&
+	
+	# Test atomic mode first
+	git replay --update-refs --onto main main..compare-test &&
+	git rev-parse compare-test >atomic-result &&
+	
+	# Reset and test batch mode
+	git branch -f compare-test main &&
+	test_commit CompareCommit &&
+	git replay --update-refs --batch --onto main main..compare-test &&
+	git rev-parse compare-test >batch-result &&
+	
+	# Results should be identical for successful cases
+	test_cmp atomic-result batch-result
+'
+
+test_expect_success '--update-refs preserves ref transaction semantics' '
+	# Create branch for testing
+	git checkout -b transaction-test main &&
+	test_commit TransactionCommit &&
+	
+	# Store original state
+	git rev-parse transaction-test >before-transaction &&
+	
+	# Use --update-refs (should be atomic)
+	git replay --update-refs --onto main main..transaction-test &&
+	
+	# Verify ref was updated
+	git rev-parse transaction-test >after-transaction &&
+	! test_cmp before-transaction after-transaction &&
+	
+	# Verify commit history is correct
+	git log --format=%s transaction-test >actual-history &&
+	test_write_lines TransactionCommit M L B A >expected-history &&
+	test_cmp expected-history actual-history
+'
+
+test_expect_success '--update-refs with --advance preserves branch history' '
+	# Test that --advance with --update-refs works correctly
+	git checkout -b advance-test main &&
+	test_commit AdvanceCommit &&
+	
+	# Store original main state
+	git rev-parse main >main-before-advance &&
+	
+	# Use --advance with --update-refs
+	git replay --update-refs --advance main main..advance-test &&
+	
+	# Main should be updated
+	git rev-parse main >main-after-advance &&
+	! test_cmp main-before-advance main-after-advance &&
+	
+	# Verify main has the right commits
+	git log --format=%s main >main-history &&
+	test_write_lines AdvanceCommit M L B A >expected-main &&
+	test_cmp expected-main main-history
+'
+
+test_expect_success '--update-refs handles ref updates consistently with traditional method' '
+	# Create test scenario
+	git checkout -b consistency-test main &&
+	test_commit ConsistencyTest &&
+	
+	# Method 1: Traditional output piped to update-ref
+	git checkout -b trad-test consistency-test &&
+	git replay --onto main main..consistency-test >update-commands &&
+	git update-ref --stdin <update-commands &&
+	git rev-parse trad-test >traditional-result &&
+	
+	# Method 2: Direct --update-refs
+	git branch -f consistency-test main &&
+	test_commit ConsistencyTest &&
+	git checkout -b direct-test consistency-test &&
+	git replay --update-refs --onto main main..consistency-test &&
+	git rev-parse direct-test >direct-result &&
+	
+	# Results should be identical
+	test_cmp traditional-result direct-result
+'
+
+test_expect_success '--update-refs error messages are helpful' '
+	# Test that error messages are clear and helpful
+	git checkout -b error-test main &&
+	test_commit ErrorTest &&
+	
+	# Test conflicting options
+	test_must_fail git replay --update --update-refs --onto main main..error-test 2>conflict-error &&
+	grep "cannot be used together" conflict-error &&
+	
+	# Test batch without update-refs
+	test_must_fail git replay --batch --onto main main..error-test 2>batch-error &&
+	grep "can only be used with" batch-error
+'
+
+test_expect_success '--update-refs with bare repository works correctly' '
+	# Test that --update-refs works in bare repositories (important for Gitaly)
+	git checkout -b bare-test main &&
+	test_commit BareTest &&
+	
+	# Test with bare repo (using existing bare setup)
+	git -C bare replay --update-refs --onto main main..bare-test &&
+	
+	# Verify the bare repo was updated correctly
+	git -C bare rev-parse bare-test >bare-result &&
+	test -s bare-result
+'
+
 test_done

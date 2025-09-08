@@ -411,6 +411,7 @@ integration_tests = [
   't3601-rm-pathspec-file.sh',
   't3602-rm-sparse-checkout.sh',
   't3650-replay-basics.sh',
+  't3651-replay-update-refs.sh',
   't3700-add.sh',
   't3701-add-interactive.sh',
   't3702-add-edit.sh',
