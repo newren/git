@@ -9,16 +9,17 @@ git-replay - EXPERIMENTAL: Replay commits on a new base, works with bare repos t
 SYNOPSIS
 --------
 [verse]
-(EXPERIMENTAL!) 'git replay' ([--contained] --onto <newbase> | --advance <branch>) <revision-range>...
+(EXPERIMENTAL!) 'git replay' ([--contained] --onto <newbase> | --advance <branch>) [--update | --update-refs [--batch]] <revision-range>...
 
 DESCRIPTION
 -----------
 
 Takes ranges of commits and replays them onto a new location. Leaves
-the working tree and the index untouched, and updates no references.
-The output of this command is meant to be used as input to
+the working tree and the index untouched, and by default updates no 
+references. The output of this command is meant to be used as input to
 `git update-ref --stdin`, which would update the relevant branches
-(see the OUTPUT section below).
+(see the OUTPUT section below). Alternatively, with `--update`, the
+refs can be updated directly.
 
 THIS COMMAND IS EXPERIMENTAL. THE BEHAVIOR MAY CHANGE.
 
@@ -42,6 +43,24 @@ When `--advance` is specified, the update-ref command(s) in the output
 will update the branch passed as an argument to `--advance` to point at
 the new commits (in other words, this mimics a cherry-pick operation).
 
+--update::
+	Update the relevant refs directly instead of outputting
+	update-ref commands. When this option is used, no output is
+	produced on successful completion, and the refs are updated
+	immediately. If any ref update fails, the command will exit
+	with a non-zero status.
+
+--update-refs::
+	Update the relevant refs using ref transactions instead of outputting
+	update-ref commands. By default, uses atomic mode where all ref updates
+	succeed or all fail. Use with `--batch` to allow partial updates.
+	When this option is used, no output is produced on successful completion.
+
+--batch::
+	Can only be used with `--update-refs`. Enables batch mode for ref
+	updates, allowing some refs to be updated successfully even if others
+	fail. Failed updates are reported as warnings rather than errors.
+
 <revision-range>::
 	Range of commits to replay. More than one <revision-range> can
 	be passed, but in `--advance <branch>` mode, they should have
@@ -54,8 +73,9 @@ include::rev-list-options.adoc[]
 OUTPUT
 ------
 
-When there are no conflicts, the output of this command is usable as
-input to `git update-ref --stdin`.  It is of the form:
+When there are no conflicts and neither `--update` nor `--update-refs` 
+is used, the output of this command is usable as input to `git update-ref --stdin`.  
+It is of the form:
 
 	update refs/heads/branch1 ${NEW_branch1_HASH} ${OLD_branch1_HASH}
 	update refs/heads/branch2 ${NEW_branch2_HASH} ${OLD_branch2_HASH}
@@ -65,6 +85,15 @@ where the number of refs updated depends on the arguments passed and
 the shape of the history being replayed.  When using `--advance`, the
 number of refs updated is always one, but for `--onto`, it can be one
 or more (rebasing multiple branches simultaneously is supported).
+
+When `--update` is used, no output is produced and the refs are updated
+directly using individual ref updates. This is equivalent to piping the normal output to 
+`git update-ref --stdin`.
+
+When `--update-refs` is used, no output is produced and the refs are updated
+using ref transactions. In atomic mode (default), all ref updates succeed 
+or all fail. In batch mode (with `--batch`), some updates may succeed while 
+others fail, with failed updates reported as warnings.
 
 EXIT STATUS
 -----------
@@ -89,6 +118,27 @@ To cherry-pick the commits from mybranch onto target:
 ------------
 $ git replay --advance target origin/main..mybranch
 update refs/heads/target ${NEW_target_HASH} ${OLD_target_HASH}
+------------
+
+To rebase `mybranch` onto `target` and update the ref directly:
+
+------------
+$ git replay --update --onto target origin/main..mybranch
+# No output; mybranch is updated directly
+------------
+
+To rebase `mybranch` onto `target` using atomic ref transactions:
+
+------------
+$ git replay --update-refs --onto target origin/main..mybranch
+# No output; mybranch is updated atomically
+------------
+
+To rebase multiple branches with partial failure tolerance:
+
+------------
+$ git replay --update-refs --batch --contained --onto origin/main origin/main..tipbranch
+# No output; refs updated in batch mode, warnings for any failures
 ------------
 
 Note that the first two examples replay the exact same commits and on
