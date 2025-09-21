@@ -1,7 +1,10 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "git-compat-util.h"
 #include "diff-merges.h"
 
 #include "gettext.h"
+#include "hex.h"
 #include "revision.h"
 
 typedef void (*diff_merges_setup_func_t)(struct rev_info *);
@@ -126,6 +129,62 @@ void diff_merges_suppress_m_parsing(void)
 	suppress_m_parsing = 1;
 }
 
+static void parse_pick_revert_entries(struct rev_info *revs,
+				      const char *filename)
+{
+	FILE *fp = fopen(filename, "r");
+	char buf[1024];
+
+	revs->picks_and_reverts = xcalloc(1, sizeof(struct oidmap));
+	oidmap_init(revs->picks_and_reverts, 0);
+
+	if (!fp)
+		die_errno("Could not open file '%s'", filename);
+
+	while (fgets(buf, sizeof(buf), fp)) {
+		char commit_new_hex[GIT_MAX_HEXSZ + 1];
+		char commit_old_hex[GIT_MAX_HEXSZ + 1];
+		char op[16];
+		struct object_id oid_new, oid_old;
+		struct commit *old_commit;
+		struct pick_revert_entry *new_entry;
+		int is_revert, parsed;
+
+		/*
+		 * Expect lines of the form:
+		 *   <commit_new> <op> <commit_old>
+		 * Example:
+		 *   abc1234 picks def5678
+		 */
+		parsed = sscanf(buf, "%40s %15s %40s", commit_new_hex, op, commit_old_hex);
+		if (parsed != 3)
+			continue; /* skip malformed lines */
+
+		if (get_oid_hex(commit_new_hex, &oid_new) < 0 ||
+		    get_oid_hex(commit_old_hex, &oid_old) < 0)
+			continue; /* skip lines with bad oids */
+
+		if (!strcmp(op, "picks"))
+			is_revert = 0;
+		else if (!strcmp(op, "reverts"))
+			is_revert = 1;
+		else
+			continue; /* skip unknown ops */
+
+		old_commit = lookup_commit_reference(revs->repo, &oid_old);
+		if (!old_commit)
+			continue;
+
+		new_entry = xcalloc(1, sizeof(*new_entry));
+		oidcpy(&new_entry->entry.oid, &oid_new);
+		new_entry->original_commit = old_commit;
+		new_entry->is_revert = is_revert;
+
+		oidmap_put(revs->picks_and_reverts, new_entry);
+	}
+	fclose(fp);
+}
+
 int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 {
 	int argcount = 1;
@@ -148,6 +207,11 @@ int diff_merges_parse_opts(struct rev_info *revs, const char **argv)
 		set_remerge_diff(revs);
 		revs->merges_imply_patch = 1;
 	} else if (!strcmp(arg, "--remerge-diff-only")) {
+		set_remerge_diff_only(revs);
+		revs->merges_imply_patch = 1;
+	} else if (starts_with(arg, "--remerge-diff-picks=")) {
+		parse_pick_revert_entries(revs,
+					  &arg[strlen("--remerge-diff-picks=")]);
 		set_remerge_diff_only(revs);
 		revs->merges_imply_patch = 1;
 	} else if (!strcmp(arg, "--no-diff-merges")) {

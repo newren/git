@@ -1091,6 +1091,39 @@ static int do_remerge_diff(struct rev_info *opt,
 	return !opt->loginfo;
 }
 
+static void get_pick_or_revert(struct rev_info *opt,
+			       struct commit *commit, int *is_revert,
+			       struct commit **pick_of, struct commit **base)
+{
+	struct pick_revert_entry *e;
+	struct commit_list *parents;
+
+	*pick_of = NULL;
+	*base = NULL;
+	*is_revert = false;
+
+	e = oidmap_get(opt->picks_and_reverts, &commit->object.oid);
+	if (!e)
+		return;
+
+	*pick_of = e->original_commit;
+	*is_revert = e->is_revert;
+
+	parents = e->original_commit->parents;
+	if (!parents) {
+		*base = NULL;
+	} else {
+		*base = parents->item;
+		if (parents->next != NULL)
+			/*
+			 * Getting here means that someone claimed the
+			 * commit in question was a pick or revert of
+			 * a merge.  Bail out.
+			 */
+			*pick_of = NULL;
+	}
+}
+
 static int do_repicked_remerge_diff(struct rev_info *opt,
 				    struct commit_list *parents,
 				    struct object_id *oid,
@@ -1106,11 +1139,25 @@ static int do_repicked_remerge_diff(struct rev_info *opt,
 	struct pretty_print_context ctx = {0};
 	int is_revert;
 
+	if ((opt->remerge_diff || opt->remerge_diff_only) &&
+	    !opt->remerge_objdir) {
+		opt->remerge_objdir = tmp_objdir_create(the_repository, "remerge-diff");
+		if (!opt->remerge_objdir)
+			return error(_("unable to create temporary object directory"));
+		tmp_objdir_replace_primary_odb(opt->remerge_objdir, 1);
+	}
+
 	/* side1 is the commit on which the cherry-pick or revert was built */
 	side1 = parents->item;
 	parse_commit_or_die(side1);
 	/* get side2 and base */
-	get_message_pick(commit, &is_revert, &side2, &base);
+	if (opt->picks_and_reverts) {
+		get_pick_or_revert(opt, commit, &is_revert, &side2, &base);
+		parse_commit_or_die(side2);
+		parse_commit_or_die(base);
+	} else {
+		get_message_pick(commit, &is_revert, &side2, &base);
+	}
 	if (!side2) {
 		show_log(opt);
 		fprintf(opt->diffopt.file,

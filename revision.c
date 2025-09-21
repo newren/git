@@ -3230,6 +3230,10 @@ void release_revisions(struct rev_info *revs)
 	clear_decoration(&revs->treesame, free);
 	line_log_free(revs);
 	oidset_clear(&revs->missing_commits);
+	if (revs->picks_and_reverts) {
+		oidmap_clear(revs->picks_and_reverts, 1);
+		free(revs->picks_and_reverts);
+	}
 	release_revisions_bloom_keyvecs(revs);
 }
 

@@ -4,6 +4,7 @@
 #include "commit.h"
 #include "grep.h"
 #include "notes.h"
+#include "oidmap.h"
 #include "oidset.h"
 #include "pretty.h"
 #include "diff.h"
@@ -114,6 +115,12 @@ struct ref_exclusions {
 	.excluded_refs = STRING_LIST_INIT_DUP, \
 	.hidden_refs = STRVEC_INIT, \
 }
+
+struct pick_revert_entry {
+	struct oidmap_entry entry;
+	struct commit *original_commit;
+	int is_revert;
+};
 
 struct oidset;
 struct topo_walk_info;
@@ -296,6 +303,7 @@ struct rev_info {
 	int		no_inline;
 	int		show_log_size;
 	struct string_list *mailmap;
+	struct oidmap	*picks_and_reverts;
 
 	/* Filter by commit log message */
 	struct grep_opt	grep_filter;
