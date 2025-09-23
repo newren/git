@@ -14,6 +14,7 @@
 #include "merge-ort.h"
 #include "object-name.h"
 #include "parse-options.h"
+#include "path.h"
 #include "refs.h"
 #include "revision.h"
 #include "strmap.h"
@@ -294,6 +295,52 @@ static int add_ref_to_transaction(struct ref_transaction *transaction,
 				      NULL, NULL, 0, "replay finished", err);
 }
 
+static int edit(int argc, const char **argv, const char *prefix,
+		struct repository *repo)
+{
+	struct string_list refs = STRING_LIST_INIT_NODUP;
+	const char * const builtin_replay_edit_usage[] = {
+		N_("git replay edit [<options>] <commit>"),
+		NULL
+	};
+	struct option options[] = {
+		OPT_STRING_LIST('r', "reference", &refs, N_("reference"),
+				N_("reference(s) to update")),
+		OPT_END()
+	};
+	int fd;
+	struct strbuf sb = STRBUF_INIT;
+
+	/* FIXME: Verify that we're in a non-bare repository */
+
+	argc = parse_options(argc, argv, prefix, options,
+			     builtin_replay_edit_usage, 0);
+
+	if (argc >= 4)
+		usage_with_options(builtin_replay_edit_usage, options);
+
+	if (refs.nr)
+		die(_("handling user-specified references not yet implemented"));
+	else
+		string_list_append(&refs, "--branches");
+
+	if (argc == 2) {
+		const char *new_argv[4] = { "switch", "--detach", "--quiet",
+					    argv[1] };
+		cmd_switch(4, new_argv, prefix, repo);
+	} else {
+		die(_("auto-picking conflicted commits to edit not yet implemented"));
+	}
+	fd = xopen(git_path_replay_edit(repo), O_CREAT | O_WRONLY, 0666);
+	strbuf_add_separated_string_list(&sb, "\n", &refs);
+	strbuf_complete_line(&sb);
+	write_in_full(fd, sb.buf, sb.len);
+	close(fd);
+	strbuf_release(&sb);
+
+	return 0;
+}
+
 int cmd_replay(int argc,
 	       const char **argv,
 	       const char *prefix,
@@ -324,7 +371,9 @@ int cmd_replay(int argc,
 		   "[--no-update-refs] <revision-range>..."),
 		NULL
 	};
+	parse_opt_subcommand_fn *fn = NULL;
 	struct option replay_options[] = {
+		OPT_SUBCOMMAND("edit", &fn, edit),
 		OPT_STRING(0, "advance", &advance_name_opt,
 			   N_("branch"),
 			   N_("make replay advance given branch")),
@@ -339,7 +388,12 @@ int cmd_replay(int argc,
 	};
 
 	argc = parse_options(argc, argv, prefix, replay_options, replay_usage,
-			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN_OPT);
+			     PARSE_OPT_KEEP_ARGV0 | PARSE_OPT_KEEP_UNKNOWN_OPT |
+			     PARSE_OPT_SUBCOMMAND_OPTIONAL);
+
+	if (fn) {
+		return !!fn(argc, argv, prefix, repo);
+	}
 
 	if (!onto_name && !advance_name_opt) {
 		error(_("option --onto or --advance is mandatory"));
