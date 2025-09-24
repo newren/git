@@ -304,12 +304,12 @@ static int add_ref_to_transaction(struct ref_transaction *transaction,
 }
 
 static void print_rejected_update(const char *refname,
-				  const struct object_id *old_oid,
-				  const struct object_id *new_oid,
-				  const char *old_target,
-				  const char *new_target,
+				  const struct object_id *old_oid UNUSED,
+				  const struct object_id *new_oid UNUSED,
+				  const char *old_target UNUSED,
+				  const char *new_target UNUSED,
 				  enum ref_transaction_error err,
-				  void *cb_data)
+				  void *cb_data UNUSED)
 {
 	const char *reason = ref_transaction_error_msg(err);
 	warning(_("failed to update %s: %s"), refname, reason);
