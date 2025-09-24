@@ -83,12 +83,6 @@ test_expect_success '--update-refs produces no output on success' '
 	test_must_be_empty output
 '
 
-test_expect_success '--update-refs --batch produces no output on success' '
-	git checkout -b batch-quiet-test topic1 &&
-	git replay --update-refs --batch --onto main topic1..batch-quiet-test >output &&
-	test_must_be_empty output
-'
-
 # Edge case tests
 
 test_expect_success '--update-refs with empty range (no-op)' '
@@ -101,28 +95,6 @@ test_expect_success '--update-refs with empty range (no-op)' '
 	# Branch should be unchanged
 	git rev-parse topic1 >topic1.after &&
 	test_cmp topic1.before topic1.after
-'
-
-test_expect_success '--update-refs atomic vs batch mode comparison' '
-	# Create branch for comparison
-	git checkout -b compare1 topic1 &&
-	test_commit Compare1 &&
-	git checkout -b compare2 topic1 &&
-	test_commit Compare2 &&
-	
-	# Test atomic mode
-	git replay --update-refs --onto main topic1..compare1 &&
-	git rev-parse compare1 >atomic-result &&
-	
-	# Test batch mode - should give same result for successful case
-	git replay --update-refs --batch --onto main topic1..compare2 &&
-	git rev-parse compare2 >batch-result &&
-	
-	# The OIDs will be different since commits are different,
-	# but both should have been updated (not equal to original)
-	git rev-parse topic1 >original &&
-	! test_cmp atomic-result original &&
-	! test_cmp batch-result original
 '
 
 test_expect_success '--update-refs handles conflict gracefully in atomic mode' '
@@ -189,16 +161,6 @@ test_expect_success '--update-refs vs traditional method equivalence' '
 
 # Error handling and validation tests
 
-test_expect_success 'error messages are helpful and clear' '
-	# Test conflicting options
-	test_must_fail git replay --update --update-refs --onto main topic1..topic2 2>error1 &&
-	grep "cannot be used together" error1 &&
-	
-	# Test batch without update-refs
-	test_must_fail git replay --batch --onto main topic1..topic2 2>error2 &&
-	grep "can only be used with.*--update-refs" error2
-'
-
 test_expect_success '--update-refs works correctly with bare repositories' '
 	# Create branch for bare repo testing
 	git checkout -b bare-test topic1 &&
@@ -246,7 +208,7 @@ test_expect_success '--update-refs handles ref transaction cleanup properly' '
 	
 	# Run multiple operations to test cleanup
 	git replay --update-refs --onto main topic1..cleanup-test &&
-	git replay --update-refs --batch --onto main topic1..cleanup-test &&
+	git replay --update-refs --onto main~2 main..cleanup-test &&
 	
 	# If cleanup is working properly, these should succeed without errors
 	test_path_is_file .git/refs/heads/cleanup-test

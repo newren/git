@@ -284,15 +284,6 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	return create_commit(repo, result->tree, pickme, replayed_base);
 }
 
-static int update_ref_direct(struct repository *repo, const char *refname,
-			     const struct object_id *new_oid,
-			     const struct object_id *old_oid)
-{
-	const char *msg = "replay";
-	return refs_update_ref(get_main_ref_store(repo), msg, refname,
-			       new_oid, old_oid, 0, UPDATE_REFS_MSG_ON_ERR);
-}
-
 static int add_ref_to_transaction(struct ref_transaction *transaction,
 				  const char *refname,
 				  const struct object_id *new_oid,
@@ -300,19 +291,7 @@ static int add_ref_to_transaction(struct ref_transaction *transaction,
 				  struct strbuf *err)
 {
 	return ref_transaction_update(transaction, refname, new_oid, old_oid,
-				      NULL, NULL, 0, "git replay", err);
-}
-
-static void print_rejected_update(const char *refname,
-				  const struct object_id *old_oid UNUSED,
-				  const struct object_id *new_oid UNUSED,
-				  const char *old_target UNUSED,
-				  const char *new_target UNUSED,
-				  enum ref_transaction_error err,
-				  void *cb_data UNUSED)
-{
-	const char *reason = ref_transaction_error_msg(err);
-	warning(_("failed to update %s: %s"), refname, reason);
+				      NULL, NULL, 0, "replay finished", err);
 }
 
 int cmd_replay(int argc,
@@ -325,8 +304,7 @@ int cmd_replay(int argc,
 	struct commit *onto = NULL;
 	const char *onto_name = NULL;
 	int contained = 0;
-	int update_directly = 0;
-	int update_refs_flag = 0;
+	int no_update_refs_flag = 0;
 	int batch_mode = 0;
 
 	struct rev_info revs;
@@ -343,7 +321,7 @@ int cmd_replay(int argc,
 	const char * const replay_usage[] = {
 		N_("(EXPERIMENTAL!) git replay "
 		   "([--contained] --onto <newbase> | --advance <branch>) "
-		   "[--update | --update-refs [--batch]] <revision-range>..."),
+		   "[--no-update-refs] <revision-range>..."),
 		NULL
 	};
 	struct option replay_options[] = {
@@ -355,12 +333,8 @@ int cmd_replay(int argc,
 			   N_("replay onto given commit")),
 		OPT_BOOL(0, "contained", &contained,
 			 N_("advance all branches contained in revision-range")),
-		OPT_BOOL(0, "update", &update_directly,
-			 N_("update branches directly instead of outputting update commands")),
-		OPT_BOOL(0, "update-refs", &update_refs_flag,
-			 N_("update branches using ref transactions")),
-		OPT_BOOL(0, "batch", &batch_mode,
-			 N_("allow partial ref updates in batch mode")),
+		OPT_BOOL(0, "no-update-refs", &no_update_refs_flag,
+			 N_("show ref update commands but do not perform them")),
 		OPT_END()
 	};
 
@@ -376,13 +350,6 @@ int cmd_replay(int argc,
 		die(_("options '%s' and '%s' cannot be used together"),
 		    "--advance", "--contained");
 
-	if (update_directly && update_refs_flag)
-		die(_("options '%s' and '%s' cannot be used together"),
-		    "--update", "--update-refs");
-
-	if (batch_mode && !update_refs_flag)
-		die(_("option '%s' can only be used with '%s'"),
-		    "--batch", "--update-refs");
 	advance_name = xstrdup_or_null(advance_name_opt);
 
 	repo_init_revisions(repo, &revs, prefix);
@@ -439,8 +406,8 @@ int cmd_replay(int argc,
 	determine_replay_mode(repo, &revs.cmdline, onto_name, &advance_name,
 			      &onto, &update_refs);
 
-	/* Initialize ref transaction if using --update-refs */
-	if (update_refs_flag) {
+	/* Initialize ref transaction unless using --no-update-refs */
+	if (!no_update_refs_flag) {
 		unsigned int transaction_flags = batch_mode ? REF_TRANSACTION_ALLOW_FAILURE : 0;
 		transaction = ref_store_transaction_begin(get_main_ref_store(repo),
 								  transaction_flags,
@@ -497,14 +464,12 @@ int cmd_replay(int argc,
 			if (decoration->type == DECORATION_REF_LOCAL &&
 			    (contained || strset_contains(update_refs,
 							  decoration->name))) {
-				if (update_directly) {
-					if (update_ref_direct(repo, decoration->name,
-							     &last_commit->object.oid,
-							     &commit->object.oid) < 0) {
-						ret = -1;
-						goto cleanup;
-					}
-				} else if (transaction) {
+				if (no_update_refs_flag) {
+					printf("update %s %s %s\n",
+					       decoration->name,
+					       oid_to_hex(&last_commit->object.oid),
+					       oid_to_hex(&commit->object.oid));
+				} else {
 					if (add_ref_to_transaction(transaction, decoration->name,
 								   &last_commit->object.oid,
 								   &commit->object.oid,
@@ -512,11 +477,6 @@ int cmd_replay(int argc,
 						ret = error(_("failed to add ref update to transaction: %s"), transaction_err.buf);
 						goto cleanup;
 					}
-				} else {
-					printf("update %s %s %s\n",
-					       decoration->name,
-					       oid_to_hex(&last_commit->object.oid),
-					       oid_to_hex(&commit->object.oid));
 				}
 			}
 			decoration = decoration->next;
@@ -525,14 +485,12 @@ int cmd_replay(int argc,
 
 	/* In --advance mode, advance the target ref */
 	if (result.clean == 1 && advance_name) {
-		if (update_directly) {
-			if (update_ref_direct(repo, advance_name,
-					     &last_commit->object.oid,
-					     &onto->object.oid) < 0) {
-				ret = -1;
-				goto cleanup;
-			}
-		} else if (transaction) {
+		if (no_update_refs_flag) {
+			printf("update %s %s %s\n",
+			       advance_name,
+			       oid_to_hex(&last_commit->object.oid),
+			       oid_to_hex(&onto->object.oid));
+		} else {
 			if (add_ref_to_transaction(transaction, advance_name,
 						   &last_commit->object.oid,
 						   &onto->object.oid,
@@ -540,27 +498,16 @@ int cmd_replay(int argc,
 				ret = error(_("failed to add ref update to transaction: %s"), transaction_err.buf);
 				goto cleanup;
 			}
-		} else {
-			printf("update %s %s %s\n",
-			       advance_name,
-			       oid_to_hex(&last_commit->object.oid),
-			       oid_to_hex(&onto->object.oid));
 		}
 	}
 
 	/* Commit the ref transaction if we have one */
 	if (transaction && result.clean == 1) {
 		if (ref_transaction_commit(transaction, &transaction_err)) {
-			if (batch_mode) {
-				/* Print failed updates in batch mode */
-				warning(_("some ref updates failed: %s"), transaction_err.buf);
-				ref_transaction_for_each_rejected_update(transaction,
-										 print_rejected_update, NULL);
-			} else {
-				/* In atomic mode, all updates failed */
-				ret = error(_("failed to update refs: %s"), transaction_err.buf);
-				goto cleanup;
-			}
+			/* In atomic mode, all updates failed */
+			ret = error(_("failed to update refs: %s"),
+				    transaction_err.buf);
+			goto cleanup;
 		}
 	}
 

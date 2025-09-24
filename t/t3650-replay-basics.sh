@@ -52,7 +52,7 @@ test_expect_success 'setup bare' '
 '
 
 test_expect_success 'using replay to rebase two branches, one on top of other' '
-	git replay --onto main topic1..topic2 >result &&
+	git replay --no-update-refs --onto main topic1..topic2 >result &&
 
 	test_line_count = 1 result &&
 
@@ -68,7 +68,7 @@ test_expect_success 'using replay to rebase two branches, one on top of other' '
 '
 
 test_expect_success 'using replay on bare repo to rebase two branches, one on top of other' '
-	git -C bare replay --onto main topic1..topic2 >result-bare &&
+	git -C bare replay --no-update-refs --onto main topic1..topic2 >result-bare &&
 	test_cmp expect result-bare
 '
 
@@ -86,7 +86,7 @@ test_expect_success 'using replay to perform basic cherry-pick' '
 	# 2nd field of result is refs/heads/main vs. refs/heads/topic2
 	# 4th field of result is hash for main instead of hash for topic2
 
-	git replay --advance main topic1..topic2 >result &&
+	git replay --no-update-refs --advance main topic1..topic2 >result &&
 
 	test_line_count = 1 result &&
 
@@ -102,7 +102,7 @@ test_expect_success 'using replay to perform basic cherry-pick' '
 '
 
 test_expect_success 'using replay on bare repo to perform basic cherry-pick' '
-	git -C bare replay --advance main topic1..topic2 >result-bare &&
+	git -C bare replay --no-update-refs --advance main topic1..topic2 >result-bare &&
 	test_cmp expect result-bare
 '
 
@@ -115,7 +115,7 @@ test_expect_success 'replay fails when both --advance and --onto are omitted' '
 '
 
 test_expect_success 'using replay to also rebase a contained branch' '
-	git replay --contained --onto main main..topic3 >result &&
+	git replay --no-update-refs --contained --onto main main..topic3 >result &&
 
 	test_line_count = 2 result &&
 	cut -f 3 -d " " result >new-branch-tips &&
@@ -139,12 +139,12 @@ test_expect_success 'using replay to also rebase a contained branch' '
 '
 
 test_expect_success 'using replay on bare repo to also rebase a contained branch' '
-	git -C bare replay --contained --onto main main..topic3 >result-bare &&
+	git -C bare replay --no-update-refs --contained --onto main main..topic3 >result-bare &&
 	test_cmp expect result-bare
 '
 
 test_expect_success 'using replay to rebase multiple divergent branches' '
-	git replay --onto main ^topic1 topic2 topic4 >result &&
+	git replay --no-update-refs --onto main ^topic1 topic2 topic4 >result &&
 
 	test_line_count = 2 result &&
 	cut -f 3 -d " " result >new-branch-tips &&
@@ -168,7 +168,7 @@ test_expect_success 'using replay to rebase multiple divergent branches' '
 '
 
 test_expect_success 'using replay on bare repo to rebase multiple divergent branches, including contained ones' '
-	git -C bare replay --contained --onto main ^main topic2 topic3 topic4 >result &&
+	git -C bare replay --no-update-refs --contained --onto main ^main topic2 topic3 topic4 >result &&
 
 	test_line_count = 4 result &&
 	cut -f 3 -d " " result >new-branch-tips &&
@@ -215,81 +215,6 @@ test_expect_success 'merge.directoryRenames=false' '
 
 	git -c merge.directoryRenames=false replay \
 		--onto rename-onto rename-onto..rename-from
-'
-
-test_expect_success 'using replay with --update to rebase a branch' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	# Store original branch tips
-	git rev-parse topic2 >topic2.old &&
-	
-	# Use --update to directly update the refs
-	git replay --update --onto main topic1..topic2 &&
-	
-	# Verify the branch was actually updated
-	git rev-parse topic2 >topic2.new &&
-	! test_cmp topic2.old topic2.new &&
-	
-	# Verify the history is correct
-	git log --format=%s topic2 >actual &&
-	test_write_lines E D M L B A >expect &&
-	test_cmp expect actual
-'
-
-test_expect_success 'using replay with --update in advance mode' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	# Store original main tip
-	git rev-parse main >main.old &&
-	
-	# Use --update with --advance
-	git replay --update --advance main topic1..topic2 &&
-	
-	# Verify main was updated
-	git rev-parse main >main.new &&
-	! test_cmp main.old main.new &&
-	
-	# Verify the history is correct
-	git log --format=%s main >actual &&
-	test_write_lines E D M L B A >expect &&
-	test_cmp expect actual &&
-	
-	# Reset main back
-	git branch -f main $(cat main.old)
-'
-
-test_expect_success 'using replay with --update and --contained' '
-	START1=$(git rev-parse topic1) &&
-	START3=$(git rev-parse topic3) &&
-	test_when_finished "git branch -f topic1 $START1" &&
-	test_when_finished "git branch -f topic3 $START3" &&
-
-	# Store original branch tips
-	git rev-parse topic1 >topic1.old &&
-	git rev-parse topic3 >topic3.old &&
-	
-	# Use --update with --contained
-	git replay --update --contained --onto main main..topic3 &&
-	
-	# Verify both branches were updated
-	git rev-parse topic1 >topic1.new &&
-	git rev-parse topic3 >topic3.new &&
-	! test_cmp topic1.old topic1.new &&
-	! test_cmp topic3.old topic3.new &&
-	
-	# Reset branches back
-	git branch -f topic1 $(cat topic1.old) &&
-	git branch -f topic3 $(cat topic3.old)
-'
-
-test_expect_success 'replay with --update should not produce output when successful' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	git replay --update --onto main topic1..topic2 >output &&
-	test_must_be_empty output
 '
 
 test_expect_success 'using replay with --update-refs to rebase a branch (atomic mode)' '
@@ -364,30 +289,6 @@ test_expect_success 'replay with --update-refs should not produce output when su
 	test_must_be_empty output
 '
 
-test_expect_success 'replay with --update-refs --batch should not produce output when successful' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	git replay --update-refs --batch --onto main topic1..topic2 >output &&
-	test_must_be_empty output
-'
-
-test_expect_success 'replay fails when --update and --update-refs are used together' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	test_must_fail git replay --update --update-refs --onto main topic1..topic2 2>error &&
-	grep "cannot be used together" error
-'
-
-test_expect_success 'replay fails when --batch is used without --update-refs' '
-	START=$(git rev-parse topic2) &&
-	test_when_finished "git branch -f topic2 $START" &&
-
-	test_must_fail git replay --batch --onto main topic1..topic2 2>error &&
-	grep "can only be used with.*--update-refs" error
-'
-
 # Edge cases and comprehensive testing for --update-refs
 
 test_expect_success 'setup for edge case tests' '
@@ -417,25 +318,6 @@ test_expect_success '--update-refs with conflicting replay (atomic mode fails co
 	test_cmp conflict-test.old conflict-test.new
 '
 
-test_expect_success '--update-refs --batch with conflicting replay (partial success)' '
-	# Create scenario with one good commit and one conflicting commit
-	git checkout -b batch-test main &&
-	test_commit GoodCommit &&
-	echo "conflict" > C.t &&
-	git add C.t &&
-	git commit -m "Bad commit" &&
-	
-	# Store original states
-	git rev-parse batch-test >batch-test.old &&
-	
-	# Batch mode should handle partial failures gracefully
-	# Note: This test might need adjustment based on actual conflict behavior
-	test_expect_code 1 git replay --update-refs --batch --onto topic1 main..batch-test 2>batch-error &&
-	
-	# In batch mode, we should get warnings rather than hard failures
-	test_path_is_file batch-error
-'
-
 test_expect_success '--update-refs with no commits to replay (empty transaction)' '
 	# Try to replay an empty range
 	git rev-parse topic1 >topic1.before &&
@@ -457,35 +339,19 @@ test_expect_success '--update-refs with multiple branches (atomic success)' '
 	# Store original states
 	git rev-parse edge1 >edge1.old &&
 	git rev-parse edge2 >edge2.old &&
-	
+
 	# Replay multiple branches atomically
 	git replay --update-refs --contained --onto main main..edge1 &&
+
+	test_tick &&  # Force replayed commits to have new timestamp
 	git replay --update-refs --contained --onto main main..edge2 &&
-	
+	git replay --update-refs --contained --onto main main..edge2 &&
+
 	# Both should be updated
 	git rev-parse edge1 >edge1.new &&
 	git rev-parse edge2 >edge2.new &&
 	! test_cmp edge1.old edge1.new &&
 	! test_cmp edge2.old edge2.new
-'
-
-test_expect_success '--update-refs atomic vs batch behavior comparison' '
-	# Create a branch for comparison
-	git checkout -b compare-test main &&
-	test_commit --no-tag --notick CompareCommit &&
-	
-	# Test atomic mode first
-	git replay --update-refs --onto main main..compare-test &&
-	git rev-parse compare-test >atomic-result &&
-	
-	# Reset and test batch mode
-	git reset --hard main &&
-	test_commit --no-tag --notick CompareCommit &&
-	git replay --update-refs --batch --onto main main..compare-test &&
-	git rev-parse compare-test >batch-result &&
-	
-	# Results should be identical for successful cases
-	test_cmp atomic-result batch-result
 '
 
 test_expect_success '--update-refs preserves ref transaction semantics' '
@@ -551,20 +417,6 @@ test_expect_success '--update-refs handles ref updates consistently with traditi
 	
 	# Results should be identical
 	test_cmp traditional-result direct-result
-'
-
-test_expect_success '--update-refs error messages are helpful' '
-	# Test that error messages are clear and helpful
-	git checkout -b error-test main &&
-	test_commit ErrorTest &&
-	
-	# Test conflicting options
-	test_must_fail git replay --update --update-refs --onto main main..error-test 2>conflict-error &&
-	grep "cannot be used together" conflict-error &&
-	
-	# Test batch without update-refs
-	test_must_fail git replay --batch --onto main main..error-test 2>batch-error &&
-	grep "can only be used with" batch-error
 '
 
 test_expect_success '--update-refs with bare repository works correctly' '
