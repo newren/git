@@ -218,6 +218,9 @@ test_expect_success 'merge.directoryRenames=false' '
 '
 
 test_expect_success 'using replay with --update to rebase a branch' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	# Store original branch tips
 	git rev-parse topic2 >topic2.old &&
 	
@@ -235,9 +238,9 @@ test_expect_success 'using replay with --update to rebase a branch' '
 '
 
 test_expect_success 'using replay with --update in advance mode' '
-	# Reset topic2 first
-	git branch -f topic2 $(cat topic2.old) &&
-	
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	# Store original main tip
 	git rev-parse main >main.old &&
 	
@@ -258,6 +261,11 @@ test_expect_success 'using replay with --update in advance mode' '
 '
 
 test_expect_success 'using replay with --update and --contained' '
+	START1=$(git rev-parse topic1) &&
+	START3=$(git rev-parse topic3) &&
+	test_when_finished "git branch -f topic1 $START1" &&
+	test_when_finished "git branch -f topic3 $START3" &&
+
 	# Store original branch tips
 	git rev-parse topic1 >topic1.old &&
 	git rev-parse topic3 >topic3.old &&
@@ -277,11 +285,17 @@ test_expect_success 'using replay with --update and --contained' '
 '
 
 test_expect_success 'replay with --update should not produce output when successful' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	git replay --update --onto main topic1..topic2 >output &&
 	test_must_be_empty output
 '
 
 test_expect_success 'using replay with --update-refs to rebase a branch (atomic mode)' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	# Store original branch tip
 	git rev-parse topic2 >topic2.old &&
 	
@@ -299,6 +313,9 @@ test_expect_success 'using replay with --update-refs to rebase a branch (atomic 
 '
 
 test_expect_success 'using replay with --update-refs in advance mode' '
+	START=$(git rev-parse main) &&
+	test_when_finished "git branch -f main $START" &&
+
 	# Store original main tip
 	git rev-parse main >main.old &&
 	
@@ -316,6 +333,11 @@ test_expect_success 'using replay with --update-refs in advance mode' '
 '
 
 test_expect_success 'using replay with --update-refs and --contained' '
+	START1=$(git rev-parse topic1) &&
+	START3=$(git rev-parse topic3) &&
+	test_when_finished "git branch -f topic1 $START1" &&
+	test_when_finished "git branch -f topic3 $START3" &&
+
 	# Store original branch tips
 	git rev-parse topic1 >topic1.old &&
 	git rev-parse topic3 >topic3.old &&
@@ -335,21 +357,33 @@ test_expect_success 'using replay with --update-refs and --contained' '
 '
 
 test_expect_success 'replay with --update-refs should not produce output when successful' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	git replay --update-refs --onto main topic1..topic2 >output &&
 	test_must_be_empty output
 '
 
 test_expect_success 'replay with --update-refs --batch should not produce output when successful' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	git replay --update-refs --batch --onto main topic1..topic2 >output &&
 	test_must_be_empty output
 '
 
 test_expect_success 'replay fails when --update and --update-refs are used together' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	test_must_fail git replay --update --update-refs --onto main topic1..topic2 2>error &&
 	grep "cannot be used together" error
 '
 
 test_expect_success 'replay fails when --batch is used without --update-refs' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	test_must_fail git replay --batch --onto main topic1..topic2 2>error &&
 	grep "can only be used with.*--update-refs" error
 '
@@ -415,6 +449,11 @@ test_expect_success '--update-refs with no commits to replay (empty transaction)
 '
 
 test_expect_success '--update-refs with multiple branches (atomic success)' '
+	START1=$(git rev-parse edge1) &&
+	START2=$(git rev-parse edge2) &&
+	test_when_finished "git branch -f edge1 $START1" &&
+	test_when_finished "git branch -f edge2 $START2" &&
+
 	# Store original states
 	git rev-parse edge1 >edge1.old &&
 	git rev-parse edge2 >edge2.old &&
@@ -433,15 +472,15 @@ test_expect_success '--update-refs with multiple branches (atomic success)' '
 test_expect_success '--update-refs atomic vs batch behavior comparison' '
 	# Create a branch for comparison
 	git checkout -b compare-test main &&
-	test_commit CompareCommit &&
+	test_commit --no-tag --notick CompareCommit &&
 	
 	# Test atomic mode first
 	git replay --update-refs --onto main main..compare-test &&
 	git rev-parse compare-test >atomic-result &&
 	
 	# Reset and test batch mode
-	git branch -f compare-test main &&
-	test_commit CompareCommit &&
+	git reset --hard main &&
+	test_commit --no-tag --notick CompareCommit &&
 	git replay --update-refs --batch --onto main main..compare-test &&
 	git rev-parse compare-test >batch-result &&
 	
@@ -458,7 +497,7 @@ test_expect_success '--update-refs preserves ref transaction semantics' '
 	git rev-parse transaction-test >before-transaction &&
 	
 	# Use --update-refs (should be atomic)
-	git replay --update-refs --onto main main..transaction-test &&
+	git replay --update-refs --onto main~2 main..transaction-test &&
 	
 	# Verify ref was updated
 	git rev-parse transaction-test >after-transaction &&
@@ -466,11 +505,14 @@ test_expect_success '--update-refs preserves ref transaction semantics' '
 	
 	# Verify commit history is correct
 	git log --format=%s transaction-test >actual-history &&
-	test_write_lines TransactionCommit M L B A >expected-history &&
+	test_write_lines TransactionCommit B A >expected-history &&
 	test_cmp expected-history actual-history
 '
 
 test_expect_success '--update-refs with --advance preserves branch history' '
+	START=$(git rev-parse main) &&
+	test_when_finished "git branch -f main $START" &&
+
 	# Test that --advance with --update-refs works correctly
 	git checkout -b advance-test main &&
 	test_commit AdvanceCommit &&
@@ -494,20 +536,18 @@ test_expect_success '--update-refs with --advance preserves branch history' '
 test_expect_success '--update-refs handles ref updates consistently with traditional method' '
 	# Create test scenario
 	git checkout -b consistency-test main &&
-	test_commit ConsistencyTest &&
+	test_commit --no-tag ConsistencyTest &&
 	
 	# Method 1: Traditional output piped to update-ref
 	git checkout -b trad-test consistency-test &&
-	git replay --onto main main..consistency-test >update-commands &&
+	git replay --onto main~2 main..consistency-test >update-commands &&
 	git update-ref --stdin <update-commands &&
-	git rev-parse trad-test >traditional-result &&
-	
+	git rev-parse consistency-test >traditional-result &&
+
 	# Method 2: Direct --update-refs
-	git branch -f consistency-test main &&
-	test_commit ConsistencyTest &&
-	git checkout -b direct-test consistency-test &&
-	git replay --update-refs --onto main main..consistency-test &&
-	git rev-parse direct-test >direct-result &&
+	git branch -f consistency-test trad-test &&
+	git replay --update-refs --onto main~2 main..consistency-test &&
+	git rev-parse consistency-test >direct-result &&
 	
 	# Results should be identical
 	test_cmp traditional-result direct-result
@@ -528,16 +568,16 @@ test_expect_success '--update-refs error messages are helpful' '
 '
 
 test_expect_success '--update-refs with bare repository works correctly' '
-	# Test that --update-refs works in bare repositories (important for Gitaly)
-	git checkout -b bare-test main &&
-	test_commit BareTest &&
-	
-	# Test with bare repo (using existing bare setup)
-	git -C bare replay --update-refs --onto main main..bare-test &&
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
+	# Test that --update-refs works in bare repositories
+	git -C bare replay --update-refs --onto main topic1..topic2 &&
 	
 	# Verify the bare repo was updated correctly
-	git -C bare rev-parse bare-test >bare-result &&
-	test -s bare-result
+	git -C bare log --format=%s topic2 >actual &&
+	test_write_lines E D M L B A >expect &&
+	test_cmp expect actual
 '
 
 test_done
