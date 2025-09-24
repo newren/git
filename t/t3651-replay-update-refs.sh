@@ -38,6 +38,9 @@ test_expect_success 'setup bare repo' '
 # Basic functionality tests
 
 test_expect_success '--update-refs works in atomic mode (basic)' '
+	START=$(git rev-parse topic2) &&
+	test_when_finished "git branch -f topic2 $START" &&
+
 	# Store original branch tip
 	git rev-parse topic2 >topic2.old &&
 	
@@ -55,6 +58,9 @@ test_expect_success '--update-refs works in atomic mode (basic)' '
 '
 
 test_expect_success '--update-refs works with --advance' '
+	START=$(git rev-parse main) &&
+	test_when_finished "git branch -f main $START" &&
+
 	# Store original main tip
 	git rev-parse main >main.old &&
 	
@@ -252,7 +258,7 @@ test_expect_success '--update-refs performance is reasonable' '
 	# Create several commits to test performance
 	git checkout -b perf-test topic1 &&
 	for i in 1 2 3 4 5; do
-		test_commit "Perf$i" || return 1
+		test_commit --no-tag "Perf$i" || return 1
 	done &&
 	
 	# Time the traditional method
@@ -260,9 +266,9 @@ test_expect_success '--update-refs performance is reasonable' '
 	time git update-ref --stdin <perf-commands &&
 	
 	# Reset and time the new method
-	git branch -f perf-test topic1 &&
+	git reset --hard topic1 &&
 	for i in 1 2 3 4 5; do
-		test_commit "Perf$i" || return 1
+		test_commit --no-tag "Perf$i" || return 1
 	done &&
 	time git replay --update-refs --onto main topic1..perf-test &&
 	
