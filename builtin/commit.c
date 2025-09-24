@@ -35,6 +35,7 @@
 #include "rerere.h"
 #include "unpack-trees.h"
 #include "column.h"
+#include "replay.h"
 #include "sequencer.h"
 #include "sparse-index.h"
 #include "mailmap.h"
@@ -1935,6 +1936,9 @@ int cmd_commit(int argc,
 		rollback_index_files();
 		die("%s", err.buf);
 	}
+
+	if (file_exists(git_path_replay_edit(the_repository)))
+		replay_descendants(the_repository, current_head, &oid);
 
 	sequencer_post_commit_cleanup(the_repository, 0);
 	unlink(git_path_merge_head(the_repository));
