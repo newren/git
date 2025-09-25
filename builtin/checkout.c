@@ -1056,6 +1056,8 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 		}
 	}
 	remove_branch_state(the_repository, !opts->quiet);
+	unlink(git_path_replay_edit(the_repository));
+
 	strbuf_release(&msg);
 	if (!opts->quiet &&
 	    !opts->force_detach &&
@@ -1223,7 +1225,7 @@ static int switch_branches(const struct checkout_opts *opts,
 		}
 	}
 
-	if (!opts->quiet && !old_branch_info.path && old_branch_info.commit && new_branch_info->commit != old_branch_info.commit)
+	if (!opts->quiet && !old_branch_info.path && old_branch_info.commit && new_branch_info->commit != old_branch_info.commit) // FIXME
 		orphaned_commit_warning(old_branch_info.commit, new_branch_info->commit);
 
 	update_refs_for_switch(opts, &old_branch_info, new_branch_info);
