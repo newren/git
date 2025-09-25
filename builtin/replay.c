@@ -21,6 +21,8 @@
 #include <oidset.h>
 #include <tree.h>
 
+#define the_repository DO_NOT_USE_THE_REPOSITORY
+
 static const char *short_commit_name(struct repository *repo,
 				     struct commit *commit)
 {
@@ -85,7 +87,7 @@ static struct commit *create_commit(struct repository *repo,
 	obj = parse_object(repo, &ret);
 
 out:
-	repo_unuse_commit_buffer(the_repository, based_on, message);
+	repo_unuse_commit_buffer(repo, based_on, message);
 	free_commit_extra_headers(extra);
 	free_commit_list(parents);
 	strbuf_release(&msg);
