@@ -1938,7 +1938,9 @@ int cmd_commit(int argc,
 	}
 
 	if (file_exists(git_path_replay_edit(the_repository)))
-		replay_descendants(the_repository, current_head, &oid);
+		replay_descendants(the_repository,
+				   &current_head->object.oid,
+				   &oid);
 
 	sequencer_post_commit_cleanup(the_repository, 0);
 	unlink(git_path_merge_head(the_repository));

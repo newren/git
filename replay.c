@@ -9,17 +9,17 @@
 #include "strvec.h"
 
 void replay_descendants(struct repository *repo,
-			struct commit *current_head,
-			struct object_id *oid)
+			const struct object_id *prev_head,
+			const struct object_id *new_head)
 {
 	struct strvec args = STRVEC_INIT;
 	struct strbuf str = STRBUF_INIT;
 	FILE *fp;
 
 	strvec_pushl(&args, "replay", "--onto", NULL);
-	strvec_push(&args, oid_to_hex(oid));
+	strvec_push(&args, oid_to_hex(new_head));
 	strvec_push(&args, "--ancestry-path");
-	strvec_pushf(&args, "^%s", oid_to_hex(&current_head->object.oid));
+	strvec_pushf(&args, "^%s", oid_to_hex(prev_head));
 
 	fp = xfopen(git_path_replay_edit(repo), "r");
 	while (strbuf_getline_lf(&str, fp) != EOF) {

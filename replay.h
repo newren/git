@@ -2,7 +2,7 @@
 #define REPLAY_H
 
 void replay_descendants(struct repository *repo,
-			struct commit *current_head,
-			struct object_id *oid);
+			const struct object_id *prev_head,
+			const struct object_id *new_head);
 
 #endif
