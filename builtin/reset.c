@@ -28,6 +28,7 @@
 #include "object-name.h"
 #include "parse-options.h"
 #include "path.h"
+#include "replay.h"
 #include "repository.h"
 #include "unpack-trees.h"
 #include "cache-tree.h"
@@ -321,6 +322,8 @@ static int reset_refs(const char *rev, const struct object_id *oid)
 					    msg.buf, "HEAD", oid, orig, 0,
 					    UPDATE_REFS_MSG_ON_ERR);
 	strbuf_release(&msg);
+	if (file_exists(git_path_replay_edit(the_repository)) && orig)
+		replay_descendants(the_repository, orig, oid);
 	return update_ref_status;
 }
 
