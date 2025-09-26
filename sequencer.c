@@ -30,6 +30,7 @@
 #include "merge-ort.h"
 #include "merge-ort-wrappers.h"
 #include "refs.h"
+#include "replay.h"
 #include "sparse-index.h"
 #include "strvec.h"
 #include "quote.h"
@@ -1294,6 +1295,10 @@ int update_head_with_reflog(const struct commit *old_head,
 	}
 	ref_transaction_free(transaction);
 	strbuf_release(&sb);
+	if (!ret && file_exists(git_path_replay_edit(the_repository)))
+		replay_descendants(the_repository,
+				   &old_head->object.oid,
+				   new_head);
 
 	return ret;
 }
