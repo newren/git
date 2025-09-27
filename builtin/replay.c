@@ -259,9 +259,11 @@ static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
 				    struct commit *fallback)
 {
 	khint_t pos = kh_get_oid_map(replayed_commits, commit->object.oid);
-	if (pos == kh_end(replayed_commits))
+	if (pos != kh_end(replayed_commits))
+		return kh_value(replayed_commits, pos);
+	if (commit->object.flags & UNINTERESTING)
 		return fallback;
-	return kh_value(replayed_commits, pos);
+	return commit;
 }
 
 static struct commit *pick_regular_commit(struct repository *repo,
@@ -359,7 +361,7 @@ static struct commit *pick_merge_commit(struct repository *repo,
 	parent1 = pickme->parents->item;
 	replayed_par1 = mapped_commit(replayed_commits, parent1, onto);
 	parent2 = pickme->parents->next->item;
-	replayed_par2 = mapped_commit(replayed_commits, parent2, parent2);
+	replayed_par2 = mapped_commit(replayed_commits, parent2, onto);
 
 	/*
 	 * We need the trees from 3 merges:
