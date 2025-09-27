@@ -531,6 +531,8 @@ __git_ps1 ()
 			:
 		elif [ -f "$g/BISECT_LOG" ]; then
 			r="|BISECTING"
+		elif [ -f "$g/REPLAY_EDIT" ]; then
+			r="|EDITING"
 		fi
 
 		if [ -n "$b" ]; then

@@ -964,6 +964,12 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 {
 	struct strbuf msg = STRBUF_INIT;
 	const char *old_desc, *reflog_msg;
+	bool exiting_replay_edit_mode = false;
+
+	if (file_exists(git_path_replay_edit(the_repository))) {
+		exiting_replay_edit_mode = true;
+	}
+
 	if (opts->new_branch) {
 		if (opts->new_orphan_branch) {
 			enum log_refs_config log_all_ref_updates =
@@ -1029,6 +1035,8 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 			describe_detached_head(_("HEAD is now at"), new_branch_info->commit);
 		}
 	} else if (new_branch_info->path) {	/* Switch branches. */
+		if (exiting_replay_edit_mode)
+			fprintf(stderr, _("You have exited editing mode of git replay.\n"));
 		if (refs_update_symref(get_main_ref_store(the_repository), "HEAD", new_branch_info->path, msg.buf) < 0)
 			die(_("unable to update HEAD"));
 		if (!opts->quiet) {
@@ -1056,10 +1064,13 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 		}
 	}
 	remove_branch_state(the_repository, !opts->quiet);
-	unlink(git_path_replay_edit(the_repository));
+	if (exiting_replay_edit_mode) {
+		unlink(git_path_replay_edit(the_repository));
+	}
 
 	strbuf_release(&msg);
-	if (!opts->quiet &&
+	if (!exiting_replay_edit_mode &&
+	    !opts->quiet &&
 	    !opts->force_detach &&
 	    (new_branch_info->path || !strcmp(new_branch_info->name, "HEAD")))
 		report_tracking(new_branch_info);
