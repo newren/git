@@ -93,6 +93,17 @@ struct ref_info {
 	size_t negative_refexprs;
 };
 
+static void record_remapping(kh_oid_map_t *replayed_commits,
+			     struct object_id *oid,
+			     struct commit *maps_to)
+{
+	int hr;
+	khint_t pos = kh_put_oid_map(replayed_commits, *oid, &hr);
+	if (hr == 0)
+		BUG("Duplicate rewritten commit: %s\n", oid_to_hex(oid));
+	kh_value(replayed_commits, pos) = maps_to;
+}
+
 static void get_ref_information(struct repository *repo,
 				struct rev_cmdline_info *cmd_info,
 				struct ref_info *ref_info)
@@ -430,8 +441,6 @@ int replay_revisions(struct rev_info *revs,
 	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(revs))) {
 		const struct name_decoration *decoration;
-		khint_t pos;
-		int hr;
 		bool is_merge = commit->parents && commit->parents->next;
 
 		if (opts->linearize && is_merge)
@@ -463,11 +472,8 @@ int replay_revisions(struct rev_info *revs,
 
 update_mapping:
 		/* Record commit -> last_commit mapping */
-		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
-		if (hr == 0)
-			BUG("Duplicate rewritten commit: %s\n",
-			    oid_to_hex(&commit->object.oid));
-		kh_value(replayed_commits, pos) = last_commit;
+		record_remapping(replayed_commits,
+				 &commit->object.oid, last_commit);
 
 		/* Update any necessary branches */
 		if (advance)
