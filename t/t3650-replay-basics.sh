@@ -502,4 +502,74 @@ test_expect_success 'using replay to rebase merges too, even basic evil ones' '
 	test_cmp expect actual
 '
 
+test_expect_success 'replay merge whose second parent is a negative ref' '
+	test_when_finished "rm -rf second-parent-negative-ref" &&
+	git init second-parent-negative-ref &&
+	(
+		cd second-parent-negative-ref &&
+		test_commit A &&
+		test_commit B &&
+		git checkout -b newbase HEAD~1 &&
+		test_commit C &&
+		git checkout -b side HEAD~1 &&
+		test_commit D &&
+		git checkout main &&
+		git merge --no-ff -m M side &&
+git log --oneline --graph --all &&
+
+		out=$(git replay --ref-action=print --onto newbase ^D main) &&
+		# out is "update refs/heads/main <newref> <oldref>"
+		new_main=$(echo "$out" | cut -f 3 -d " ") &&
+
+		# first parent of new_main should be rebased onto newbase,
+		# i.e. first parent of (first_parent of new_main) should be
+		# newbase
+		git rev-parse "$new_main^1~1" >actual &&
+		git rev-parse newbase >expect &&
+		test_cmp expect actual &&
+
+		# second parent of new_main should be mapped directly to newbase
+		git rev-parse "$new_main^2" >actual &&
+		git rev-parse newbase >expect &&
+git log --oneline --graph $new_main &&
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'replay merge with parent that is uninteresting' '
+	test_when_finished "rm -rf uninteresting-parent" &&
+	git init uninteresting-parent &&
+	(
+		cd uninteresting-parent &&
+		test_commit A &&
+		test_commit B &&
+		test_commit C &&
+		git branch topic1 &&
+		git checkout -b newbase A &&
+		test_commit E &&
+		git checkout -b side A &&
+		test_commit D &&
+		git merge --no-ff -m M B &&
+		git branch -M main &&
+
+		out=$(git replay --ref-action=print --onto newbase ^topic1 main) &&
+		new_main=$(echo "$out" | cut -f 3 -d " ") &&
+
+		# Check that we get the right number of commits & commit msgs
+		git log --format=%s --topo-order $new_main >all_commits &&
+		printf "%s\n" M B D E A >expect &&
+		test_cmp expect all_commits &&
+
+		# Check that we keep the original B parent as second parent
+		git rev-parse "$new_main^2" >actual &&
+		git rev-parse B >expect &&
+		test_cmp expect actual &&
+
+		# Check that D was rebased, so that E is now the parent of D
+		git rev-parse "$new_main~2" >actual &&
+		git rev-parse E >expect &&
+		test_cmp expect actual
+	)
+'
+
 test_done
