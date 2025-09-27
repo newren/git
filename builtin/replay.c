@@ -243,6 +243,17 @@ static void determine_replay_mode(struct repository *repo,
 	strset_clear(&rinfo.positive_refs);
 }
 
+static void record_remapping(kh_oid_map_t *replayed_commits,
+			     struct object_id *oid,
+			     struct commit *maps_to)
+{
+	int hr;
+	khint_t pos = kh_put_oid_map(replayed_commits, *oid, &hr);
+	if (hr == 0)
+		BUG("Duplicate rewritten commit: %s\n", oid_to_hex(oid));
+	kh_value(replayed_commits, pos) = maps_to;
+}
+
 static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
 				    struct commit *commit,
 				    struct commit *fallback)
@@ -616,8 +627,6 @@ int cmd_replay(int argc,
 	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(&revs))) {
 		const struct name_decoration *decoration;
-		khint_t pos;
-		int hr;
 
 		if (!commit->parents)
 			die(_("replaying down to root commit is not supported yet!"));
@@ -637,11 +646,8 @@ int cmd_replay(int argc,
 			       oid_to_hex(&commit->object.oid));
 
 		/* Record commit -> pick mapping */
-		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
-		if (hr == 0)
-			BUG("Duplicate rewritten commit: %s\n",
-			    oid_to_hex(&commit->object.oid));
-		kh_value(replayed_commits, pos) = last_commit;
+		record_remapping(replayed_commits,
+				 &commit->object.oid, last_commit);
 
 		/* Update any necessary branches */
 		if (advance_name)
