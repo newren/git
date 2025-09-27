@@ -500,7 +500,10 @@ int cmd_replay(int argc,
 	const char *onto_name = NULL;
 	int contained = 0;
 	int no_update_refs_flag = 0;
+	int brief_stats = 0;
 	int batch_mode = 0;
+	int commits_updated = 0;
+	int branches_updated = 0;
 
 	struct rev_info revs;
 	struct commit *last_commit = NULL;
@@ -532,6 +535,8 @@ int cmd_replay(int argc,
 			 N_("advance all branches contained in revision-range")),
 		OPT_BOOL(0, "no-update-refs", &no_update_refs_flag,
 			 N_("show ref update commands but do not perform them")),
+		OPT_BOOL(0, "brief-stats", &brief_stats,
+			 N_("show brief stats about commits/branches updated")),
 		OPT_END()
 	};
 
@@ -648,6 +653,7 @@ int cmd_replay(int argc,
 		else
 			last_commit = pick_octopus_commit(repo, commit, replayed_commits,
 							  onto, &merge_opt, &result);
+		commits_updated++;
 
 		/* TODO: Handle conflicts */
 		if (!last_commit)
@@ -682,6 +688,7 @@ int cmd_replay(int argc,
 						goto cleanup;
 					}
 				}
+				branches_updated++;
 			}
 			decoration = decoration->next;
 		}
@@ -712,6 +719,10 @@ int cmd_replay(int argc,
 			ret = error(_("failed to update refs: %s"),
 				    transaction_err.buf);
 			goto cleanup;
+		}
+		if (brief_stats) {
+			fprintf(stderr, "Updated %d commits and %d branches.\n",
+				commits_updated, branches_updated);
 		}
 	}
 

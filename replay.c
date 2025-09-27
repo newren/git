@@ -16,7 +16,7 @@ void replay_descendants(struct repository *repo,
 	struct strbuf str = STRBUF_INIT;
 	FILE *fp;
 
-	strvec_pushl(&args, "replay", "--onto", NULL);
+	strvec_pushl(&args, "replay", "--brief-stats", "--onto", NULL);
 	strvec_push(&args, oid_to_hex(new_head));
 	strvec_push(&args, "--ancestry-path");
 	strvec_pushf(&args, "^%s", oid_to_hex(prev_head));
