@@ -103,9 +103,23 @@ struct ref_info {
 	int negative_refexprs;
 };
 
+static void record_remapping(kh_oid_map_t *replayed_commits,
+			     struct object_id *oid,
+			     struct commit *maps_to)
+{
+	int hr;
+	khint_t pos = kh_put_oid_map(replayed_commits, *oid, &hr);
+	if (hr == 0)
+		BUG("Duplicate rewritten commit: %s\n", oid_to_hex(oid));
+	kh_value(replayed_commits, pos) = maps_to;
+}
+
+
 static void get_ref_information(struct repository *repo,
 				struct rev_cmdline_info *cmd_info,
-				struct ref_info *ref_info)
+				struct ref_info *ref_info,
+				kh_oid_map_t *replayed_commits,
+				struct commit *newbase)
 {
 	int i;
 
@@ -149,6 +163,14 @@ static void get_ref_information(struct repository *repo,
 				ref_info->onto = lookup_commit_reference_gently(repo,
 										&e->item->oid, 1);
 			ref_info->negative_refexprs++;
+
+			if (newbase) {
+				printf("Recording remapping: %s -> %s\n",
+				       oid_to_hex(&e->item->oid),
+				       oid_to_hex(&newbase->object.oid));
+				record_remapping(replayed_commits,
+						 &e->item->oid, newbase);
+			}
 		} else {
 			if (can_uniquely_dwim)
 				strset_add(&ref_info->positive_refs, fullname);
@@ -161,6 +183,7 @@ static void get_ref_information(struct repository *repo,
 
 static void determine_replay_mode(struct repository *repo,
 				  struct rev_cmdline_info *cmd_info,
+				  kh_oid_map_t *replayed_commits,
 				  const char *onto_name,
 				  char **advance_name,
 				  struct commit **onto,
@@ -168,7 +191,15 @@ static void determine_replay_mode(struct repository *repo,
 {
 	struct ref_info rinfo;
 
-	get_ref_information(repo, cmd_info, &rinfo);
+	if (onto_name) {
+		*onto = peel_committish(repo, onto_name);
+	} else if (*advance_name) {
+		*onto = peel_committish(repo, *advance_name);
+	} else {
+		*onto = NULL;
+	}
+	get_ref_information(repo, cmd_info, &rinfo, replayed_commits, *onto);
+
 	if (!rinfo.positive_refexprs)
 		die(_("need some commits to replay"));
 
@@ -239,6 +270,7 @@ static void determine_replay_mode(struct repository *repo,
 		**update_refs = rinfo.positive_refs;
 		memset(&rinfo.positive_refs, 0, sizeof(**update_refs));
 	}
+
 	strset_clear(&rinfo.negative_refs);
 	strset_clear(&rinfo.positive_refs);
 }
@@ -256,7 +288,6 @@ static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
 static struct commit *pick_regular_commit(struct repository *repo,
 					  struct commit *pickme,
 					  kh_oid_map_t *replayed_commits,
-					  struct commit *onto,
 					  struct merge_options *merge_opt,
 					  struct merge_result *result)
 {
@@ -267,7 +298,7 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	struct strbuf parent2_desc = STRBUF_INIT;
 
 	base = pickme->parents->item;
-	replayed_base = mapped_commit(replayed_commits, base, onto);
+	replayed_base = mapped_commit(replayed_commits, base, base);
 
 	result->tree = repo_get_commit_tree(repo, replayed_base);
 	pickme_tree = repo_get_commit_tree(repo, pickme);
@@ -332,7 +363,6 @@ static void do_merge(struct repository *repo,
 static struct commit *pick_merge_commit(struct repository *repo,
 					struct commit *pickme,
 					kh_oid_map_t *replayed_commits,
-					struct commit *onto,
 					struct merge_options *merge_opt,
 					struct merge_result *result)
 {
@@ -346,7 +376,7 @@ static struct commit *pick_merge_commit(struct repository *repo,
 	struct merge_result remerge_res = { 0 }, new_merge_res = { 0 };
 
 	parent1 = pickme->parents->item;
-	replayed_par1 = mapped_commit(replayed_commits, parent1, onto);
+	replayed_par1 = mapped_commit(replayed_commits, parent1, parent1);
 	parent2 = pickme->parents->next->item;
 	replayed_par2 = mapped_commit(replayed_commits, parent2, parent2);
 
@@ -405,7 +435,6 @@ static struct commit *pick_merge_commit(struct repository *repo,
 static struct commit *pick_octopus_commit(struct repository *repo UNUSED,
 					  struct commit *pickme UNUSED,
 					  kh_oid_map_t *replayed_commits UNUSED,
-					  struct commit *onto UNUSED,
 					  struct merge_options *merge_opt UNUSED,
 					  struct merge_result *result UNUSED)
 {
@@ -585,8 +614,9 @@ int cmd_replay(int argc,
 		revs.simplify_history = 0;
 	}
 
-	determine_replay_mode(repo, &revs.cmdline, onto_name, &advance_name,
-			      &onto, &update_refs);
+	replayed_commits = kh_init_oid_map();
+	determine_replay_mode(repo, &revs.cmdline, replayed_commits,
+			      onto_name, &advance_name, &onto, &update_refs);
 
 	/* Initialize ref transaction unless using --no-update-refs */
 	if (!no_update_refs_flag) {
@@ -613,23 +643,20 @@ int cmd_replay(int argc,
 	result.clean = 1;  /* Assume clean until proven otherwise */
 	merge_opt.show_rename_progress = 0;
 	last_commit = onto;
-	replayed_commits = kh_init_oid_map();
 	while ((commit = get_revision(&revs))) {
 		const struct name_decoration *decoration;
-		khint_t pos;
-		int hr;
 
 		if (!commit->parents)
 			die(_("replaying down to root commit is not supported yet!"));
 		if (!commit->parents->next)
 			last_commit = pick_regular_commit(repo, commit, replayed_commits,
-							  onto, &merge_opt, &result);
+							  &merge_opt, &result);
 		else if (!commit->parents->next->next)
 			last_commit = pick_merge_commit(repo, commit, replayed_commits,
-							onto, &merge_opt, &result);
+							&merge_opt, &result);
 		else
 			last_commit = pick_octopus_commit(repo, commit, replayed_commits,
-							  onto, &merge_opt, &result);
+							  &merge_opt, &result);
 
 		/* TODO: Handle conflicts */
 		if (!last_commit)
