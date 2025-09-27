@@ -8,6 +8,7 @@
 #include "git-compat-util.h"
 
 #include "builtin.h"
+#include "advice.h"
 #include "commit-reach.h"
 #include "environment.h"
 #include "hex.h"
@@ -469,6 +470,11 @@ static int edit(int argc, const char **argv, const char *prefix,
 		const char *new_argv[4] = { "switch", "--detach", "--quiet",
 					    argv[1] };
 		cmd_switch(4, new_argv, prefix, repo);
+		advise_if_enabled(ADVICE_REPLAY_EDIT,
+			_("Switched your working tree to %s.  Any edits will\n"
+			  "cause descendant commits to be replayed on top.\n"
+			  "Use \"git switch\" to exit editing mode.\n"),
+			argv[1]);
 	} else {
 		die(_("auto-picking conflicted commits to edit not yet implemented"));
 	}

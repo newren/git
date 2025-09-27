@@ -74,6 +74,7 @@ static struct {
 	[ADVICE_PUSH_UPDATE_REJECTED_ALIAS]		= { "pushNonFastForward" }, /* backwards compatibility */
 	[ADVICE_REBASE_TODO_ERROR]			= { "rebaseTodoError" },
 	[ADVICE_REF_SYNTAX]				= { "refSyntax" },
+	[ADVICE_REPLAY_EDIT]				= { "replayEdit" },
 	[ADVICE_RESET_NO_REFRESH_WARNING]		= { "resetNoRefresh" },
 	[ADVICE_RESOLVE_CONFLICT]			= { "resolveConflict" },
 	[ADVICE_RM_HINTS]				= { "rmHints" },
