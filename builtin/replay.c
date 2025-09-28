@@ -342,6 +342,7 @@ static void do_merge(struct repository *repo,
 	o->record_conflict_msgs_as_headers = 1;
 	o->msg_header_prefix = "remerge";
 
+	o->ancestor = "ancestor"; /* TODO */
 	o->branch1 = "parent1"; /* TODO */
 	o->branch2 = "parent2";
 
@@ -422,9 +423,7 @@ static struct commit *pick_merge_commit(struct repository *repo,
 	 * TODO: relax this; intermediate results can have conflicts
 	 * without outer one having some
 	 */
-	if (result->clean != 1 ||
-	    remerge_res.clean != 1 ||
-	    new_merge_res.clean != 1)
+	if (result->clean != 1)
 		return NULL;
 
 	return create_commit(repo, result->tree, pickme,
