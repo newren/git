@@ -324,6 +324,18 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	if (!result->clean)
 		return NULL;
 
+	/*
+	 * If our new commit would be empty, i.e. its tree matches its parent,
+	 * and the original commit we are picking is not empty, i.e. its tree
+	 * does not match its parent, then do not create the empty commit and
+	 * just return our parent.
+	 */
+	if (oideq(&result->tree->object.oid,
+		  &repo_get_commit_tree(repo, replayed_base)->object.oid) &&
+	    !oideq(&repo_get_commit_tree(repo, pickme)->object.oid,
+		  &repo_get_commit_tree(repo, pickme->parents->item)->object.oid))
+		return replayed_base;
+	/* ...otherwise, create the commit. */
 	return create_commit(repo, result->tree, pickme, replayed_base, NULL);
 }
 
