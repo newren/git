@@ -5,6 +5,7 @@
 #include "hex.h"
 #include "path.h"
 #include "replay.h"
+#include "revision.h"
 #include "strbuf.h"
 #include "strvec.h"
 
@@ -28,5 +29,6 @@ void replay_descendants(struct repository *repo,
 	}
 	fclose(fp);
 	strbuf_release(&str);
+	reset_revision_walk();
 	cmd_replay(args.nr, args.v, NULL, repo);
 }
