@@ -298,7 +298,9 @@ test_expect_success 'merge.directoryRenames=false' '
 	git commit -m modified to-rename/add-a-file.t &&
 
 	git -c merge.directoryRenames=false replay \
-		--onto rename-onto rename-onto..rename-from
+		--onto rename-onto rename-onto..rename-from &&
+
+	git reset --hard HEAD
 '
 
 test_expect_success 'default atomic behavior updates refs directly' '
