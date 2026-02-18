@@ -320,10 +320,10 @@ int replay_revisions(struct rev_info *revs,
 
 		if (opts->linearize && is_merge)
 			/*
-			 * drop the commit, then map current commit to
-			 * the same as the previous commit
+			 * drop the merge commit, then map it to the same
+			 * 'last_commit' as previously used
 			 */
-			;
+			goto update_mapping;
 		else if (is_merge)
 			die(_("replaying merge commits is not supported yet!"));
 		else
@@ -334,8 +334,10 @@ int replay_revisions(struct rev_info *revs,
 						    &merge_opt, &result);
 
 		if (!last_commit)
+			/* TODO: handle conflicts */
 			break;
 
+update_mapping:
 		/* Record commit -> last_commit mapping */
 		pos = kh_put_oid_map(replayed_commits, commit->object.oid, &hr);
 		if (hr == 0)
