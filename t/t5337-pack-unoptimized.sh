@@ -133,4 +133,38 @@ test_expect_success '.unoptimized is removed by git repack -d' '
 	)
 '
 
+test_expect_success 'pack-objects --mark-unoptimized writes .unoptimized' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		A=$(git hash-object -w a) &&
+		B=$(git hash-object -w b) &&
+		printf "%s\n%s\n" "$A" "$B" |
+			git pack-objects --window=0 --mark-unoptimized \
+				.git/objects/pack/pack >pack.hash &&
+		pack="pack-$(cat pack.hash).pack" &&
+		test_path_is_file .git/objects/pack/${pack%.pack}.unoptimized &&
+		test_must_be_empty .git/objects/pack/${pack%.pack}.unoptimized &&
+		test 0 -eq "$(count_deltas .git/objects/pack/${pack%.pack}.idx)" &&
+		git prune-packed &&
+
+		out_pack=$(repack_blobs) &&
+		test 1 -le "$(count_deltas .git/objects/pack/${out_pack%.pack}.idx)"
+	)
+'
+
+test_expect_success 'pack-objects --mark-unoptimized is incompatible with --stdout' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		A=$(git hash-object -w a) &&
+		printf "%s\n" "$A" >in &&
+		test_must_fail git pack-objects --mark-unoptimized --stdout \
+			<in >/dev/null 2>err &&
+		test_grep "cannot be used together" err
+	)
+'
+
 test_done

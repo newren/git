@@ -44,6 +44,7 @@
 #include "pack-mtimes.h"
 #include "parse-options.h"
 #include "pkt-line.h"
+#include "path.h"
 #include "blob.h"
 #include "tree.h"
 #include "path-walk.h"
@@ -212,6 +213,7 @@ static int keep_unreachable, unpack_unreachable, include_tag;
 static timestamp_t unpack_unreachable_expiration;
 static int pack_loose_unreachable;
 static int cruft;
+static int mark_unoptimized;
 static int shallow = 0;
 static timestamp_t cruft_expiration;
 static int local;
@@ -1469,6 +1471,14 @@ static void write_pack_file(void)
 					    nr_written, &to_pack,
 					    &pack_idx_opts, hash,
 					    &idx_tmp_name);
+
+			if (mark_unoptimized) {
+				size_t tmpname_len = tmpname.len;
+
+				strbuf_addstr(&tmpname, "unoptimized");
+				write_pack_marker_file(the_repository, tmpname.buf, "");
+				strbuf_setlen(&tmpname, tmpname_len);
+			}
 
 			if (write_bitmap_index) {
 				size_t tmpname_len = tmpname.len;
@@ -5207,6 +5217,8 @@ int cmd_pack_objects(int argc,
 		  N_("unpack unreachable objects newer than <time>"),
 		  PARSE_OPT_OPTARG, option_parse_unpack_unreachable),
 		OPT_BOOL(0, "cruft", &cruft, N_("create a cruft pack")),
+		OPT_BOOL(0, "mark-unoptimized", &mark_unoptimized,
+			 N_("write an .unoptimized marker alongside the output pack(s)")),
 		OPT_CALLBACK_F(0, "cruft-expiration", NULL, N_("time"),
 		  N_("expire cruft objects older than <time>"),
 		  PARSE_OPT_OPTARG, option_parse_cruft_expiration),
@@ -5396,6 +5408,9 @@ int cmd_pack_objects(int argc,
 
 	if (!pack_to_stdout && thin)
 		die(_("--thin cannot be used to build an indexable pack"));
+
+	die_for_incompatible_opt2(mark_unoptimized, "--mark-unoptimized",
+				  pack_to_stdout, "--stdout");
 
 	die_for_incompatible_opt2(keep_unreachable, "--keep-unreachable",
 				  unpack_unreachable, "--unpack-unreachable");
