@@ -116,6 +116,15 @@ reachability up to the boundary set by the excluded packs.
 Incompatible with `--revs`, or options that imply `--revs` (such as
 `--all`), with the exception of `--unpacked`, which is compatible.
 
+--emit-input-packs=<file>::
+--emit-input-loose=<file>::
+	Write all local pack basenames or loose object IDs, respectively,
+	one per line, to `<file>` before object enumeration. These snapshots
+	may include inputs not selected for packing and are
+	intended for internal communication with the invoking
+	linkgit:git-repack[1] process, so linkgit:git-pack-aggregate[1] can
+	avoid those inputs.
+
 --cruft::
 	Packs unreachable objects into a separate "cruft" pack, denoted
 	by the existence of a `.mtimes` file. Typically used by `git
