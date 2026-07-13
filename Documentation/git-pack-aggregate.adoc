@@ -10,6 +10,7 @@ SYNOPSIS
 --------
 [verse]
 'git pack-aggregate' --once [--min-loose=<n>] [--min-packs=<n>]
+                   [--max-objects=<n>]
 
 DESCRIPTION
 -----------
@@ -64,6 +65,20 @@ OPTIONS
 	Skip aggregation of small packfiles if fewer than `<n>` aggregatable
 	packs are present.
 	Defaults to 5.
+
+--max-objects=<n>::
+	Skip packs estimated to contain more than `<n>` objects, leaving
+	them untouched by step 2.  The object count is estimated cheaply
+	from the size of the pack's `.idx` file rather than by opening it.
+	Legacy v1 indexes may admit slightly more objects than the limit.
+	This keeps `git pack-aggregate` focused on rolling up the small
+	packs it is meant for, instead of repacking a large base pack
+	(which would amount to a near-full repack).  Defaults to the
+	`pack.aggregateMaxObjects` configuration value, or 100000 if that
+	is unset.  A value of `0` disables the limit.  Note that packs
+	already referenced by the multi-pack-index are excluded
+	regardless of this setting, so on a normally-maintained
+	repository the large base pack is skipped anyway.
 
 SEE ALSO
 --------

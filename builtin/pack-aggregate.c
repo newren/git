@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "builtin.h"
+#include "config.h"
 #include "gettext.h"
 #include "hash.h"
 #include "hex.h"
@@ -21,9 +22,12 @@
 #include "wrapper.h"
 
 static const char *const pack_aggregate_usage[] = {
-	N_("git pack-aggregate --once [--min-loose=<n>] [--min-packs=<n>]"),
+	N_("git pack-aggregate --once [--min-loose=<n>] [--min-packs=<n>]\n"
+	   "                  [--max-objects=<n>]"),
 	NULL
 };
+
+#define DEFAULT_MAX_OBJECTS 100000
 
 static int has_sidecar(const char *packdir, const char *basename,
 		       const char *ext)
@@ -55,9 +59,40 @@ static int has_protective_sidecar(const char *packdir, const char *basename)
 	return 0;
 }
 
-static int has_idx(const char *packdir, const char *basename)
+static int idx_file_size(const char *packdir, const char *basename,
+			 off_t *size)
 {
-	return has_sidecar(packdir, basename, "idx");
+	struct strbuf buf = STRBUF_INIT;
+	struct stat st;
+	int ret;
+
+	strbuf_addf(&buf, "%s/%s.idx", packdir, basename);
+	ret = !stat(buf.buf, &st);
+	if (ret)
+		*size = st.st_size;
+	strbuf_release(&buf);
+	return ret;
+}
+
+/*
+ * Convert the object-count cap to a v2 index size for comparison with
+ * idx_file_size().  Smaller v1 indexes may admit more objects than the
+ * heuristic limit.  For N objects:
+ *
+ *   size = 8 (header) + 1024 (fanout) + N*(rawsz + 8) + 2*rawsz (trailer)
+ *
+ * Ignore the extra 8 bytes per offset >= 2GiB.  This overestimates N
+ * for packs with large offsets, favoring skipping borderline packs.
+ * A cap of 0 disables the limit and returns 0.
+ */
+static off_t max_objects_to_idx_size(const struct git_hash_algo *algo,
+				     int max_objects)
+{
+	off_t rawsz = algo->rawsz;
+
+	if (!max_objects)
+		return 0;
+	return 8 + 1024 + 2 * rawsz + (rawsz + 8) * (off_t)max_objects;
 }
 
 /*
@@ -206,10 +241,12 @@ static void collect_pack_candidates(struct repository *repo,
 				    const char *packdir,
 				    struct strset *cycle_exclude,
 				    struct strset *midx_exclude,
-				    struct string_list *candidates)
+				    struct string_list *candidates,
+				    off_t max_idx_size)
 {
 	struct packed_git *p;
 	struct strbuf base = STRBUF_INIT;
+	off_t idx_size = 0;
 
 	repo_for_each_pack(repo, p) {
 		if (!p->pack_local)
@@ -226,7 +263,9 @@ static void collect_pack_candidates(struct repository *repo,
 			continue;
 		if (has_protective_sidecar(packdir, base.buf))
 			continue;
-		if (!has_idx(packdir, base.buf))
+		if (!idx_file_size(packdir, base.buf, &idx_size))
+			continue;
+		if (max_idx_size && idx_size > max_idx_size)
 			continue;
 
 		string_list_append(candidates, base.buf);
@@ -398,7 +437,7 @@ static void unlink_consumed_packs(const char *packdir,
 
 static int run_aggregation(struct repository *repo, const char *packdir,
 			   struct strset *midx_exclude,
-			   int min_loose, int min_packs)
+			   int min_loose, int min_packs, int max_objects)
 {
 	struct oid_array loose_oids = OID_ARRAY_INIT;
 	struct string_list loose_paths = STRING_LIST_INIT_DUP;
@@ -450,7 +489,9 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 	 */
 	refresh_midx_exclusions(repo, midx_exclude);
 	collect_pack_candidates(repo, packdir,
-				&loose_rollup_exclude, midx_exclude, &candidates);
+				&loose_rollup_exclude, midx_exclude, &candidates,
+				max_objects_to_idx_size(repo->hash_algo,
+							max_objects));
 
 	if ((int)candidates.nr < min_packs)
 		goto out;
@@ -490,6 +531,7 @@ int cmd_pack_aggregate(int argc, const char **argv,
 {
 	int min_packs = 5;
 	int min_loose = 5;
+	int max_objects = -1;
 	int once = 0;
 	struct option options[] = {
 		OPT_BOOL(0, "once", &once,
@@ -500,6 +542,9 @@ int cmd_pack_aggregate(int argc, const char **argv,
 		OPT_INTEGER(0, "min-packs", &min_packs,
 			    N_("skip pack aggregation if fewer "
 			       "candidates (default 5)")),
+		OPT_INTEGER(0, "max-objects", &max_objects,
+			    N_("skip packs with more than this many "
+			       "objects (0 for no limit)")),
 		OPT_END(),
 	};
 	struct strset midx_exclude = STRSET_INIT;
@@ -519,10 +564,16 @@ int cmd_pack_aggregate(int argc, const char **argv,
 	if (repo->repository_format_precious_objects)
 		die(_("cannot aggregate in a precious-objects repo"));
 
+	if (max_objects < 0 &&
+	    repo_config_get_int(repo, "pack.aggregatemaxobjects", &max_objects))
+		max_objects = DEFAULT_MAX_OBJECTS;
+	if (max_objects < 0)
+		die(_("pack.aggregateMaxObjects cannot be negative"));
+
 	packdir = mkpathdup("%s/pack", repo_get_object_directory(repo));
 
 	ret = run_aggregation(repo, packdir, &midx_exclude,
-			      min_loose, min_packs);
+			      min_loose, min_packs, max_objects);
 
 	strset_clear(&midx_exclude);
 	free(packdir);
