@@ -3858,6 +3858,30 @@ static int pack_entry_is_delta(struct packed_git *p, off_t offset)
 }
 
 /*
+ * If the object stored in pack `p` at `offset` is a delta, resolve the
+ * object id of its base into `base_out` and return 1.  Return 0 for a
+ * non-delta or on any parse failure.  The cost is just an object-header
+ * parse, plus a revindex-backed offset lookup for OFS deltas.
+ */
+static int pack_entry_delta_base(struct packed_git *p, off_t offset,
+				 struct object_id *base_out)
+{
+	struct pack_window *w_curs = NULL;
+	off_t curpos = offset;
+	size_t size;
+	enum object_type type;
+	int ret = 0;
+
+	type = unpack_object_header(p, &w_curs, &curpos, &size);
+	if ((type == OBJ_OFS_DELTA || type == OBJ_REF_DELTA) &&
+	    !get_delta_base_oid(p, &w_curs, curpos, base_out, type, offset))
+		ret = 1;
+
+	unuse_pack(&w_curs);
+	return ret;
+}
+
+/*
  * When an object appears in more than one included pack, the first copy we
  * saw (packs are visited newest-mtime first) is the one recorded in the
  * packing list.  If that copy is a plain base but another included pack
@@ -3870,7 +3894,8 @@ static int pack_entry_is_delta(struct packed_git *p, off_t offset)
 static void maybe_prefer_delta_copy(const struct object_id *oid,
 				    struct packed_git *p, uint32_t pos)
 {
-	struct object_entry *entry;
+	struct object_entry *entry, *base_entry;
+	struct object_id cand_base, base_of_base;
 	off_t ofs;
 
 	if (!reuse_delta)
@@ -3884,7 +3909,23 @@ static void maybe_prefer_delta_copy(const struct object_id *oid,
 		return;
 
 	ofs = nth_packed_object_offset(p, pos);
-	if (!pack_entry_is_delta(p, ofs))
+	if (!pack_entry_delta_base(p, ofs, &cand_base))
+		return;
+
+	/*
+	 * Switching would make `oid` a delta against `cand_base`.  If
+	 * `cand_base` is itself already recorded as a delta against `oid`,
+	 * the switch forms a two-object cycle that a later
+	 * break_delta_chains() pass would have to cut.  Cutting it keeps one
+	 * of the two deltas either way, so switching gains nothing here; skip
+	 * it and leave `oid` a base, so the existing `cand_base -> oid` delta
+	 * survives with no cycle to break.
+	 */
+	base_entry = packlist_find(&to_pack, &cand_base);
+	if (base_entry && !base_entry->preferred_base && IN_PACK(base_entry) &&
+	    pack_entry_delta_base(IN_PACK(base_entry),
+				  base_entry->in_pack_offset, &base_of_base) &&
+	    oideq(&base_of_base, oid))
 		return;
 
 	oe_set_in_pack(&to_pack, entry, p);
