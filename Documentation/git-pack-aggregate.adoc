@@ -10,7 +10,8 @@ SYNOPSIS
 --------
 [verse]
 'git pack-aggregate' --once [--min-loose=<n>] [--min-packs=<n>]
-                   [--max-loose-objects=<n>] [--max-objects=<n>]
+                   [--max-loose-objects=<n>]
+                   [--max-objects=<n>] [--max-packs=<n>]
 
 DESCRIPTION
 -----------
@@ -80,6 +81,24 @@ OPTIONS
 	regardless of this setting, so on a normally-maintained
 	repository the large base pack is skipped anyway.
 
+--max-packs=<n>::
+	Fold at most `<n>` packs into each output pack.  When more than
+	`<n>` aggregatable packs are present, they are split into several
+	evenly-sized batches and each batch is rolled up into its own
+	output pack, rather than combining everything into a single pack.
+	This bounds how many packs any single `pack-objects` run (and any
+	later reader) must keep open at once, which matters on repositories
+	with such an extreme number of packs that per-process limits on
+	memory mappings or open files would otherwise be exceeded.  Note
+	that a pack in use costs roughly three such resources -- its
+	`.idx`, `.pack`, and `.rev` files -- so a batch of `<n>` packs
+	holds on the order of `3 * <n>` at peak; leave headroom below the
+	relevant limit when choosing `<n>`.  Splitting happens on whole-pack
+	boundaries, so each batch reuses the packs' existing deltas as-is
+	(a delta and its base always share a pack).  Defaults to the
+	`pack.aggregateMaxPacks` configuration value, or `10000` if that is
+	unset.  A value of `0` disables the limit and folds everything into
+	one pack.
 SEE ALSO
 --------
 linkgit:git-repack[1], linkgit:git-pack-objects[1],
