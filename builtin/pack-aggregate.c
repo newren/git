@@ -24,13 +24,15 @@
 static const char *const pack_aggregate_usage[] = {
 	N_("git pack-aggregate --once [--min-loose=<n>] [--min-packs=<n>]\n"
 	   "                         [--max-loose-objects=<n>]\n"
-	   "                         [--max-objects=<n>]"),
+	   "                         [--max-objects=<n>] [--max-packs=<n>]"),
 	NULL
 };
 
 #define DEFAULT_MAX_LOOSE_OBJECTS 100000
 
 #define DEFAULT_MAX_OBJECTS 100000
+
+#define DEFAULT_MAX_PACKS 10000
 
 static int has_sidecar(const char *packdir, const char *basename,
 		       const char *ext)
@@ -315,13 +317,14 @@ static void collect_pack_candidates(struct repository *repo,
 
 static int run_pack_objects_packs(const char *packtmp,
 				  const struct string_list *bases,
+				  size_t begin, size_t count,
 				  struct strbuf *out_hash)
 {
 	struct strbuf input = STRBUF_INIT;
 	size_t i;
 	int ret;
 
-	for (i = 0; i < bases->nr; i++)
+	for (i = begin; i < begin + count; i++)
 		strbuf_addf(&input, "%s.pack\n", bases->items[i].string);
 	ret = run_pack_objects(packtmp, 1, &input, out_hash);
 	strbuf_release(&input);
@@ -389,6 +392,7 @@ cleanup:
 
 static void unlink_consumed_packs(const char *packdir,
 				  const struct string_list *bases,
+				  size_t begin, size_t count,
 				  const char *keep_basename)
 {
 	static const char *exts[] = {
@@ -396,7 +400,7 @@ static void unlink_consumed_packs(const char *packdir,
 	};
 	size_t i;
 
-	for (i = 0; i < bases->nr; i++) {
+	for (i = begin; i < begin + count; i++) {
 		const char *base = bases->items[i].string;
 		int j;
 
@@ -435,7 +439,8 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 			   struct strset *loose_exclude,
 			   struct strset *midx_exclude,
 			   int min_loose, int min_packs,
-			   int max_loose_objects, int max_objects)
+			   int max_loose_objects, int max_objects,
+			   int max_packs)
 {
 	struct oid_array loose_oids = OID_ARRAY_INIT;
 	struct string_list loose_paths = STRING_LIST_INIT_DUP;
@@ -450,7 +455,6 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 	struct string_list candidates = STRING_LIST_INIT_DUP;
 	struct strbuf first_loose_rollup = STRBUF_INIT;
 	struct strbuf loose_hash = STRBUF_INIT;
-	struct strbuf packs_hash = STRBUF_INIT;
 	char *packtmp_loose = NULL;
 	char *packtmp_packs = NULL;
 	int ret = 0;
@@ -520,7 +524,7 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 	}
 
 	/*
-	 * Step 2: aggregate small packs into a single bigger pack.  A
+	 * Step 2: aggregate small packs into one or more output packs.  A
 	 * single loose-rollup pack is picked up naturally below.  When
 	 * step 1 needed multiple tranches, leave those outputs alone this
 	 * cycle rather than immediately copying the entire backlog again.
@@ -538,28 +542,68 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 
 	packtmp_packs = mkpathdup("%s/.tmp-%d-pack",
 				  packdir, (int)getpid());
-	if (run_pack_objects_packs(packtmp_packs, &candidates,
-				   &packs_hash)) {
-		ret = error(_("pack-objects failed during "
-			      "pack aggregation"));
-		goto out;
-	}
-	if (packs_hash.len) {
-		struct strbuf output_base = STRBUF_INIT;
 
-		if (packs_hash.len != repo->hash_algo->hexsz) {
-			ret = error(_("pack-objects returned an invalid pack hash"));
-			strbuf_release(&output_base);
-			goto out;
+	/*
+	 * Split the candidates into evenly-sized batches of at most
+	 * max_packs and roll each batch up into its own output pack (see
+	 * --max-packs).  Splitting on whole-pack boundaries lets each
+	 * batch reuse the packs' existing deltas as-is: on-disk packs are
+	 * self-contained, so a delta and its base never land in different
+	 * batches.  Size batches as ceil(total / ceil(total / max_packs))
+	 * to avoid a tiny trailing batch; max_packs == 0 means one batch
+	 * holding everything.
+	 */
+	{
+		size_t total = candidates.nr;
+		size_t batch_size = total;
+		size_t start;
+
+		if (max_packs > 0 && total > (size_t)max_packs) {
+			size_t num_batches = DIV_ROUND_UP(total,
+							  (size_t)max_packs);
+			batch_size = DIV_ROUND_UP(total, num_batches);
 		}
-		if (install_pack(repo, packtmp_packs, packdir, packs_hash.buf)) {
-			ret = -1;
-			strbuf_release(&output_base);
-			goto out;
+
+		for (start = 0; start < total; start += batch_size) {
+			size_t count = batch_size;
+			struct strbuf batch_hash = STRBUF_INIT;
+
+			if (start + count > total)
+				count = total - start;
+
+			if (run_pack_objects_packs(packtmp_packs, &candidates,
+						   start, count, &batch_hash)) {
+				ret = error(_("pack-objects failed during "
+					      "pack aggregation"));
+				strbuf_release(&batch_hash);
+				goto out;
+			}
+			if (batch_hash.len) {
+				struct strbuf output_base = STRBUF_INIT;
+
+				if (batch_hash.len != repo->hash_algo->hexsz) {
+					ret = error(_("pack-objects returned an "
+						      "invalid pack hash"));
+					strbuf_release(&batch_hash);
+					strbuf_release(&output_base);
+					goto out;
+				}
+				if (install_pack(repo, packtmp_packs, packdir,
+						 batch_hash.buf)) {
+					ret = -1;
+					strbuf_release(&batch_hash);
+					strbuf_release(&output_base);
+					goto out;
+				}
+				strbuf_addf(&output_base, "pack-%s",
+					    batch_hash.buf);
+				unlink_consumed_packs(packdir, &candidates,
+						      start, count,
+						      output_base.buf);
+				strbuf_release(&output_base);
+			}
+			strbuf_release(&batch_hash);
 		}
-		strbuf_addf(&output_base, "pack-%s", packs_hash.buf);
-		unlink_consumed_packs(packdir, &candidates, output_base.buf);
-		strbuf_release(&output_base);
 	}
 
 out:
@@ -567,7 +611,6 @@ out:
 	free(packtmp_packs);
 	strbuf_release(&first_loose_rollup);
 	strbuf_release(&loose_hash);
-	strbuf_release(&packs_hash);
 	strset_clear(&loose_rollup_exclude);
 	string_list_clear(&candidates, 0);
 	oid_array_clear(&loose_oids);
@@ -582,6 +625,7 @@ int cmd_pack_aggregate(int argc, const char **argv,
 	int min_loose = 5;
 	int max_loose_objects = -1;
 	int max_objects = -1;
+	int max_packs = -1;
 	int once = 0;
 	struct option options[] = {
 		OPT_BOOL(0, "once", &once,
@@ -598,6 +642,9 @@ int cmd_pack_aggregate(int argc, const char **argv,
 		OPT_INTEGER(0, "max-objects", &max_objects,
 			    N_("skip packs with more than this many "
 			       "objects (0 for no limit)")),
+		OPT_INTEGER(0, "max-packs", &max_packs,
+			    N_("aggregate at most this many packs into "
+			       "each output pack (0 for no limit)")),
 		OPT_END(),
 	};
 	struct strset pack_exclude = STRSET_INIT;
@@ -630,12 +677,18 @@ int cmd_pack_aggregate(int argc, const char **argv,
 	if (max_objects < 0)
 		die(_("pack.aggregateMaxObjects cannot be negative"));
 
+	if (max_packs < 0 &&
+	    repo_config_get_int(repo, "pack.aggregatemaxpacks", &max_packs))
+		max_packs = DEFAULT_MAX_PACKS;
+	if (max_packs < 0)
+		die(_("pack.aggregateMaxPacks cannot be negative"));
+
 	packdir = mkpathdup("%s/pack", repo_get_object_directory(repo));
 
 	ret = run_aggregation(repo, packdir, &pack_exclude,
 			      &loose_exclude, &midx_exclude,
 			      min_loose, min_packs,
-			      max_loose_objects, max_objects);
+			      max_loose_objects, max_objects, max_packs);
 
 	strset_clear(&pack_exclude);
 	strset_clear(&loose_exclude);
