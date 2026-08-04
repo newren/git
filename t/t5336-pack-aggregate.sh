@@ -3,6 +3,7 @@
 test_description='`git pack-aggregate` rolls up small packs and loose objects'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY/lib-terminal.sh"
 
 # Build N tiny packs in objects/pack/, each containing one distinct
 # blob.  Echoes the basenames (without .pack) one per line.
@@ -82,14 +83,85 @@ test_expect_success 'setup an empty repo' '
 	git init repo
 '
 
-test_expect_success '--once is required' '
+test_expect_success 'an aggregation mode is required' '
 	test_when_finished "rm -fr work" &&
 	cp -R repo work &&
 	(
 		cd work &&
 		test_must_fail git pack-aggregate 2>err &&
-		test_grep -- "--once is required" err
+		test_grep "exactly one of --once or --loop" err
 	)
+'
+
+test_expect_success 'aggregation modes and intervals are validated' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		test_must_fail git pack-aggregate --once --loop 2>err &&
+		test_grep "exactly one of --once or --loop" err &&
+		test_must_fail git pack-aggregate --loop --interval=0 2>err &&
+		test_grep -- "--interval must be at least 1" err &&
+		test_must_fail git pack-aggregate --once --min-loose=0 2>err &&
+		test_grep -- "--min-loose must be at least 1" err &&
+		test_must_fail git pack-aggregate --once --min-packs=0 2>err &&
+		test_grep -- "--min-packs must be at least 1" err
+	)
+'
+
+test_expect_success !MINGW 'loop exits when the parent pipe closes' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		: | git pack-aggregate --loop --interval=60 \
+			--parent-pipe-fd=0
+	)
+'
+
+test_expect_success !MINGW 'loop rejects a closed parent descriptor' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		test_must_fail git pack-aggregate --loop \
+			--parent-pipe-fd=9 9<&- 2>err &&
+		test_grep "invalid parent pipe descriptor" err
+	)
+'
+
+test_expect_success 'explicit progress works without a terminal' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		build_n_packs 5 >/dev/null &&
+		git pack-aggregate --once --progress 2>err &&
+		test_grep "Enumerating objects" err
+	)
+'
+
+test_expect_success TTY 'one-shot progress defaults and override on a terminal' '
+	test_when_finished "rm -fr work" &&
+	for option in default --no-progress
+	do
+		rm -fr work &&
+		cp -R repo work &&
+		(
+			cd work &&
+			build_n_packs 5 >/dev/null &&
+			if test "$option" = default
+			then
+				test_terminal git pack-aggregate --once \
+					>out 2>err &&
+				test_grep "Enumerating objects" err
+			else
+				test_terminal git pack-aggregate --once \
+					"$option" >out 2>err &&
+				test_must_be_empty err
+			fi
+		) || return 1
+	done
 '
 
 test_expect_success '--once below --min-packs is a no-op for packs' '
@@ -236,6 +308,61 @@ do
 		)
 	'
 done
+
+test_expect_success '--exclude-pack-file protects listed packs' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		build_n_packs 6 >packs.txt &&
+		first=$(sed -n 1p packs.txt) &&
+		second=$(sed -n 2p packs.txt) &&
+		cat >exclude.txt <<-EOF &&
+		# pack exclusions may use either recognized suffix
+
+		  $first.pack
+		$second.idx
+		pack-does-not-exist
+		EOF
+		git pack-aggregate --once \
+			--min-loose=1000 --min-packs=4 \
+			--exclude-pack-file=exclude.txt &&
+		test_path_is_file .git/objects/pack/${first}.pack &&
+		test_path_is_file .git/objects/pack/${second}.pack &&
+		# 2 excluded + 1 aggregate = 3 packs total.
+		test 3 -eq "$(count_packs)" &&
+		test 1 -eq "$(count_unoptimized)" &&
+		git fsck
+	)
+'
+
+test_expect_success '--exclude-loose-file protects listed loose objects' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		build_n_loose 5 >loose.txt &&
+		first=$(sed -n 1p loose.txt) &&
+		second=$(sed -n 2p loose.txt) &&
+		cat >exclude.txt <<-EOF &&
+		# loose exclusions are full object IDs
+
+		  $first
+		$second
+		not-an-object-id
+		EOF
+		git pack-aggregate --once \
+			--min-loose=1 --min-packs=1000 \
+			--exclude-loose-file=exclude.txt &&
+		test_path_is_file \
+			".git/objects/$(test_oid_to_path "$first")" &&
+		test_path_is_file \
+			".git/objects/$(test_oid_to_path "$second")" &&
+		test 2 -eq "$(count_loose)" &&
+		test 1 -eq "$(count_packs)" &&
+		git fsck
+	)
+'
 
 test_expect_success 'MIDX packs are protected even when lookup is disabled' '
 	test_when_finished "rm -fr work" &&
@@ -921,6 +1048,17 @@ test_expect_success 'repack stops when --aggregate-once fails' '
 		test_grep "pack.aggregateMaxObjects cannot be negative" err &&
 		test_grep "git pack-aggregate --once failed" err &&
 		test_grep ! "\"argv\":.*\"pack-objects\"" trace.txt
+	)
+'
+
+test_expect_success TTY 'quiet repack suppresses one-shot progress on a terminal' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		build_n_packs 5 >/dev/null &&
+		test_terminal git repack -q --aggregate-once >out 2>err &&
+		test_must_be_empty err
 	)
 '
 
