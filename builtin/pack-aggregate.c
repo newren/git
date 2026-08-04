@@ -14,6 +14,7 @@
 #include "path.h"
 #include "repository.h"
 #include "run-command.h"
+#include "sigchain.h"
 #include "strbuf.h"
 #include "string-list.h"
 #include "strmap.h"
@@ -22,9 +23,13 @@
 #include "wrapper.h"
 
 static const char *const pack_aggregate_usage[] = {
-	N_("git pack-aggregate --once [--min-loose=<n>] [--min-packs=<n>]\n"
-	   "                         [--max-loose-objects=<n>]\n"
-	   "                         [--max-objects=<n>] [--max-packs=<n>]"),
+	N_("git pack-aggregate (--once | --loop) [--interval=<seconds>]\n"
+	   "                  [--min-loose=<n>] [--min-packs=<n>]\n"
+	   "                  [--max-loose-objects=<n>]\n"
+	   "                  [--max-objects=<n>] [--max-packs=<n>]\n"
+	   "                  [--exclude-pack-file=<path>]\n"
+	   "                  [--exclude-loose-file=<path>]\n"
+	   "                  [--parent-pipe-fd=<n>]"),
 	NULL
 };
 
@@ -33,6 +38,14 @@ static const char *const pack_aggregate_usage[] = {
 #define DEFAULT_MAX_OBJECTS 100000
 
 #define DEFAULT_MAX_PACKS 10000
+
+static volatile sig_atomic_t stop_signaled;
+static int parent_pipe_fd = -1;
+
+static void term_handler(int sig UNUSED)
+{
+	stop_signaled = 1;
+}
 
 static int has_sidecar(const char *packdir, const char *basename,
 		       const char *ext)
@@ -112,6 +125,27 @@ static off_t max_objects_to_idx_size(const struct git_hash_algo *algo,
 	if (!max_objects)
 		return 0;
 	return 8 + 1024 + 2 * rawsz + (rawsz + 8) * (off_t)max_objects;
+}
+
+static void load_exclusions_from_file(const char *path, struct strset *set)
+{
+	FILE *fp;
+	struct strbuf line = STRBUF_INIT;
+
+	fp = fopen(path, "r");
+	if (!fp)
+		die_errno(_("could not open exclude file '%s'"), path);
+
+	while (strbuf_getline_lf(&line, fp) != EOF) {
+		strbuf_trim(&line);
+		if (!line.len || line.buf[0] == '#')
+			continue;
+		strbuf_strip_suffix(&line, ".pack");
+		strbuf_strip_suffix(&line, ".idx");
+		strset_add(set, line.buf);
+	}
+	strbuf_release(&line);
+	fclose(fp);
 }
 
 /*
@@ -434,13 +468,13 @@ static void unlink_consumed_packs(const char *packdir,
 	}
 }
 
-static int run_aggregation(struct repository *repo, const char *packdir,
-			   struct strset *pack_exclude,
-			   struct strset *loose_exclude,
-			   struct strset *midx_exclude,
-			   int min_loose, int min_packs,
-			   int max_loose_objects, int max_objects,
-			   int max_packs)
+static int do_one_cycle(struct repository *repo, const char *packdir,
+			struct strset *pack_exclude,
+			struct strset *loose_exclude,
+			struct strset *midx_exclude,
+			int min_loose, int min_packs,
+			int max_loose_objects, int max_objects,
+			int max_packs)
 {
 	struct oid_array loose_oids = OID_ARRAY_INIT;
 	struct string_list loose_paths = STRING_LIST_INIT_DUP;
@@ -469,12 +503,12 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 	set_loose_scan_cutoff(repo, &loose_data);
 	for_each_loose_file_in_source(repo->objects->sources,
 				      loose_scan_cb, NULL, NULL, &loose_data);
-	if (loose_data.eligible >= (size_t)min_loose) {
+	if (loose_data.eligible >= (size_t)min_loose && !stop_signaled) {
 		size_t loose_pack_count = 0;
 
 		packtmp_loose = mkpathdup("%s/.tmp-%d-loose-pack",
 					  packdir, (int)getpid());
-		while (loose_oids.nr) {
+		while (loose_oids.nr && !stop_signaled) {
 			strbuf_reset(&loose_hash);
 			if (run_pack_objects_loose(packtmp_loose, &loose_oids,
 						   &loose_hash)) {
@@ -513,6 +547,8 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 
 			oid_array_clear(&loose_oids);
 			string_list_clear(&loose_paths, 0);
+			if (stop_signaled)
+				break;
 
 			/* Once rollup starts, also consume a final partial tranche. */
 			loose_data.minimum = 1;
@@ -522,6 +558,9 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 						      &loose_data);
 		}
 	}
+
+	if (stop_signaled)
+		goto out;
 
 	/*
 	 * Step 2: aggregate small packs into one or more output packs.  A
@@ -564,7 +603,8 @@ static int run_aggregation(struct repository *repo, const char *packdir,
 			batch_size = DIV_ROUND_UP(total, num_batches);
 		}
 
-		for (start = 0; start < total; start += batch_size) {
+		for (start = 0; start < total && !stop_signaled;
+		     start += batch_size) {
 			size_t count = batch_size;
 			struct strbuf batch_hash = STRBUF_INIT;
 
@@ -618,18 +658,73 @@ out:
 	return ret;
 }
 
+static void interruptible_sleep(unsigned int seconds)
+{
+	struct pollfd pfd;
+	int timeout_ms;
+
+	if (stop_signaled)
+		return;
+
+	if (parent_pipe_fd < 0) {
+		unsigned int remaining = seconds;
+		while (remaining > 0 && !stop_signaled)
+			remaining = sleep(remaining);
+		return;
+	}
+
+	/*
+	 * Watch the parent pipe so we wake immediately if the process
+	 * that spawned us exits.  POLLHUP is reported in revents
+	 * regardless of whether it appears in events, so we leave
+	 * events==0; any of POLLHUP/POLLERR/POLLNVAL/POLLIN means the
+	 * other end of the pipe is gone and we should stop.
+	 */
+	pfd.fd = parent_pipe_fd;
+	pfd.events = 0;
+	timeout_ms = (seconds > INT_MAX / 1000) ? INT_MAX
+					       : (int)(seconds * 1000);
+
+	while (!stop_signaled) {
+		int ret;
+		pfd.revents = 0;
+		ret = poll(&pfd, 1, timeout_ms);
+		if (ret < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (ret == 0)
+			break;
+		if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL | POLLIN)) {
+			stop_signaled = 1;
+			break;
+		}
+	}
+}
+
 int cmd_pack_aggregate(int argc, const char **argv,
 		       const char *prefix, struct repository *repo)
 {
+	const char *exclude_pack_file = NULL;
+	const char *exclude_loose_file = NULL;
+	int interval = 60;
 	int min_packs = 5;
 	int min_loose = 5;
 	int max_loose_objects = -1;
 	int max_objects = -1;
 	int max_packs = -1;
 	int once = 0;
+	int loop = 0;
 	struct option options[] = {
 		OPT_BOOL(0, "once", &once,
 			 N_("run a single cycle and exit")),
+		OPT_BOOL(0, "loop", &loop,
+			 N_("loop forever, sleeping --interval seconds "
+			    "between cycles")),
+		OPT_INTEGER(0, "interval", &interval,
+			    N_("seconds to sleep between cycles "
+			       "(default 60)")),
 		OPT_INTEGER(0, "min-loose", &min_loose,
 			    N_("skip loose-object rollup if fewer "
 			       "candidates (default 5)")),
@@ -645,6 +740,17 @@ int cmd_pack_aggregate(int argc, const char **argv,
 		OPT_INTEGER(0, "max-packs", &max_packs,
 			    N_("aggregate at most this many packs into "
 			       "each output pack (0 for no limit)")),
+		OPT_STRING(0, "exclude-pack-file", &exclude_pack_file,
+			   N_("file"),
+			   N_("file listing pack basenames never to "
+			      "touch")),
+		OPT_STRING(0, "exclude-loose-file", &exclude_loose_file,
+			   N_("file"),
+			   N_("file listing loose object OIDs never to "
+			      "touch")),
+		OPT_INTEGER(0, "parent-pipe-fd", &parent_pipe_fd,
+			    N_("inherited fd of a pipe whose write end "
+			       "the parent holds; EOF triggers exit")),
 		OPT_END(),
 	};
 	struct strset pack_exclude = STRSET_INIT;
@@ -657,8 +763,10 @@ int cmd_pack_aggregate(int argc, const char **argv,
 			     pack_aggregate_usage, 0);
 	if (argc > 0)
 		usage_with_options(pack_aggregate_usage, options);
-	if (!once)
-		die(_("--once is required"));
+	if (once == loop)
+		die(_("exactly one of --once or --loop is required"));
+	if (interval < 1)
+		die(_("--interval must be at least 1"));
 	if (min_loose < 1)
 		die(_("--min-loose must be at least 1"));
 	if (min_packs < 1)
@@ -685,10 +793,27 @@ int cmd_pack_aggregate(int argc, const char **argv,
 
 	packdir = mkpathdup("%s/pack", repo_get_object_directory(repo));
 
-	ret = run_aggregation(repo, packdir, &pack_exclude,
-			      &loose_exclude, &midx_exclude,
-			      min_loose, min_packs,
-			      max_loose_objects, max_objects, max_packs);
+	if (exclude_pack_file)
+		load_exclusions_from_file(exclude_pack_file, &pack_exclude);
+	if (exclude_loose_file)
+		load_exclusions_from_file(exclude_loose_file, &loose_exclude);
+
+	sigchain_push(SIGTERM, term_handler);
+	sigchain_push(SIGHUP, term_handler);
+	sigchain_push(SIGINT, term_handler);
+
+	do {
+		if (stop_signaled)
+			break;
+		ret = do_one_cycle(repo, packdir, &pack_exclude,
+				   &loose_exclude, &midx_exclude,
+				   min_loose, min_packs,
+				   max_loose_objects, max_objects,
+				   max_packs);
+		if (ret || once || stop_signaled)
+			break;
+		interruptible_sleep((unsigned int)interval);
+	} while (!stop_signaled);
 
 	strset_clear(&pack_exclude);
 	strset_clear(&loose_exclude);
