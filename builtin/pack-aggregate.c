@@ -47,9 +47,9 @@ static const char *const pack_aggregate_usage[] = {
 static volatile sig_atomic_t stop_signaled;
 static int parent_pipe_fd = -1;
 
-static void term_handler(int sig UNUSED)
+static void term_handler(int sig)
 {
-	stop_signaled = 1;
+	stop_signaled = sig;
 }
 
 static int has_sidecar(const char *packdir, const char *basename,
@@ -267,7 +267,7 @@ static int run_pack_objects(const char *packtmp, int stdin_packs,
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct strbuf output = STRBUF_INIT;
-	int ret;
+	int ret, status;
 
 	strvec_push(&cmd.args, "pack-objects");
 	if (stdin_packs)
@@ -283,15 +283,25 @@ static int run_pack_objects(const char *packtmp, int stdin_packs,
 	strvec_push(&cmd.args, packtmp);
 	cmd.git_cmd = 1;
 	cmd.clean_on_exit = 1;
+	cmd.quiet_termination = 1;
 
 	/*
-	 * pipe_command() pumps stdin and stdout concurrently.  Its
-	 * clean-on-exit handling also terminates the child if we exit
-	 * before it does.
+	 * Pump stdin and stdout concurrently, retaining the child status
+	 * if cancellation breaks its input pipe. Clean-on-exit handling
+	 * terminates the child if we exit before it does.
 	 */
-	ret = pipe_command(&cmd, input->buf, input->len, &output, 0, NULL, 0);
+	ret = pipe_command_with_status(&cmd, input->buf, input->len,
+					&output, 0, NULL, 0, &status);
 
-	if (ret > 0)
+	/* Cancellation must not publish partial output or hide other failures. */
+	if (stop_signaled && status == 128 + stop_signaled &&
+	    (ret == status || (ret < 0 && errno == EPIPE))) {
+		remove_temporary_packs(packtmp);
+		strbuf_release(&output);
+		return 0;
+	}
+
+	if (ret && status >= 0)
 		remove_temporary_packs(packtmp);
 
 	if (!ret && output.len) {
