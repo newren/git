@@ -38,6 +38,9 @@ This command provides a quick recovery step for a repository that has
 accumulated many loose objects or small packs.  It reduces the number
 of files that unrelated `git` operations must scan, while leaving a
 later thorough linkgit:git-repack[1] to optimize deltas and pack layout.
+The `repack.aggregateOnce` configuration variable (see
+linkgit:git-repack[1]) lets `git repack` request this cleanup before
+beginning that more expensive work.
 
 Like `git repack`, `git pack-aggregate` takes no locks of its own.  Do
 not run it concurrently with other pack-rewriting maintenance.
