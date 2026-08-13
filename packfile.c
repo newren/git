@@ -531,6 +531,11 @@ const char *pack_basename(struct packed_git *p)
 	return ret;
 }
 
+int is_temp_pack_basename(const char *base)
+{
+	return starts_with(base, ".tmp-") || starts_with(base, "tmp_");
+}
+
 /*
  * Do not call this directly as this leaks p->pack_fd on error return;
  * call open_packed_git() instead.

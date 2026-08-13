@@ -176,6 +176,11 @@ char *odb_pack_name(struct repository *r, struct strbuf *buf,
 const char *pack_basename(struct packed_git *p);
 
 /*
+ * Return nonzero for a pack basename with a ".tmp-" or "tmp_" prefix.
+ */
+int is_temp_pack_basename(const char *base);
+
+/*
  * Parse the pack idx file found at idx_path and create a packed_git struct
  * which can be used with find_pack_entry_one().
  *

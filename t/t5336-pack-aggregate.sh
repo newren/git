@@ -1100,4 +1100,39 @@ test_expect_success 'CLI can disable configured once aggregation' '
 	)
 '
 
+test_expect_success 'pack-aggregate ignores in-flight temporary packs' '
+	test_when_finished "rm -fr work" &&
+	cp -R repo work &&
+	(
+		cd work &&
+		build_n_packs 5 >packs.txt &&
+		# Completed temporary packs are visible to the object-store scan,
+		# but must not be consumed before their owner installs them.
+		for prefix in .tmp-1234- tmp_
+		do
+			read victim &&
+			for e in pack idx rev
+			do
+				from=.git/objects/pack/${victim}.$e &&
+				if test -f "$from"
+				then
+					mv "$from" \
+						.git/objects/pack/${prefix}${victim}.$e ||
+						return 1
+				fi
+			done || return 1
+		done <packs.txt &&
+		git pack-aggregate --once --min-loose=1000 --min-packs=3 &&
+		for prefix in .tmp-1234- tmp_
+		do
+			test_path_is_file .git/objects/pack/${prefix}*.pack &&
+			test_path_is_file .git/objects/pack/${prefix}*.idx ||
+				return 1
+		done &&
+		# Only the three permanent packs were rolled into one.
+		test 1 -eq "$(count_packs)" &&
+		git fsck
+	)
+'
+
 test_done
