@@ -306,6 +306,25 @@ static int unlink_loose_paths(const struct string_list *paths)
 
 /* ---------- pack aggregation ---------- */
 
+/*
+ * True only for a durably installed "pack-<hash>" basename.  This
+ * rejects an in-flight ".tmp-<pid>-pack-<hash>" staging file written by
+ * a concurrent repack or pack-aggregate, which the object-store scan
+ * (matching any "*.idx") would otherwise surface as a candidate.
+ */
+static int is_canonical_pack_base(const char *base)
+{
+	const char *hex;
+	size_t i, hexsz = the_hash_algo->hexsz;
+
+	if (!skip_prefix(base, "pack-", &hex))
+		return 0;
+	for (i = 0; i < hexsz; i++)
+		if (!isxdigit(hex[i]))
+			return 0;
+	return hex[hexsz] == '\0';
+}
+
 static void collect_pack_candidates(struct repository *repo,
 				    const char *packdir,
 				    const struct string_list *keep_pack_list,
@@ -332,6 +351,9 @@ static void collect_pack_candidates(struct repository *repo,
 		if (string_list_has_string(keep_pack_list, base.buf))
 			continue;
 		if (!strbuf_strip_suffix(&base, ".pack"))
+			continue;
+
+		if (!is_canonical_pack_base(base.buf))
 			continue;
 
 		if (strset_contains(file_exclude, base.buf))
