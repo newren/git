@@ -1015,6 +1015,21 @@ static int batch_one_object_oi(const struct object_id *oid,
 	return payload->callback(oid, NULL, 0, payload->payload);
 }
 
+/*
+ * Open the current pack indexes before walking objects: a concurrent
+ * repack may unlink their files during the walk.  The mappings survive
+ * both unlinking and pack-fd eviction, so the walk can still use them.
+ */
+static int snapshot_pack_indexes(void)
+{
+	struct packed_git *p;
+
+	repo_for_each_pack(the_repository, p)
+		if (open_pack_index(p))
+			return -1;
+	return 0;
+}
+
 static int batch_each_object(struct batch_options *opt,
 			     for_each_object_fn callback,
 			     unsigned flags,
@@ -1081,6 +1096,11 @@ static int batch_objects(struct batch_options *opt)
 			warning("This repository uses promisor remotes. Some objects may not be loaded.");
 
 		disable_replace_refs();
+
+		if (snapshot_pack_indexes()) {
+			strbuf_release(&output);
+			return error(_("unable to enumerate all objects"));
+		}
 
 		cb.opt = opt;
 		cb.expand = &data;
