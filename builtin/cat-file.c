@@ -543,6 +543,13 @@ static void batch_object_write(const char *obj_name,
 		if (opt->objects_filter.choice == LOFC_BLOB_LIMIT)
 			data->info.sizep = &data->size;
 
+		/*
+		 * The pack supplied by an unordered walk may have been removed
+		 * by a concurrent repack.  Ensure it is still accessible before
+		 * reading directly from it; otherwise fall back to OID lookup.
+		 */
+		if (pack && !is_pack_valid(pack))
+			pack = NULL;
 		if (pack)
 			ret = packed_object_info(NULL, pack, offset, &data->info);
 		else
