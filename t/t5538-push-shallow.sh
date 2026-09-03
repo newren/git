@@ -343,4 +343,35 @@ test_expect_success 'push to a shallowUpdate receiver rejects a rootless snapsho
 	git --git-dir=seed-receiver.git rev-parse --verify seeded
 '
 
+# Splitting a multi-ref push recomputes the pack and avoids exclusions from
+# one ref stripping objects needed by another.
+test_expect_success 'incomplete multi-ref shallow push advises pushing refs separately' '
+	git init hint-origin &&
+	git -C hint-origin checkout -b A &&
+	test_commit -C hint-origin --no-tag has-shared sh shared &&
+	test_commit -C hint-origin --no-tag A1 &&
+	git -C hint-origin switch --orphan B &&
+	test_commit -C hint-origin --no-tag B0 &&
+	test_commit -C hint-origin --no-tag B1 &&
+
+	# Strict checking rejects the incomplete pack before connectivity.
+	git init --bare hint-receiver.git &&
+	git --git-dir=hint-receiver.git config receive.fsckObjects true &&
+	git -C hint-origin push "file://$(pwd)/hint-receiver.git" \
+		B:refs/heads/B B:refs/heads/A &&
+
+	git clone --depth=1 --no-single-branch \
+		"file://$(pwd)/hint-origin" hint-client &&
+
+	git -C hint-client checkout A &&
+	test_commit -C hint-client --no-tag cX &&
+	git -C hint-client checkout -b topic B &&
+	test_commit -C hint-client --no-tag reintroduce sh shared &&
+
+	test_must_fail git -C hint-client \
+		-c push.shallowExcludeBoundary=true \
+		push --force "file://$(pwd)/hint-receiver.git" A topic 2>err &&
+	test_grep "shallow boundary may have excluded objects" err
+'
+
 test_done

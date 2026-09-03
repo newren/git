@@ -1,4 +1,5 @@
 #include "git-compat-util.h"
+#include "advice.h"
 #include "config.h"
 #include "commit.h"
 #include "date.h"
@@ -161,7 +162,8 @@ static int append_reachable_shallow_grafts(struct repository *r,
 static int pack_objects(struct repository *r,
 			int fd, struct ref *refs, struct oid_array *advertised,
 			struct oid_array *negotiated,
-			struct send_pack_args *args)
+			struct send_pack_args *args,
+			int *excluded_boundary)
 {
 	struct odb_generate_pack_options opts = ODB_GENERATE_PACK_OPTIONS_INIT;
 	struct odb_pack_generator *generator;
@@ -191,7 +193,8 @@ static int pack_objects(struct repository *r,
 	/* Exclude reachable shallow boundaries from the pack. */
 	if (is_repository_shallow(r) &&
 	    get_exclude_boundary_mode(r) == EXCLUDE_BOUNDARY_YES)
-		append_reachable_shallow_grafts(r, refs, advertised,
+		*excluded_boundary = append_reachable_shallow_grafts(
+						r, refs, advertised,
 						negotiated, args,
 						&opts.haves);
 
@@ -607,6 +610,8 @@ int send_pack(struct repository *r,
 	int push_options_supported = 0;
 	int object_format_supported = 0;
 	unsigned cmds_sent = 0;
+	int excluded_boundary = 0;
+	int pack_contributing_refs = 0;
 	int ret;
 	struct async demux;
 	char *push_cert_nonce = NULL;
@@ -742,8 +747,10 @@ int send_pack(struct repository *r,
 		default:
 			continue;
 		}
-		if (!ref->deletion)
+		if (!ref->deletion) {
 			need_pack_data = 1;
+			pack_contributing_refs++;
+		}
 
 		if (args->dry_run || !status_report)
 			ref->status = REF_STATUS_OK;
@@ -832,7 +839,8 @@ int send_pack(struct repository *r,
 			   PACKET_READ_DIE_ON_ERR_PACKET);
 
 	if (need_pack_data && cmds_sent) {
-		if (pack_objects(r, out, remote_refs, extra_have, &commons, args) < 0) {
+		if (pack_objects(r, out, remote_refs, extra_have, &commons, args,
+				 &excluded_boundary) < 0) {
 			if (args->stateless_rpc)
 				close(out);
 			if (git_connection_is_socket(conn))
@@ -877,6 +885,16 @@ int send_pack(struct repository *r,
 			ret = -1;
 		}
 	}
+
+	/*
+	 * Per-ref pushes prevent one ref's boundary from excluding objects
+	 * needed by another.
+	 */
+	if (ret < 0 && excluded_boundary && pack_contributing_refs > 1)
+		advise_if_enabled(ADVICE_PUSH_SHALLOW_BOUNDARY,
+			_("A shallow boundary may have excluded objects needed by another ref.\n"
+			  "Try pushing the refs one at a time, e.g.:\n"
+			  "  git push <remote> <ref>"));
 
 	if (ret < 0)
 		goto out;
