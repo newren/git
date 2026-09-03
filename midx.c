@@ -896,6 +896,38 @@ static void midx_report(const char *fmt, ...)
 	va_end(ap);
 }
 
+/* Whether we have already printed the missing-pack hint. */
+static int verify_midx_missing_pack_reported;
+
+/* Check whether the .pack file for pack_int_id is missing. */
+static int midx_pack_vanished(struct multi_pack_index *m, uint32_t pack_int_id)
+{
+	struct strbuf path = STRBUF_INIT;
+	int vanished;
+
+	pack_int_id = midx_for_pack(&m, pack_int_id);
+	strbuf_addf(&path, "%s/pack/%s", m->source->base.path,
+		    m->pack_names[pack_int_id]);
+	strbuf_strip_suffix(&path, ".idx");
+	strbuf_addstr(&path, ".pack");
+	vanished = access(path.buf, F_OK) < 0 && errno == ENOENT;
+	strbuf_release(&path);
+	return vanished;
+}
+
+static void midx_report_missing_pack_hint(struct multi_pack_index *m,
+					  uint32_t pack_int_id)
+{
+	if (!verify_midx_missing_pack_reported &&
+	    midx_pack_vanished(m, pack_int_id)) {
+		verify_midx_missing_pack_reported = 1;
+		fprintf(stderr, "%s\n",
+			_("a pack referenced by the multi-pack-index is "
+			  "missing; concurrent maintenance may have replaced "
+			  "it; retry after concurrent maintenance completes"));
+	}
+}
+
 struct pair_pos_vs_id
 {
 	uint32_t pos;
@@ -931,6 +963,7 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 	struct multi_pack_index *m = load_multi_pack_index(source);
 	struct multi_pack_index *curr;
 	verify_midx_error = 0;
+	verify_midx_missing_pack_reported = 0;
 
 	if (!m) {
 		int result = 0;
@@ -955,8 +988,10 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 						  _("Looking for referenced packfiles"),
 						  m->num_packs + m->num_packs_in_base);
 	for (i = 0; i < m->num_packs + m->num_packs_in_base; i++) {
-		if (prepare_midx_pack(m, i))
+		if (prepare_midx_pack(m, i)) {
 			midx_report("failed to load pack in position %d", i);
+			midx_report_missing_pack_hint(m, i);
+		}
 
 		display_progress(progress, i + 1);
 	}
@@ -1035,12 +1070,14 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 		if (midx_fill_entry(m, &oid, &e, NULL) != MIDX_FILL_HIT) {
 			midx_report(_("failed to load pack entry for oid[%d] = %s"),
 				    pairs[i].pos, oid_to_hex(&oid));
+			midx_report_missing_pack_hint(m, pairs[i].pack_int_id);
 			continue;
 		}
 
 		if (open_pack_index(e.p)) {
 			midx_report(_("failed to load pack-index for packfile %s"),
 				    e.p->pack_name);
+			midx_report_missing_pack_hint(m, pairs[i].pack_int_id);
 			break;
 		}
 
