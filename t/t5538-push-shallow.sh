@@ -164,4 +164,50 @@ test_expect_success 'push new commit from shallow clone has good deltas' '
 	test_region pack-objects path-walk config-push.txt
 '
 
+test_expect_success 'incomplete shallow push rejects without disconnecting' '
+	git init raw-origin &&
+	git -C raw-origin checkout -b A &&
+	test_commit -C raw-origin --no-tag has-shared sh shared &&
+	test_commit -C raw-origin --no-tag A1 &&
+	A1=$(git -C raw-origin rev-parse HEAD) &&
+	git -C raw-origin switch --orphan B &&
+	test_commit -C raw-origin --no-tag B0 &&
+	test_commit -C raw-origin --no-tag B1 &&
+	B1=$(git -C raw-origin rev-parse HEAD) &&
+
+	git init --bare raw-receiver.git &&
+	git -C raw-receiver.git config receive.fsckObjects false &&
+	git -C raw-origin push ../raw-receiver.git \
+		B:refs/heads/B B:refs/heads/A &&
+
+	git -C raw-origin checkout A &&
+	test_commit -C raw-origin --no-tag cX &&
+	cX=$(git -C raw-origin rev-parse HEAD) &&
+	git -C raw-origin checkout -b topic B &&
+	test_commit -C raw-origin --no-tag reintroduce sh shared &&
+	topic=$(git -C raw-origin rev-parse HEAD) &&
+
+	# Declare A1 and B1 as shallow, but omit them and their objects from
+	# the pack. This mimics an incomplete shallow push without relying on
+	# send-pack to create one.
+	{
+		printf "shallow %s\nshallow %s\n" "$A1" "$B1" |
+		packetize &&
+		printf "%s %s refs/heads/A\0report-status object-format=%s\n" \
+			"$B1" "$cX" "$(test_oid algo)" |
+		packetize_raw &&
+		printf "%s %s refs/heads/topic\n" "$ZERO_OID" "$topic" |
+		packetize &&
+		printf 0000 &&
+		printf "%s\n%s\n^%s\n^%s\n" "$cX" "$topic" "$A1" "$B1" |
+		git -C raw-origin pack-objects --stdout --revs
+	} >input &&
+
+	git receive-pack raw-receiver.git <input >out 2>err &&
+	depacketize <out >out.raw &&
+	test_grep "ng refs/heads/A missing necessary objects" out.raw &&
+	test_grep "ng refs/heads/topic missing necessary objects" out.raw &&
+	test_grep ! "unable to parse commit" err
+'
+
 test_done
