@@ -896,6 +896,62 @@ static void midx_report(const char *fmt, ...)
 	va_end(ap);
 }
 
+/*
+ * Set once we have blamed a verification failure on a pack that the midx
+ * references having vanished -- the signature of a concurrent repack.  The
+ * objects are not lost (they moved to the replacement pack) and a quiescent
+ * retry succeeds, so we say so rather than implying midx corruption.
+ */
+static int verify_midx_race;
+
+/*
+ * Has the ".pack" backing the midx entry at pack_int_id been removed?  A
+ * concurrent repack unlinks a redundant pack's ".idx" before its ".pack", so
+ * a missing ".pack" is the tell-tale of that removal race.
+ */
+static int midx_pack_vanished(struct multi_pack_index *m, uint32_t pack_int_id)
+{
+	struct multi_pack_index *cur = m;
+	struct strbuf path = STRBUF_INIT;
+	int vanished;
+
+	pack_int_id = midx_for_pack(&cur, pack_int_id);
+	strbuf_addf(&path, "%s/pack/%s", cur->source->base.path,
+		    cur->pack_names[pack_int_id]);
+	strbuf_strip_suffix(&path, ".idx");
+	strbuf_addstr(&path, ".pack");
+	vanished = access(path.buf, F_OK) < 0 && errno == ENOENT;
+	strbuf_release(&path);
+	return vanished;
+}
+
+/*
+ * Like midx_report(), but for a failure to load the pack for pack_int_id.  If
+ * that pack simply vanished, add a one-time hint to retry when quiescent, so a
+ * concurrent repack is not mistaken for midx corruption.
+ */
+__attribute__((format (printf, 3, 4)))
+static void midx_report_pack_load(struct multi_pack_index *m,
+				  uint32_t pack_int_id,
+				  const char *fmt, ...)
+{
+	va_list ap;
+
+	verify_midx_error = 1;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	fprintf(stderr, "\n");
+	va_end(ap);
+
+	if (!verify_midx_race && midx_pack_vanished(m, pack_int_id)) {
+		verify_midx_race = 1;
+		fprintf(stderr, "%s\n",
+			_("a pack referenced by the multi-pack-index is "
+			  "missing; concurrent maintenance may have replaced "
+			  "it; retry when quiescent"));
+	}
+}
+
 struct pair_pos_vs_id
 {
 	uint32_t pos;
@@ -931,6 +987,7 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 	struct multi_pack_index *m = load_multi_pack_index(source);
 	struct multi_pack_index *curr;
 	verify_midx_error = 0;
+	verify_midx_race = 0;
 
 	if (!m) {
 		int result = 0;
@@ -956,7 +1013,8 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 						  m->num_packs + m->num_packs_in_base);
 	for (i = 0; i < m->num_packs + m->num_packs_in_base; i++) {
 		if (prepare_midx_pack(m, i))
-			midx_report("failed to load pack in position %d", i);
+			midx_report_pack_load(m, i,
+					      "failed to load pack in position %d", i);
 
 		display_progress(progress, i + 1);
 	}
@@ -1033,13 +1091,15 @@ int verify_midx_file(struct odb_source_packed *source, unsigned flags)
 		nth_midxed_object_oid(&oid, m, pairs[i].pos);
 
 		if (!fill_midx_entry(m, &oid, &e, NULL)) {
-			midx_report(_("failed to load pack entry for oid[%d] = %s"),
+			midx_report_pack_load(m, pairs[i].pack_int_id,
+				    _("failed to load pack entry for oid[%d] = %s"),
 				    pairs[i].pos, oid_to_hex(&oid));
 			continue;
 		}
 
 		if (open_pack_index(e.p)) {
-			midx_report(_("failed to load pack-index for packfile %s"),
+			midx_report_pack_load(m, pairs[i].pack_int_id,
+				    _("failed to load pack-index for packfile %s"),
 				    e.p->pack_name);
 			break;
 		}
