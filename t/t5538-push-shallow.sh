@@ -210,4 +210,135 @@ test_expect_success 'incomplete shallow push rejects without disconnecting' '
 	test_grep ! "unable to parse commit" err
 '
 
+test_expect_success 'shallow boundary exclusion avoids sending the full tree' '
+	git init adv-origin &&
+	# The shallow grafts are intentionally untagged so that no
+	# advertised ref points at them.
+	test_commit --no-tag -C adv-origin a &&
+	test_commit --no-tag -C adv-origin b &&
+
+	git clone --depth=1 "file://$(pwd)/adv-origin" adv-client &&
+
+	# The remote branch advances past the history we have, so its
+	# advertised tip is something we cannot use as a negative tip;
+	# only the shallow graft lets us exclude the full tree.
+	test_commit --no-tag -C adv-origin c &&
+
+	git -C adv-client checkout -b topic &&
+	test_commit --no-tag -C adv-client new &&
+	GIT_PROGRESS_DELAY=0 git -C adv-client \
+		-c push.shallowExcludeBoundary=true \
+		push --progress origin topic 2>err &&
+
+	# Only the new commit, its tree, and the new blob are sent; sending
+	# the full tree is avoided by excluding the shallow graft.
+	test_grep "Enumerating objects: 4, done." err
+'
+
+test_expect_success 'push.shallowExcludeBoundary=false sends full tree' '
+	git init adv-origin2 &&
+	test_commit --no-tag -C adv-origin2 a &&
+	test_commit --no-tag -C adv-origin2 b &&
+
+	git clone --depth=1 "file://$(pwd)/adv-origin2" adv-client2 &&
+	test_commit --no-tag -C adv-origin2 c &&
+
+	git -C adv-client2 checkout -b topic &&
+	test_commit --no-tag -C adv-client2 new &&
+	GIT_PROGRESS_DELAY=0 git -C adv-client2 \
+		-c push.shallowExcludeBoundary=false \
+		push --progress origin topic 2>err &&
+
+	# With the optimization disabled and no advertised ref pointing at
+	# the shallow graft, the full snapshot down to the shallow graft is
+	# resent, including its full tree.
+	test_grep "Enumerating objects: 7, done." err
+'
+
+test_expect_success 'push.shallowExcludeBoundary=abort refuses when a graft is reached' '
+	git init adv-origin3 &&
+	test_commit --no-tag -C adv-origin3 a &&
+	test_commit --no-tag -C adv-origin3 b &&
+
+	git clone --depth=1 "file://$(pwd)/adv-origin3" adv-client3 &&
+
+	# The remote branch advances past the history we have, so its
+	# advertised tip cannot bound the walk; only the shallow graft could,
+	# which is exactly what "abort" refuses to rely on.
+	test_commit --no-tag -C adv-origin3 c &&
+
+	git -C adv-client3 checkout -b topic &&
+	test_commit --no-tag -C adv-client3 new &&
+
+	test_must_fail git -C adv-client3 \
+		-c push.shallowExcludeBoundary=abort push origin topic 2>err &&
+	test_grep "push.shallowExcludeBoundary" err &&
+
+	# The receiver must be left untouched: no ref was created.
+	test_must_fail git -C adv-origin3 rev-parse --verify refs/heads/topic
+'
+
+# A and B are unrelated shallow histories. The receiver has B1 under both
+# names, but lacks the "shared" blob from A1. The client adds cX atop A1 and
+# reintroduces "shared" on a topic atop B1. Pushing A and topic together
+# rejects A as a non-fast-forward, but A still participates in pack selection.
+# Its A1 boundary must not exclude the blob needed by topic.
+test_expect_success 'shallow push does not over-exclude for an accepted ref via a rejected one' '
+	git init tworoot-origin &&
+	git -C tworoot-origin checkout -b A &&
+	test_commit -C tworoot-origin --no-tag has-shared sh shared &&
+	test_commit -C tworoot-origin --no-tag A1 &&
+	git -C tworoot-origin switch --orphan B &&
+	test_commit -C tworoot-origin --no-tag B0 &&
+	test_commit -C tworoot-origin --no-tag B1 &&
+
+	git init --bare tworoot-receiver.git &&
+	git -C tworoot-origin push "file://$(pwd)/tworoot-receiver.git" \
+		B:refs/heads/B B:refs/heads/A &&
+
+	git clone --depth=1 --no-single-branch \
+		"file://$(pwd)/tworoot-origin" tworoot-client &&
+
+	git -C tworoot-client checkout A &&
+	test_commit -C tworoot-client --no-tag cX &&
+
+	git -C tworoot-client checkout -b topic B &&
+	test_commit -C tworoot-client --no-tag reintroduce sh shared &&
+
+	test_must_fail git -C tworoot-client \
+		-c push.shallowExcludeBoundary=true push \
+		"file://$(pwd)/tworoot-receiver.git" A topic &&
+	git --git-dir=tworoot-receiver.git rev-parse --verify topic
+'
+
+# A receive.shallowUpdate receiver needs the boundary snapshot to adopt a new
+# shallow root, so omission must reject rather than create a broken ref.
+test_expect_success 'push to a shallowUpdate receiver rejects a rootless snapshot' '
+	git init seed-origin &&
+	test_commit -C seed-origin s1 &&
+	test_commit -C seed-origin s2 &&
+	test_commit -C seed-origin s3 &&
+
+	# depth-2: a shallow graft at s2, pushing s3 on top of it
+	git clone --depth=2 "file://$(pwd)/seed-origin" seed-client &&
+
+	git init --bare seed-receiver.git &&
+	git --git-dir=seed-receiver.git config receive.shallowUpdate true &&
+
+	# Optimization on: the s2 boundary snapshot is withheld, so the
+	# receiver cannot graft the new root and rejects the push, leaving the
+	# ref uncreated.
+	test_must_fail git -C seed-client \
+		-c push.shallowExcludeBoundary=true push \
+		"file://$(pwd)/seed-receiver.git" HEAD:refs/heads/seeded 2>err &&
+	test_grep "remote rejected" err &&
+	test_must_fail git --git-dir=seed-receiver.git rev-parse --verify seeded &&
+
+	# Opt-out: the full snapshot is sent, so the same push now succeeds and
+	# the new shallow root is grafted.
+	git -C seed-client -c push.shallowExcludeBoundary=false push \
+		"file://$(pwd)/seed-receiver.git" HEAD:refs/heads/seeded &&
+	git --git-dir=seed-receiver.git rev-parse --verify seeded
+'
+
 test_done

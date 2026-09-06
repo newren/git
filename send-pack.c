@@ -14,6 +14,7 @@
 #include "transport.h"
 #include "version.h"
 #include "oid-array.h"
+#include "oidset.h"
 #include "gpg-interface.h"
 #include "shallow.h"
 #include "parse-options.h"
@@ -55,6 +56,105 @@ static void append_negative_object(struct repository *r,
 	oid_array_append(haves, oid);
 }
 
+static int check_to_send_update(const struct ref *ref,
+				const struct send_pack_args *args);
+
+enum exclude_boundary_mode {
+	EXCLUDE_BOUNDARY_NONE = 0,
+	EXCLUDE_BOUNDARY_YES,
+	EXCLUDE_BOUNDARY_ABORT
+};
+
+static enum exclude_boundary_mode get_exclude_boundary_mode(struct repository *r)
+{
+	const char *value;
+
+	if (repo_config_get_string_tmp(r, "push.shallowexcludeboundary", &value))
+		return EXCLUDE_BOUNDARY_NONE;
+
+	switch (git_parse_maybe_bool(value)) {
+	case 1:
+		return EXCLUDE_BOUNDARY_YES;
+	case 0:
+		return EXCLUDE_BOUNDARY_NONE;
+	default:
+		if (!strcasecmp(value, "abort"))
+			return EXCLUDE_BOUNDARY_ABORT;
+		die(_("bad push.shallowExcludeBoundary value: %s"), value);
+	}
+}
+
+/*
+ * Append shallow grafts bounding contributing refs. Grafts from unrelated
+ * history could exclude objects this push needs, while commits both sides
+ * have make any graft below them irrelevant.
+ */
+static int append_reachable_shallow_grafts(struct repository *r,
+					    const struct ref *refs,
+					    const struct oid_array *advertised,
+					    const struct oid_array *negotiated,
+					    const struct send_pack_args *args,
+					    struct oid_array *haves)
+{
+	struct commit_list *pending = NULL;
+	struct oidset seen = OIDSET_INIT;
+	struct oidset known = OIDSET_INIT;
+	const struct ref *ref;
+	int found = 0;
+	size_t i;
+
+	for (i = 0; i < advertised->nr; i++)
+		oidset_insert(&known, &advertised->oid[i]);
+	for (i = 0; i < negotiated->nr; i++)
+		oidset_insert(&known, &negotiated->oid[i]);
+
+	/* Populate "known" fully before starting the walk. */
+	for (ref = refs; ref; ref = ref->next) {
+		struct commit *commit;
+
+		if (!is_null_oid(&ref->old_oid))
+			oidset_insert(&known, &ref->old_oid);
+
+		if (is_null_oid(&ref->new_oid))
+			continue;
+		if (check_to_send_update(ref, args))
+			continue;
+		commit = lookup_commit_reference_gently(r, &ref->new_oid, 1);
+		if (commit)
+			commit_list_insert(commit, &pending);
+	}
+
+	while (pending) {
+		struct commit *commit = pop_commit(&pending);
+		const struct object_id *oid = &commit->object.oid;
+		struct commit_graft *graft;
+		struct commit_list *parent;
+
+		if (oidset_insert(&seen, oid))
+			continue;
+
+		if (oidset_contains(&known, oid) &&
+		    odb_has_object(r->objects, oid, 0))
+			continue;
+
+		graft = lookup_commit_graft(r, oid);
+		if (graft && graft->nr_parent == -1) {
+			append_negative_object(r, haves, oid);
+			found++;
+			continue;
+		}
+
+		if (repo_parse_commit(r, commit))
+			continue;
+		for (parent = commit->parents; parent; parent = parent->next)
+			commit_list_insert(parent->item, &pending);
+	}
+
+	oidset_clear(&seen);
+	oidset_clear(&known);
+	return found;
+}
+
 /*
  * Make a pack stream and spit it out into file descriptor fd
  */
@@ -87,6 +187,13 @@ static int pack_objects(struct repository *r,
 		append_negative_object(r, &opts.haves, &advertised->oid[i]);
 	for (size_t i = 0; i < negotiated->nr; i++)
 		append_negative_object(r, &opts.haves, &negotiated->oid[i]);
+
+	/* Exclude reachable shallow boundaries from the pack. */
+	if (is_repository_shallow(r) &&
+	    get_exclude_boundary_mode(r) == EXCLUDE_BOUNDARY_YES)
+		append_reachable_shallow_grafts(r, refs, advertised,
+						negotiated, args,
+						&opts.haves);
 
 	while (refs) {
 		if (!is_null_oid(&refs->old_oid))
@@ -642,6 +749,21 @@ int send_pack(struct repository *r,
 			ref->status = REF_STATUS_OK;
 		else
 			ref->status = REF_STATUS_EXPECTING_REPORT;
+	}
+
+	/* Honor ABORT before sending any ref-update commands. */
+	if (!args->dry_run && need_pack_data && is_repository_shallow(r) &&
+	    get_exclude_boundary_mode(r) == EXCLUDE_BOUNDARY_ABORT) {
+		struct oid_array probe = OID_ARRAY_INIT;
+		int reachable = append_reachable_shallow_grafts(r, remote_refs,
+								extra_have,
+								&commons, args,
+								&probe);
+		oid_array_clear(&probe);
+		if (reachable)
+			die(_("refusing to push a shallow boundary commit\n"
+			      "Set push.shallowExcludeBoundary to true to omit it (fast),\n"
+			      "or false to send it (needed for receive.shallowUpdate)."));
 	}
 
 	if (!args->dry_run)
