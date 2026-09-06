@@ -147,12 +147,12 @@ This will result in only b (a and c are cleared).
 	If the push reaches such a boundary, refuse it rather than
 	choosing whether to send or omit it.
 `true`;;
-	Omit the boundary objects (fast). If the receiver does not have
-	them, the push is rejected.
+	(the default) Omit the boundary objects (fast). If the receiver
+	does not have them, the push is rejected.
 `false`;;
-	(the default) Send the boundary objects, retaining the historical
-	behavior.  This can send the boundary's entire tree, which may be
-	very large.  This is only needed when pushing to a receiver that
+	Send the boundary objects, retaining the historical behavior.
+	This can send the boundary's entire tree, which may be very
+	large.  This is only needed when pushing to a receiver that
 	accepts new shallow roots (i.e. one with `receive.shallowUpdate`
 	enabled), which is very rare.
 --

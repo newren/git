@@ -64,7 +64,8 @@ EOF
 test_expect_success 'push from shallow clone, with grafted roots' '
 	(
 	cd shallow2 &&
-	test_must_fail git push ../.git +main:refs/remotes/shallow2/main 2>err &&
+	test_must_fail git -c push.shallowExcludeBoundary=false \
+		push ../.git +main:refs/remotes/shallow2/main 2>err &&
 	test_grep "shallow2/main.*shallow update not allowed" err
 	) &&
 	test_must_fail git rev-parse shallow2/main &&
@@ -75,7 +76,8 @@ test_expect_success 'add new shallow root with receive.updateshallow on' '
 	test_config receive.shallowupdate true &&
 	(
 	cd shallow2 &&
-	git push ../.git +main:refs/remotes/shallow2/main
+	git -c push.shallowExcludeBoundary=false \
+		push ../.git +main:refs/remotes/shallow2/main
 	) &&
 	git log --format=%s shallow2/main >actual &&
 	git fsck &&
@@ -90,7 +92,8 @@ test_expect_success 'push from shallow to shallow' '
 	(
 	cd shallow &&
 	git --git-dir=../shallow2/.git config receive.shallowupdate true &&
-	git push ../shallow2/.git +main:refs/remotes/shallow/main &&
+	git -c push.shallowExcludeBoundary=false \
+		push ../shallow2/.git +main:refs/remotes/shallow/main &&
 	git --git-dir=../shallow2/.git config receive.shallowupdate false
 	) &&
 	(
@@ -227,7 +230,6 @@ test_expect_success 'shallow boundary exclusion avoids sending the full tree' '
 	git -C adv-client checkout -b topic &&
 	test_commit --no-tag -C adv-client new &&
 	GIT_PROGRESS_DELAY=0 git -C adv-client \
-		-c push.shallowExcludeBoundary=true \
 		push --progress origin topic 2>err &&
 
 	# Only the new commit, its tree, and the new blob are sent; sending

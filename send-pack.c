@@ -70,7 +70,7 @@ static enum exclude_boundary_mode get_exclude_boundary_mode(struct repository *r
 	const char *value;
 
 	if (repo_config_get_string_tmp(r, "push.shallowexcludeboundary", &value))
-		return EXCLUDE_BOUNDARY_NONE;
+		return EXCLUDE_BOUNDARY_YES;
 
 	switch (git_parse_maybe_bool(value)) {
 	case 1:
