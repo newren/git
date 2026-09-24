@@ -35,6 +35,55 @@ test_expect_success 'run_command can run a command' '
 	test_must_be_empty err
 '
 
+test_expect_success !MINGW 'terminate_command handles termination and reaping' '
+	for mode in exit term ignore
+	do
+		case "$mode" in
+		exit) status=7 ;;
+		term) status=143 ;;
+		ignore) status=137 ;;
+		esac &&
+		echo "status=$status args=0" >expect &&
+		test-tool run-command terminate "$mode" >actual 2>err &&
+		test_cmp expect actual &&
+		test_must_be_empty err || return 1
+	done
+'
+
+test_expect_success !MINGW 'terminate_command handles an already-reaped child' '
+	echo "status=-1 args=0" >expect &&
+	test-tool run-command terminate reaped >actual 2>err &&
+	test_cmp expect actual &&
+	test_grep "waitpid for test-tool failed" err &&
+	test_grep ! "unexpected cleanup callback" err
+'
+
+test_expect_success MINGW 'terminate_command reaps an exited child' '
+	echo "status=7 args=0" >expect &&
+	test-tool run-command terminate exited >actual 2>err &&
+	test_cmp expect actual &&
+	test_must_be_empty err
+'
+
+test_expect_success !MINGW 'signal cleanup can return to its caller' '
+	for mode in signal signal-wait
+	do
+		case "$mode" in
+		signal) status=143 ;;
+		signal-wait) status=0 ;;
+		esac &&
+		echo "status=$status args=0" >expect &&
+		test-tool run-command terminate "$mode" >actual 2>err &&
+		test_cmp expect actual &&
+		if test "$mode" = signal
+		then
+			test_grep "died of signal 15" err &&
+			test_grep ! "unexpected cleanup callback" err
+		else
+			test_must_be_empty err
+		fi || return 1
+	done
+'
 
 test_lazy_prereq RUNS_COMMANDS_FROM_PWD '
 	write_script runs-commands-from-pwd <<-\EOF &&

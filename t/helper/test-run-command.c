@@ -18,6 +18,7 @@
 #include "string-list.h"
 #include "thread-utils.h"
 #include "wildmatch.h"
+#include "write-or-die.h"
 
 static int number_callbacks;
 static int parallel_next(struct child_process *cp,
@@ -439,6 +440,77 @@ static int inherit_handle_child(void)
 	return 0;
 }
 
+static void exit_on_term(int sig UNUSED)
+{
+	_exit(7);
+}
+
+static void return_on_term(int sig UNUSED)
+{
+}
+
+static void unexpected_cleanup(struct child_process *process UNUSED)
+{
+	fprintf(stderr, "unexpected cleanup callback\n");
+}
+
+static int test_terminate(const char *mode)
+{
+	struct child_process child = CHILD_PROCESS_INIT;
+	char ready;
+	int status;
+	int signal_cleanup = !strcmp(mode, "signal") ||
+		!strcmp(mode, "signal-wait");
+
+	if (signal_cleanup)
+		signal(SIGTERM, return_on_term);
+	strvec_pushl(&child.args, "test-tool", "run-command",
+		     "termination-child", mode, NULL);
+	if (!strcmp(mode, "exited"))
+		child.in = -1;
+	child.out = -1;
+	child.clean_on_exit = 1;
+	child.clean_on_exit_handler = unexpected_cleanup;
+	child.wait_after_clean = !strcmp(mode, "signal-wait");
+	if (start_command(&child))
+		return 1;
+	if (read_in_full(child.out, &ready, 1) != 1)
+		die("child did not become ready");
+	close(child.out);
+	if (!strcmp(mode, "reaped")) {
+		if (waitpid(child.pid, &status, 0) != child.pid)
+			die_errno("could not reap child");
+	}
+#ifdef GIT_WINDOWS_NATIVE
+	if (!strcmp(mode, "exited")) {
+		HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, child.pid);
+
+		if (!process)
+			die("could not open child process: %lu",
+			    (unsigned long)GetLastError());
+		write_or_die(child.in, "x", 1);
+		close(child.in);
+		if (WaitForSingleObject(process, 30000) != WAIT_OBJECT_0)
+			die("child did not exit");
+		CloseHandle(process);
+	}
+#endif
+	if (signal_cleanup) {
+		raise(SIGTERM);
+		if (child.wait_after_clean) {
+			child_process_clear(&child);
+			status = 0;
+		} else {
+			status = finish_command(&child);
+		}
+	} else {
+		status = terminate_command(&child, 100);
+	}
+	printf("status=%d args=%"PRIuMAX"\n", status,
+	       (uintmax_t)child.args.nr);
+	return 0;
+}
+
 int cmd__run_command(int argc, const char **argv)
 {
 	struct child_process proc = CHILD_PROCESS_INIT;
@@ -448,6 +520,26 @@ int cmd__run_command(int argc, const char **argv)
 		.data = &proc,
 	};
 
+	if (argc == 3 && !strcmp(argv[1], "terminate"))
+		return test_terminate(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "termination-child")) {
+		if (!strcmp(argv[2], "ignore"))
+			signal(SIGTERM, SIG_IGN);
+		else if (!strcmp(argv[2], "exit"))
+			signal(SIGTERM, exit_on_term);
+		write_or_die(1, "r", 1);
+		if (!strcmp(argv[2], "exited")) {
+			char release;
+
+			if (read_in_full(0, &release, 1) != 1)
+				die("parent did not release child");
+			return 7;
+		}
+		if (!strcmp(argv[2], "reaped"))
+			return 0;
+		sleep_millisec(30000);
+		return 1;
+	}
 	if (argc > 1 && !strcmp(argv[1], "testsuite"))
 		return testsuite(argc - 1, argv + 1);
 	if (!strcmp(argv[1], "inherited-handle"))

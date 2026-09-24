@@ -224,6 +224,19 @@ int start_command(struct child_process *);
  */
 int finish_command(struct child_process *);
 
+/**
+ * Ask a sub-process to terminate, wait up to timeout_ms for it to exit,
+ * and then kill it before completing the normal finish_command() cleanup.
+ * The timeout bounds the grace period, not the subsequent reap.
+ * Return the finish_command() status without expected termination noise.
+ * If signaling fails, allow up to timeout_ms for a concurrent exit before
+ * reporting the error.
+ * On a signal or wait error, return -1 with a diagnostic and errno set.
+ * Retain child state on error unless ECHILD proves it cannot be reaped.
+ * Callers must not release resources protecting a possibly live child.
+ */
+int terminate_command(struct child_process *, unsigned int timeout_ms);
+
 int finish_command_in_signal(struct child_process *);
 
 /**
