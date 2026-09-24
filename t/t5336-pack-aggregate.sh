@@ -7,13 +7,15 @@ test_description='`git pack-aggregate` rolls up small packs and loose objects'
 
 # Build N tiny packs in objects/pack/, each containing one distinct
 # blob.  Echoes the basenames (without .pack) one per line.
+# An optional salt (default: $$) distinguishes separate batches.
 build_n_packs () {
 	n=$1 &&
+	salt=${2-$$} &&
 	mkdir -p .git/objects/pack &&
 	i=0 &&
 	while test $i -lt "$n"
 	do
-		blob=$(echo "content-$i-$$" | git hash-object -w --stdin) &&
+		blob=$(echo "content-$i-$salt" | git hash-object -w --stdin) &&
 		echo "$blob" |
 		git pack-objects --window=0 .git/objects/pack/pack \
 			>pack_hash &&
@@ -1089,6 +1091,115 @@ test_expect_success 'repack --aggregate-loop spawns and reaps pack-aggregate' '
 		test -z "$(ls .git/objects | grep pack-aggregate)" &&
 		git fsck
 	)
+'
+
+wait_for_file () {
+	local attempts=0 &&
+	while test ! -f "$1" && test "$attempts" -lt 100
+	do
+		sleep 0.1 &&
+		attempts=$((attempts + 1)) || return 1
+	done &&
+	test_path_is_file "$1"
+}
+
+test_aggregate_arrivals () {
+	local mode="$1" &&
+	repack_pid= &&
+	test_when_finished '
+		if test -n "$repack_pid"
+		then
+			>work/main-gate
+			>work/aggregate-gate
+			wait "$repack_pid" 2>/dev/null || :
+		fi
+		rm -fr work
+	' &&
+	cp -R repo work &&
+	(cd work && build_n_packs 5 initial >/dev/null) &&
+	{
+		GIT_TEST_PACK_OBJECTS_WAIT_AFTER_INPUT="$PWD/work/main-gate" \
+		GIT_TEST_PACK_OBJECTS_WAIT_BEFORE_WRITE="$PWD/work/aggregate-gate" \
+		GIT_TEST_PACK_AGGREGATE_INTERVAL=1 \
+			git -C work repack -d --geometric=2 \
+				--aggregate-loop 2>work/err &
+		repack_pid=$!
+	} &&
+	wait_for_file work/main-gate.waiting &&
+	(cd work && build_n_packs 5 concurrent >/dev/null) &&
+	wait_for_file work/aggregate-gate.waiting &&
+	if test "$mode" = complete
+	then
+		>work/aggregate-gate &&
+		i=0 &&
+		while test "$(cd work && count_unoptimized)" -eq 0 &&
+			test $i -lt 100
+		do
+			sleep 0.1 &&
+			i=$((i + 1)) || return 1
+		done &&
+		test 1 -eq "$(cd work && count_unoptimized)"
+	fi &&
+	>work/main-gate &&
+	wait "$repack_pid" &&
+	repack_pid= &&
+	test_grep ! "error:" work/err &&
+	test -z "$(ls work/.git/objects | grep pack-aggregate)" &&
+	git -C work fsck
+}
+
+test_expect_success 'repack --aggregate-loop aggregates new packs' '
+	test_aggregate_arrivals complete
+'
+
+test_expect_success !MINGW 'repack can stop active aggregation without failing' '
+	test_aggregate_arrivals cancel
+'
+
+test_expect_success 'repack warns about a failed background aggregation' '
+	repack_pid= &&
+	test_when_finished "
+		if test -n \"\$repack_pid\"
+		then
+			>work/main-gate
+			if test -d work/failure
+			then
+				>work/failure/gate
+			fi
+			wait \"\$repack_pid\" 2>/dev/null || :
+		fi
+		rm -fr work
+	" &&
+	cp -R repo work &&
+	mkdir work/failure &&
+	(cd work && build_n_packs 5 initial >/dev/null) &&
+	{
+		test_env \
+			GIT_TEST_PACK_OBJECTS_WAIT_AFTER_INPUT="$PWD/work/main-gate" \
+			GIT_TEST_PACK_OBJECTS_WAIT_BEFORE_WRITE="$PWD/work/failure/gate" \
+			GIT_TEST_PACK_AGGREGATE_INTERVAL=1 \
+			git -C work repack -d --geometric=2 \
+				--aggregate-loop 2>work/err &
+		repack_pid=$!
+	} &&
+	wait_for_file work/main-gate.waiting &&
+	(cd work && build_n_packs 5 concurrent >/dev/null) &&
+	wait_for_file work/failure/gate.waiting &&
+	mv work/failure work/failure-saved &&
+	>work/failure &&
+	i=0 &&
+	while ! grep "pack-objects failed during pack aggregation" work/err &&
+		test $i -lt 100
+	do
+		sleep 0.1 &&
+		i=$((i + 1)) || return 1
+	done &&
+	test_grep "pack-objects failed during pack aggregation" work/err &&
+	test_grep "could not access.*failure/gate" work/err &&
+	>work/main-gate &&
+	wait "$repack_pid" &&
+	repack_pid= &&
+	test_grep "warning: git pack-aggregate --loop failed" work/err
 '
 
 test_expect_success 'repack can enable both aggregation modes' '

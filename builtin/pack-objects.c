@@ -30,6 +30,7 @@
 #include "strvec.h"
 #include "strmap.h"
 #include "list.h"
+#include "wrapper.h"
 #include "packfile.h"
 #include "object-file.h"
 #include "object-file-convert.h"
@@ -5300,6 +5301,29 @@ static void emit_input_loose_to_file(const char *path)
 	strbuf_release(&tmp);
 }
 
+static void wait_for_test_gate(const char *path)
+{
+	struct strbuf waiting_path = STRBUF_INIT;
+	struct stat st;
+	int waited_ms = 0;
+
+	if (!path)
+		return;
+
+	strbuf_addf(&waiting_path, "%s.waiting", path);
+	write_file(waiting_path.buf, "%s", "");
+	while (lstat(path, &st) < 0) {
+		if (errno != ENOENT)
+			die_errno(_("could not access '%s'"), path);
+		if (waited_ms >= 30000)
+			die(_("timed out waiting for test synchronization file "
+			      "'%s'"), path);
+		sleep_millisec(10);
+		waited_ms += 10;
+	}
+	strbuf_release(&waiting_path);
+}
+
 int cmd_pack_objects(int argc,
 		     const char **argv,
 		     const char *prefix,
@@ -5671,6 +5695,8 @@ int cmd_pack_objects(int argc,
 		emit_input_packs_to_file(emit_input_packs_path);
 	if (emit_input_loose_path)
 		emit_input_loose_to_file(emit_input_loose_path);
+	if (emit_input_packs_path || emit_input_loose_path)
+		wait_for_test_gate(getenv("GIT_TEST_PACK_OBJECTS_WAIT_AFTER_INPUT"));
 
 	if (progress && !cruft)
 		progress_state = start_progress(the_repository,
@@ -5713,6 +5739,8 @@ int cmd_pack_objects(int argc,
 
 	trace2_region_enter("pack-objects", "write-pack-file", the_repository);
 	write_excluded_by_configs();
+	if (mark_unoptimized)
+		wait_for_test_gate(getenv("GIT_TEST_PACK_OBJECTS_WAIT_BEFORE_WRITE"));
 	write_pack_file();
 	trace2_region_leave("pack-objects", "write-pack-file", the_repository);
 
