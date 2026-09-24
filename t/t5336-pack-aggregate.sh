@@ -1262,29 +1262,44 @@ test_expect_success PERL 'pack-aggregate survives through MIDX bitmap write' '
 			.git/objects/pack/multi-pack-index-*.bitmap &&
 		git rev-list --test-bitmap HEAD &&
 		# Match child start and exit events by session ID.
-		# Direct waitpid() teardown omits the child_exit event in the
-		# parent trace, so compare the child exit events.
+		# Observe the children exiting, not the parent reaping them.
 		perl -ne '\''
 			my ($sid)  = /"sid":"([^"]+)"/ or next;
 			my ($time) = /"time":"([^"]+)"/;
-			if (/"event":"start"/) {
+			if (/"event":"(?:start|child_start)"/) {
 				# Match the subcommand, not a path containing
 				# pack-aggregate.
 				my ($argv) = /"argv":\["[^"]*","([^"]+)"/;
-				if (defined($argv) && $argv eq "multi-pack-index") {
-					$kind{$sid} = "midx";
-				} elsif (defined($argv) && $argv eq "pack-aggregate") {
-					$kind{$sid} = "agg";
+				my $kind = defined($argv) &&
+					$argv eq "multi-pack-index" ? "midx" :
+					defined($argv) && $argv eq "pack-aggregate" ?
+					"agg" : undef;
+				next unless $kind;
+				if (/"event":"child_start"/) {
+					my ($id) = /"child_id":([0-9]+)/ or next;
+					$child{"$sid:$id"} = $kind;
+				} else {
+					$kind{$sid} = $kind;
 				}
 			} elsif (/"event":"exit"/ && $kind{$sid}) {
 				$exit{$kind{$sid}} = $time
 					unless defined($exit{$kind{$sid}});
+			} elsif (/"event":"child_exit"/) {
+				my ($id) = /"child_id":([0-9]+)/ or next;
+				my $kind = $child{"$sid:$id"} or next;
+				$reaped{$kind} = $time
+					unless defined($reaped{$kind});
 			}
 			END {
 				die "missing midx exit\n" unless $exit{midx};
 				die "missing agg exit\n"  unless $exit{agg};
 				die "ordering wrong: agg=$exit{agg} midx=$exit{midx}\n"
 					unless $exit{agg} gt $exit{midx};
+				for my $kind ("midx", "agg") {
+					die "missing $kind reap\n" unless $reaped{$kind};
+					die "reaped before exit: $kind\n"
+						unless $reaped{$kind} ge $exit{$kind};
+				}
 			}
 		'\'' trace.txt
 	)
