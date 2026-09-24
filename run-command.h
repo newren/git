@@ -123,6 +123,8 @@ struct child_process {
 	 * special error condition.
 	 */
 	unsigned silent_exec_failure:1;
+	/* Suppress SIGTERM/SIGKILL diagnostics, without changing exit status. */
+	unsigned quiet_termination:1;
 
 	/**
 	 * Run the command from argv[0] using a shell (but note that we may
@@ -277,6 +279,19 @@ int pipe_command(struct child_process *cmd,
 		 const char *in, size_t in_len,
 		 struct strbuf *out, size_t out_hint,
 		 struct strbuf *err, size_t err_hint);
+
+/**
+ * Like pipe_command(), but with a non-NULL status, ignore SIGPIPE while
+ * pumping I/O and store the child exit status even if I/O fails. The
+ * return value remains -1 on I/O failure, with errno describing that
+ * failure (preferring other errors to EPIPE). A status of -1 means the
+ * child could not be started or its status could not be obtained.
+ */
+int pipe_command_with_status(struct child_process *cmd,
+			     const char *in, size_t in_len,
+			     struct strbuf *out, size_t out_hint,
+			     struct strbuf *err, size_t err_hint,
+			     int *status);
 
 /**
  * Convenience wrapper around pipe_command for the common case

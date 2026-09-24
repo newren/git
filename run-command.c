@@ -1034,7 +1034,8 @@ end_of_spawn:
 
 int finish_command(struct child_process *cmd)
 {
-	int ret = wait_or_whine(cmd->pid, cmd->args.v[0], 0, 0);
+	int ret = wait_or_whine(cmd->pid, cmd->args.v[0], 0,
+				cmd->quiet_termination);
 	trace2_child_exit(cmd, ret);
 	child_process_clear(cmd);
 	invalidate_lstat_cache();
@@ -1509,7 +1510,7 @@ static int pump_io_round(struct io_pump *slots, int nr, struct pollfd *pfd)
 static int pump_io(struct io_pump *slots, int nr)
 {
 	struct pollfd *pfd;
-	int i;
+	int i, error = 0;
 
 	for (i = 0; i < nr; i++)
 		slots[i].error = 0;
@@ -1519,24 +1520,30 @@ static int pump_io(struct io_pump *slots, int nr)
 		; /* nothing */
 	free(pfd);
 
-	/* There may be multiple errno values, so just pick the first. */
-	for (i = 0; i < nr; i++) {
-		if (slots[i].error) {
-			errno = slots[i].error;
-			return -1;
-		}
+	/* Do not let an expected EPIPE mask other I/O errors. */
+	for (i = 0; i < nr; i++)
+		if (slots[i].error && (!error || error == EPIPE))
+			error = slots[i].error;
+	if (error) {
+		errno = error;
+		return -1;
 	}
 	return 0;
 }
 
 
-int pipe_command(struct child_process *cmd,
-		 const char *in, size_t in_len,
-		 struct strbuf *out, size_t out_hint,
-		 struct strbuf *err, size_t err_hint)
+int pipe_command_with_status(struct child_process *cmd,
+			     const char *in, size_t in_len,
+			     struct strbuf *out, size_t out_hint,
+			     struct strbuf *err, size_t err_hint,
+			     int *status)
 {
 	struct io_pump io[3];
 	int nr = 0;
+	int ret, io_error;
+
+	if (status)
+		*status = -1;
 
 	if (in)
 		cmd->in = -1;
@@ -1579,12 +1586,30 @@ int pipe_command(struct child_process *cmd,
 		nr++;
 	}
 
-	if (pump_io(io, nr) < 0) {
-		finish_command(cmd); /* throw away exit code */
+	if (status)
+		sigchain_push(SIGPIPE, SIG_IGN);
+	ret = pump_io(io, nr);
+	io_error = ret ? errno : 0;
+	if (status)
+		sigchain_pop(SIGPIPE);
+
+	ret = finish_command(cmd);
+	if (status)
+		*status = ret;
+	if (io_error) {
+		errno = io_error;
 		return -1;
 	}
+	return ret;
+}
 
-	return finish_command(cmd);
+int pipe_command(struct child_process *cmd,
+		 const char *in, size_t in_len,
+		 struct strbuf *out, size_t out_hint,
+		 struct strbuf *err, size_t err_hint)
+{
+	return pipe_command_with_status(cmd, in, in_len, out, out_hint,
+					err, err_hint, NULL);
 }
 
 enum child_state {

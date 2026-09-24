@@ -511,6 +511,68 @@ static int test_terminate(const char *mode)
 	return 0;
 }
 
+static int test_pipe_command(const char *mode)
+{
+	struct child_process child = CHILD_PROCESS_INIT;
+	struct strbuf input = STRBUF_INIT;
+	struct strbuf output = STRBUF_INIT;
+	int ret, status = -1, broken_pipe;
+	int legacy = !strcmp(mode, "legacy");
+
+	if (starts_with(mode, "cancel"))
+		signal(SIGTERM, return_on_term);
+	if (legacy)
+		signal(SIGPIPE, SIG_IGN);
+	strvec_pushl(&child.args, "test-tool", "run-command",
+		     "pipe-command-child", mode, NULL);
+	child.clean_on_exit = !legacy;
+	child.quiet_termination = 1;
+	strbuf_addchars(&input, 'x', 16 * 1024 * 1024);
+	if (legacy)
+		ret = pipe_command(&child, input.buf, input.len,
+				   &output, 0, NULL, 0);
+	else
+		ret = pipe_command_with_status(&child, input.buf, input.len,
+					       &output, 0, NULL, 0, &status);
+	broken_pipe = ret < 0 && errno == EPIPE;
+	printf("result=%d status=%d broken-pipe=%d\n",
+	       ret, status, broken_pipe);
+	fwrite_or_die(stdout, output.buf, output.len);
+	strbuf_release(&input);
+	strbuf_release(&output);
+	return 0;
+}
+
+static int pipe_command_child(const char *mode)
+{
+	char ready;
+
+	/* Make sure the parent has started pumping before closing its input. */
+	write_or_die(1, "output\n", 7);
+	if (read_in_full(0, &ready, 1) != 1)
+		die("parent did not send input");
+	if (starts_with(mode, "consume")) {
+		struct strbuf input = STRBUF_INIT;
+
+		if (strbuf_read(&input, 0, 0) < 0)
+			die_errno("could not read input");
+		strbuf_release(&input);
+		return !strcmp(mode, "consume-failure") ? 7 : 0;
+	}
+	if (starts_with(mode, "cancel")) {
+		if (!strcmp(mode, "cancel-failure"))
+			signal(SIGTERM, exit_on_term);
+		if (kill(getppid(), SIGTERM))
+			die_errno("could not signal parent");
+		sleep_millisec(30000);
+		return 1;
+	}
+	close(0);
+	if (!strcmp(mode, "term"))
+		raise(SIGTERM);
+	return !strcmp(mode, "failure") ? 7 : 0;
+}
+
 int cmd__run_command(int argc, const char **argv)
 {
 	struct child_process proc = CHILD_PROCESS_INIT;
@@ -522,6 +584,10 @@ int cmd__run_command(int argc, const char **argv)
 
 	if (argc == 3 && !strcmp(argv[1], "terminate"))
 		return test_terminate(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "pipe-command"))
+		return test_pipe_command(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "pipe-command-child"))
+		return pipe_command_child(argv[2]);
 	if (argc == 3 && !strcmp(argv[1], "termination-child")) {
 		if (!strcmp(argv[2], "ignore"))
 			signal(SIGTERM, SIG_IGN);
@@ -576,7 +642,9 @@ int cmd__run_command(int argc, const char **argv)
 		fprintf(stderr, "FAIL %s\n", argv[1]);
 		return 1;
 	}
-	if (!strcmp(argv[1], "run-command")) {
+	if (!strcmp(argv[1], "run-command") ||
+	    !strcmp(argv[1], "quiet-run-command")) {
+		proc.quiet_termination = !strcmp(argv[1], "quiet-run-command");
 		ret = run_command(&proc);
 		goto cleanup;
 	}
