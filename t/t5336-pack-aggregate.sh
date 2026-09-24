@@ -1441,4 +1441,34 @@ test_expect_success 'pack-aggregate ignores in-flight temporary packs' '
 	)
 '
 
+test_expect_success !MINGW 'loop exits when signaled' '
+	aggregate_pid= &&
+	test_when_finished "
+		if test -n \"\$aggregate_pid\"
+		then
+			kill \"\$aggregate_pid\" 2>/dev/null || :
+			wait \"\$aggregate_pid\" 2>/dev/null || :
+		fi
+		rm -fr work
+	" &&
+	cp -R repo work &&
+	>work/trace.txt &&
+	{
+		GIT_TRACE2_EVENT="$PWD/work/trace.txt" \
+			git -C work pack-aggregate --loop --interval=60 &
+		aggregate_pid=$!
+	} &&
+	i=0 &&
+	while ! grep "\"label\":\"cycle\"" work/trace.txt &&
+		test $i -lt 100
+	do
+		sleep 0.1 &&
+		i=$((i + 1)) || return 1
+	done &&
+	test_grep "\"label\":\"cycle\"" work/trace.txt &&
+	kill "$aggregate_pid" &&
+	wait "$aggregate_pid" &&
+	aggregate_pid=
+'
+
 test_done
