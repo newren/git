@@ -1355,18 +1355,26 @@ test_expect_success 'startup cleans up stale .keep markers from dead pids' '
 	)
 '
 
-test_expect_success !MINGW 'startup leaves live-pid .keep markers alone' '
-	test_when_finished "rm -fr work" &&
+test_expect_success 'startup leaves live-pid .keep markers alone' '
+	test_when_finished "
+		>live.stop
+		wait \$pid_job 2>/dev/null || :
+		rm -fr work live.stop live_pid.txt
+	" &&
 	cp -R repo work &&
-	# Use the test-runner shell pid, which is reliably alive
-	# for the duration of this test.  PID 1 (init) would also
-	# work since our code treats EPERM as "alive".
-	#
-	# !MINGW: on Windows, bash $$ is a virtualized MSYS pid that
-	# does not correspond to a process kill(pid, 0) can see, so
-	# our liveness check would treat it as dead and the marker
-	# would be removed.  Skip this test there.
-	live_pid=$$ &&
+	{
+		test-tool run-command print-pid-and-wait live.stop \
+			>live_pid.txt &
+		pid_job=$!
+	} &&
+	i=0 &&
+	while test ! -s live_pid.txt && test $i -lt 100
+	do
+		sleep 0.1 &&
+		i=$((i + 1)) || return 1
+	done &&
+	test -s live_pid.txt &&
+	live_pid=$(cat live_pid.txt) &&
 	(
 		cd work &&
 		build_n_packs 3 >packs.txt &&
@@ -1378,7 +1386,9 @@ test_expect_success !MINGW 'startup leaves live-pid .keep markers alone' '
 		git repack -d --geometric=2 --aggregate-loop &&
 		test_path_is_file "$live" &&
 		test_grep "pid=${live_pid}" "$live"
-	)
+	) &&
+	>live.stop &&
+	wait "$pid_job"
 '
 
 test_expect_success 'pack-aggregate ignores in-flight temporary packs' '
